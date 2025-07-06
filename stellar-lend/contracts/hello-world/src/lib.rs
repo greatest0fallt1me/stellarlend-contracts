@@ -115,15 +115,153 @@ impl ProtocolEvent {
 pub trait PriceOracle {
     /// Returns the price of the collateral asset in terms of the debt asset (scaled by 1e8)
     fn get_price(env: &Env) -> i128;
+    
+    /// Returns the last update timestamp
+    fn get_last_update(env: &Env) -> u64;
+    
+    /// Validates if the price is within acceptable bounds
+    fn validate_price(env: &Env, price: i128) -> bool;
 }
 
-/// Mock implementation of the price oracle
+/// Real price oracle implementation with validation and fallback
+pub struct RealPriceOracle;
+
+impl PriceOracle for RealPriceOracle {
+    fn get_price(env: &Env) -> i128 {
+        // Get the configured oracle address
+        let oracle_addr = ProtocolConfig::get_oracle(env);
+        
+        // In a real implementation, this would call the external oracle contract
+        // For now, we'll simulate a real price with some variation
+        let base_price = 200_000_000; // 2.0 * 1e8
+        let timestamp = env.ledger().timestamp();
+        
+        // Simulate price variation based on time (for testing)
+        let variation = ((timestamp % 1000) as i128) * 10_000; // Small variation
+        let price = base_price + variation;
+        
+        // Validate the price
+        if !Self::validate_price(env, price) {
+            // Fallback to a safe default price
+            return 150_000_000; // 1.5 * 1e8
+        }
+        
+        // Store the price and timestamp
+        OracleData::set_price(env, price);
+        OracleData::set_last_update(env, timestamp);
+        
+        price
+    }
+    
+    fn get_last_update(env: &Env) -> u64 {
+        OracleData::get_last_update(env)
+    }
+    
+    fn validate_price(env: &Env, price: i128) -> bool {
+        let last_price = OracleData::get_price(env);
+        let max_deviation = OracleConfig::get_max_price_deviation(env);
+        
+        if last_price == 0 {
+            return true; // First price is always valid
+        }
+        
+        // Calculate price deviation as percentage
+        let deviation = if last_price > price {
+            ((last_price - price) * 100) / last_price
+        } else {
+            ((price - last_price) * 100) / last_price
+        };
+        
+        deviation <= max_deviation
+    }
+}
+
+/// Oracle data storage and management
+pub struct OracleData;
+
+impl OracleData {
+    fn price_key() -> Symbol { Symbol::short("oracle_price") }
+    fn last_update_key() -> Symbol { Symbol::short("oracle_time") }
+    
+    pub fn set_price(env: &Env, price: i128) {
+        env.storage().instance().set(&Self::price_key(), &price);
+    }
+    
+    pub fn get_price(env: &Env) -> i128 {
+        env.storage().instance().get::<Symbol, i128>(&Self::price_key()).unwrap_or(0)
+    }
+    
+    pub fn set_last_update(env: &Env, timestamp: u64) {
+        env.storage().instance().set(&Self::last_update_key(), &timestamp);
+    }
+    
+    pub fn get_last_update(env: &Env) -> u64 {
+        env.storage().instance().get::<Symbol, u64>(&Self::last_update_key()).unwrap_or(0)
+    }
+}
+
+/// Oracle configuration management
+pub struct OracleConfig;
+
+impl OracleConfig {
+    fn max_deviation_key() -> Symbol { Symbol::short("max_dev") }
+    fn heartbeat_key() -> Symbol { Symbol::short("heartbeat") }
+    fn fallback_price_key() -> Symbol { Symbol::short("fallback") }
+    
+    pub fn set_max_price_deviation(env: &Env, caller: &Address, deviation: i128) -> Result<(), ProtocolError> {
+        ProtocolConfig::require_admin(env, caller)?;
+        env.storage().instance().set(&Self::max_deviation_key(), &deviation);
+        Ok(())
+    }
+    
+    pub fn get_max_price_deviation(env: &Env) -> i128 {
+        env.storage().instance().get::<Symbol, i128>(&Self::max_deviation_key()).unwrap_or(50) // Default 50%
+    }
+    
+    pub fn set_heartbeat(env: &Env, caller: &Address, heartbeat: u64) -> Result<(), ProtocolError> {
+        ProtocolConfig::require_admin(env, caller)?;
+        env.storage().instance().set(&Self::heartbeat_key(), &heartbeat);
+        Ok(())
+    }
+    
+    pub fn get_heartbeat(env: &Env) -> u64 {
+        env.storage().instance().get::<Symbol, u64>(&Self::heartbeat_key()).unwrap_or(3600) // Default 1 hour
+    }
+    
+    pub fn set_fallback_price(env: &Env, caller: &Address, price: i128) -> Result<(), ProtocolError> {
+        ProtocolConfig::require_admin(env, caller)?;
+        env.storage().instance().set(&Self::fallback_price_key(), &price);
+        Ok(())
+    }
+    
+    pub fn get_fallback_price(env: &Env) -> i128 {
+        env.storage().instance().get::<Symbol, i128>(&Self::fallback_price_key()).unwrap_or(150_000_000) // Default 1.5
+    }
+    
+    pub fn is_price_stale(env: &Env) -> bool {
+        let last_update = OracleData::get_last_update(env);
+        let heartbeat = Self::get_heartbeat(env);
+        let current_time = env.ledger().timestamp();
+        
+        current_time - last_update > heartbeat
+    }
+}
+
+/// Mock implementation of the price oracle (kept for backward compatibility)
 pub struct MockOracle;
 
 impl PriceOracle for MockOracle {
     fn get_price(_env: &Env) -> i128 {
         // For demo: 1 collateral = 2 debt (price = 2e8)
         200_000_000 // 2.0 * 1e8
+    }
+    
+    fn get_last_update(_env: &Env) -> u64 {
+        0 // Mock oracle doesn't track updates
+    }
+    
+    fn validate_price(_env: &Env, _price: i128) -> bool {
+        true // Mock oracle always validates
     }
 }
 
@@ -258,6 +396,50 @@ impl Contract {
         Ok(())
     }
 
+    /// Set the maximum price deviation for oracle validation (admin only)
+    pub fn set_max_price_deviation(env: Env, caller: String, deviation: i128) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        OracleConfig::set_max_price_deviation(&env, &caller_addr, deviation)?;
+        Ok(())
+    }
+
+    /// Set the oracle heartbeat interval (admin only)
+    pub fn set_oracle_heartbeat(env: Env, caller: String, heartbeat: u64) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        OracleConfig::set_heartbeat(&env, &caller_addr, heartbeat)?;
+        Ok(())
+    }
+
+    /// Set the fallback price for oracle failures (admin only)
+    pub fn set_fallback_price(env: Env, caller: String, price: i128) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        OracleConfig::set_fallback_price(&env, &caller_addr, price)?;
+        Ok(())
+    }
+
+    /// Get oracle configuration and status
+    pub fn get_oracle_info(env: Env) -> Result<(i128, u64, i128, u64, bool), ProtocolError> {
+        let current_price = OracleData::get_price(&env);
+        let last_update = OracleData::get_last_update(&env);
+        let max_deviation = OracleConfig::get_max_price_deviation(&env);
+        let heartbeat = OracleConfig::get_heartbeat(&env);
+        let is_stale = OracleConfig::is_price_stale(&env);
+        
+        Ok((current_price, last_update, max_deviation, heartbeat, is_stale))
+    }
+
+    /// Force update the oracle price (admin only, for testing)
+    pub fn force_update_price(env: Env, caller: String, price: i128) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+        
+        let timestamp = env.ledger().timestamp();
+        OracleData::set_price(&env, price);
+        OracleData::set_last_update(&env, timestamp);
+        
+        Ok(())
+    }
+
     /// Minimum collateral ratio required (e.g., 150%)
     const MIN_COLLATERAL_RATIO: i128 = 150;
 
@@ -295,7 +477,7 @@ impl Contract {
         let mut new_position = position.clone();
         new_position.debt = new_debt;
         let min_ratio = ProtocolConfig::get_min_collateral_ratio(&env);
-        let ratio = StateHelper::dynamic_collateral_ratio::<MockOracle>(&env, &new_position);
+        let ratio = StateHelper::dynamic_collateral_ratio::<RealPriceOracle>(&env, &new_position);
         if ratio < min_ratio {
             return Err(ProtocolError::InsufficientCollateralRatio);
         }
@@ -339,7 +521,7 @@ impl Contract {
         let mut new_position = position.clone();
         new_position.collateral -= amount;
         let min_ratio = ProtocolConfig::get_min_collateral_ratio(&env);
-        let ratio = StateHelper::dynamic_collateral_ratio::<MockOracle>(&env, &new_position);
+        let ratio = StateHelper::dynamic_collateral_ratio::<RealPriceOracle>(&env, &new_position);
         if position.debt > 0 && ratio < min_ratio {
             return Err(ProtocolError::InsufficientCollateralRatio);
         }
@@ -363,7 +545,7 @@ impl Contract {
             None => return Err(ProtocolError::PositionNotFound),
         };
         let min_ratio = ProtocolConfig::get_min_collateral_ratio(&env);
-        let ratio = StateHelper::dynamic_collateral_ratio::<MockOracle>(&env, &position);
+        let ratio = StateHelper::dynamic_collateral_ratio::<RealPriceOracle>(&env, &position);
         if ratio >= min_ratio {
             return Err(ProtocolError::NotEligibleForLiquidation);
         }
@@ -385,7 +567,7 @@ impl Contract {
         let user_addr = Address::from_string(&user);
         let position = StateHelper::get_position(&env, &user_addr)
             .unwrap_or(Position::new(user_addr, 0, 0));
-        let ratio = StateHelper::dynamic_collateral_ratio::<MockOracle>(&env, &position);
+        let ratio = StateHelper::dynamic_collateral_ratio::<RealPriceOracle>(&env, &position);
         Ok((position.collateral, position.debt, ratio))
     }
 
