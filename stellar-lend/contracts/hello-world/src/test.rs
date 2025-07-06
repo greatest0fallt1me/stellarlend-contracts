@@ -324,7 +324,7 @@ fn test_liquidate_success() {
         Contract::borrow(env.clone(), user.to_string(), 1000).unwrap();
         
         // Liquidate the user's position (not the liquidator's)
-        let result = Contract::liquidate(env.clone(), user.to_string(), 500);
+        let result = Contract::liquidate(env.clone(), liquidator.to_string(), user.to_string(), 500);
         assert!(result.is_ok());
         
         // Verify position is updated (debt reduced, collateral penalized)
@@ -349,7 +349,7 @@ fn test_liquidate_not_eligible() {
         Contract::borrow(env.clone(), user.to_string(), 1000).unwrap();
         
         // Try to liquidate (should fail as position is well-collateralized)
-        let result = Contract::liquidate(env.clone(), liquidator.to_string(), 500);
+        let result = Contract::liquidate(env.clone(), liquidator.to_string(), user.to_string(), 500);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), ProtocolError::NotEligibleForLiquidation);
     });
