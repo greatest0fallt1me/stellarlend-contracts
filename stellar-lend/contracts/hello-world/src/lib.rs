@@ -109,77 +109,78 @@ impl Contract {
 
     // --- Core Protocol Function Placeholders ---
 
-    /// Deposit collateral into the protocol (stub)
-    ///
-    /// # Parameters
-    /// - `env`: The contract environment
-    /// - `depositor`: The address of the user depositing collateral (placeholder type)
-    /// - `amount`: The amount of collateral to deposit (placeholder type)
+    /// Deposit collateral into the protocol
     pub fn deposit_collateral(env: Env, depositor: String, amount: i128) {
-        // Access control: check that the depositor signed the transaction
-        // (In real implementation, use Address and require_auth)
         if depositor.is_empty() {
             panic!("Depositor address cannot be empty");
         }
         if amount <= 0 {
             panic!("Deposit amount must be positive");
         }
-        // TODO: Implement require_auth/depositor signature check
-        // TODO: Implement deposit logic
+        // Convert depositor to Address
+        let depositor_addr = Address::from_string(&depositor);
+        // Load or create position
+        let mut position = StateHelper::get_position(&env, &depositor_addr)
+            .unwrap_or(Position::new(depositor_addr.clone(), 0, 0));
+        // Update collateral
+        position.collateral += amount;
+        StateHelper::save_position(&env, &position);
+        // Emit event
+        ProtocolEvent::Deposit { user: depositor, amount }.emit(&env);
     }
 
-    /// Borrow assets from the protocol (stub)
-    ///
-    /// # Parameters
-    /// - `env`: The contract environment
-    /// - `borrower`: The address of the user borrowing assets (placeholder type)
-    /// - `amount`: The amount to borrow (placeholder type)
+    /// Borrow assets from the protocol
     pub fn borrow(env: Env, borrower: String, amount: i128) {
-        // Access control: check that the borrower signed the transaction
         if borrower.is_empty() {
             panic!("Borrower address cannot be empty");
         }
         if amount <= 0 {
             panic!("Borrow amount must be positive");
         }
-        // TODO: Implement require_auth/borrower signature check
-        // TODO: Implement borrow logic
+        let borrower_addr = Address::from_string(&borrower);
+        let mut position = StateHelper::get_position(&env, &borrower_addr)
+            .unwrap_or(Position::new(borrower_addr.clone(), 0, 0));
+        // Update debt
+        position.debt += amount;
+        StateHelper::save_position(&env, &position);
+        ProtocolEvent::Borrow { user: borrower, amount }.emit(&env);
     }
 
-    /// Repay borrowed assets (stub)
-    ///
-    /// # Parameters
-    /// - `env`: The contract environment
-    /// - `repayer`: The address of the user repaying (placeholder type)
-    /// - `amount`: The amount to repay (placeholder type)
+    /// Repay borrowed assets
     pub fn repay(env: Env, repayer: String, amount: i128) {
-        // Access control: check that the repayer signed the transaction
         if repayer.is_empty() {
             panic!("Repayer address cannot be empty");
         }
         if amount <= 0 {
             panic!("Repay amount must be positive");
         }
-        // TODO: Implement require_auth/repayer signature check
-        // TODO: Implement repay logic
+        let repayer_addr = Address::from_string(&repayer);
+        let mut position = StateHelper::get_position(&env, &repayer_addr)
+            .unwrap_or(Position::new(repayer_addr.clone(), 0, 0));
+        // Repay debt (cannot go below zero)
+        position.debt = (position.debt - amount).max(0);
+        StateHelper::save_position(&env, &position);
+        ProtocolEvent::Repay { user: repayer, amount }.emit(&env);
     }
 
-    /// Withdraw collateral (stub)
-    ///
-    /// # Parameters
-    /// - `env`: The contract environment
-    /// - `withdrawer`: The address of the user withdrawing (placeholder type)
-    /// - `amount`: The amount to withdraw (placeholder type)
+    /// Withdraw collateral
     pub fn withdraw(env: Env, withdrawer: String, amount: i128) {
-        // Access control: check that the withdrawer signed the transaction
         if withdrawer.is_empty() {
             panic!("Withdrawer address cannot be empty");
         }
         if amount <= 0 {
             panic!("Withdraw amount must be positive");
         }
-        // TODO: Implement require_auth/withdrawer signature check
-        // TODO: Implement withdraw logic
+        let withdrawer_addr = Address::from_string(&withdrawer);
+        let mut position = StateHelper::get_position(&env, &withdrawer_addr)
+            .unwrap_or(Position::new(withdrawer_addr.clone(), 0, 0));
+        // Withdraw collateral (cannot go below zero)
+        if position.collateral < amount {
+            panic!("Insufficient collateral");
+        }
+        position.collateral -= amount;
+        StateHelper::save_position(&env, &position);
+        ProtocolEvent::Withdraw { user: withdrawer, amount }.emit(&env);
     }
 
     /// Liquidate undercollateralized positions (stub)
