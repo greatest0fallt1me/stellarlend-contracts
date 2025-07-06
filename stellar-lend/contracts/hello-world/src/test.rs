@@ -35,7 +35,7 @@ impl TestUtils {
 
     /// Create a test oracle address
     pub fn create_oracle_address(env: &Env) -> Address {
-        Self::create_test_address(env, "GAUA7XL5K54CC2DDGP77FJ2YBHRJLT36CPZDXWPM6MP7MANOGG77PNJU")
+        Self::create_test_address(env, "GBXOTMMXRS24MYZI5FJPUCOEOFNWSR4XX7UXIK3NDGGE6A5QMJ5FF2FS")
     }
 
     /// Initialize the contract with test admin
@@ -79,7 +79,8 @@ fn test_contract_initialization() {
 
 #[test]
 fn test_contract_initialization_already_initialized() {
-    let env = TestUtils::create_test_env();
+    let env = Env::default();
+    env.mock_all_auths();
     let admin = TestUtils::create_admin_address(&env);
     
     let contract_id = env.register(Contract, ());
@@ -97,7 +98,8 @@ fn test_contract_initialization_already_initialized() {
 
 #[test]
 fn test_deposit_collateral() {
-    let env = TestUtils::create_test_env();
+    let env = Env::default();
+    env.mock_all_auths();
     let _admin = TestUtils::initialize_contract(&env);
     let user = TestUtils::create_user_address(&env, 1);
     
@@ -116,7 +118,8 @@ fn test_deposit_collateral() {
 
 #[test]
 fn test_deposit_collateral_invalid_amount() {
-    let env = TestUtils::create_test_env();
+    let env = Env::default();
+    env.mock_all_auths();
     let _admin = TestUtils::initialize_contract(&env);
     let user = TestUtils::create_user_address(&env, 1);
     
@@ -136,7 +139,8 @@ fn test_deposit_collateral_invalid_amount() {
 
 #[test]
 fn test_deposit_collateral_invalid_address() {
-    let env = TestUtils::create_test_env();
+    let env = Env::default();
+    env.mock_all_auths();
     let _admin = TestUtils::initialize_contract(&env);
     
     let contract_id = env.register(Contract, ());
@@ -150,7 +154,8 @@ fn test_deposit_collateral_invalid_address() {
 
 #[test]
 fn test_borrow_success() {
-    let env = TestUtils::create_test_env();
+    let env = Env::default();
+    env.mock_all_auths();
     let _admin = TestUtils::initialize_contract(&env);
     let user = TestUtils::create_user_address(&env, 1);
     
@@ -172,7 +177,8 @@ fn test_borrow_success() {
 
 #[test]
 fn test_borrow_insufficient_collateral_ratio() {
-    let env = TestUtils::create_test_env();
+    let env = Env::default();
+    env.mock_all_auths();
     let _admin = TestUtils::initialize_contract(&env);
     let user = TestUtils::create_user_address(&env, 1);
     
@@ -190,7 +196,8 @@ fn test_borrow_insufficient_collateral_ratio() {
 
 #[test]
 fn test_repay_success() {
-    let env = TestUtils::create_test_env();
+    let env = Env::default();
+    env.mock_all_auths();
     let _admin = TestUtils::initialize_contract(&env);
     let user = TestUtils::create_user_address(&env, 1);
     
@@ -213,7 +220,8 @@ fn test_repay_success() {
 
 #[test]
 fn test_repay_full_amount() {
-    let env = TestUtils::create_test_env();
+    let env = Env::default();
+    env.mock_all_auths();
     let _admin = TestUtils::initialize_contract(&env);
     let user = TestUtils::create_user_address(&env, 1);
     
@@ -236,7 +244,8 @@ fn test_repay_full_amount() {
 
 #[test]
 fn test_withdraw_success() {
-    let env = TestUtils::create_test_env();
+    let env = Env::default();
+    env.mock_all_auths();
     let _admin = TestUtils::initialize_contract(&env);
     let user = TestUtils::create_user_address(&env, 1);
     
@@ -258,7 +267,8 @@ fn test_withdraw_success() {
 
 #[test]
 fn test_withdraw_insufficient_collateral() {
-    let env = TestUtils::create_test_env();
+    let env = Env::default();
+    env.mock_all_auths();
     let _admin = TestUtils::initialize_contract(&env);
     let user = TestUtils::create_user_address(&env, 1);
     
@@ -276,7 +286,8 @@ fn test_withdraw_insufficient_collateral() {
 
 #[test]
 fn test_withdraw_insufficient_collateral_ratio() {
-    let env = TestUtils::create_test_env();
+    let env = Env::default();
+    env.mock_all_auths();
     let _admin = TestUtils::initialize_contract(&env);
     let user = TestUtils::create_user_address(&env, 1);
     
@@ -295,7 +306,8 @@ fn test_withdraw_insufficient_collateral_ratio() {
 
 #[test]
 fn test_liquidate_success() {
-    let env = TestUtils::create_test_env();
+    let env = Env::default();
+    env.mock_all_auths();
     let _admin = TestUtils::initialize_contract(&env);
     let user = TestUtils::create_user_address(&env, 1);
     let liquidator = TestUtils::create_user_address(&env, 2);
@@ -319,7 +331,8 @@ fn test_liquidate_success() {
 
 #[test]
 fn test_liquidate_not_eligible() {
-    let env = TestUtils::create_test_env();
+    let env = Env::default();
+    env.mock_all_auths();
     let _admin = TestUtils::initialize_contract(&env);
     let user = TestUtils::create_user_address(&env, 1);
     let liquidator = TestUtils::create_user_address(&env, 2);
@@ -339,7 +352,8 @@ fn test_liquidate_not_eligible() {
 
 #[test]
 fn test_admin_functions() {
-    let env = TestUtils::create_test_env();
+    let env = Env::default();
+    env.mock_all_auths();
     let admin = TestUtils::initialize_contract(&env);
     let non_admin = TestUtils::create_user_address(&env, 1);
     let oracle = TestUtils::create_oracle_address(&env);
@@ -368,13 +382,14 @@ fn test_admin_functions() {
 
 #[test]
 fn test_protocol_params() {
-    let env = TestUtils::create_test_env();
+    let env = Env::default();
+    env.mock_all_auths();
     let admin = TestUtils::initialize_contract(&env);
     let oracle = TestUtils::create_oracle_address(&env);
     
     let contract_id = env.register(Contract, ());
     env.as_contract(&contract_id, || {
-        // Set oracle
+        // Set oracle first
         Contract::set_oracle(env.clone(), admin.to_string(), oracle.to_string()).unwrap();
         
         // Get protocol params
@@ -387,7 +402,8 @@ fn test_protocol_params() {
 
 #[test]
 fn test_system_stats() {
-    let env = TestUtils::create_test_env();
+    let env = Env::default();
+    env.mock_all_auths();
     let _admin = TestUtils::initialize_contract(&env);
     
     let contract_id = env.register(Contract, ());
@@ -401,7 +417,8 @@ fn test_system_stats() {
 
 #[test]
 fn test_event_history_stubs() {
-    let env = TestUtils::create_test_env();
+    let env = Env::default();
+    env.mock_all_auths();
     let _admin = TestUtils::initialize_contract(&env);
     let user = TestUtils::create_user_address(&env, 1);
     
@@ -419,7 +436,8 @@ fn test_event_history_stubs() {
 
 #[test]
 fn test_edge_cases() {
-    let env = TestUtils::create_test_env();
+    let env = Env::default();
+    env.mock_all_auths();
     let _admin = TestUtils::initialize_contract(&env);
     let user = TestUtils::create_user_address(&env, 1);
     
@@ -439,7 +457,8 @@ fn test_edge_cases() {
 
 #[test]
 fn test_multiple_users() {
-    let env = TestUtils::create_test_env();
+    let env = Env::default();
+    env.mock_all_auths();
     let _admin = TestUtils::initialize_contract(&env);
     let user1 = TestUtils::create_user_address(&env, 1);
     let user2 = TestUtils::create_user_address(&env, 2);
