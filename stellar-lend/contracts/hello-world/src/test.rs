@@ -44,6 +44,10 @@ impl TestUtils {
         let contract_id = env.register(Contract, ());
         env.as_contract(&contract_id, || {
             Contract::initialize(env.clone(), admin.to_string()).unwrap();
+            
+            // Set oracle address for RealPriceOracle to work
+            let oracle = Self::create_oracle_address(env);
+            Contract::set_oracle(env.clone(), admin.to_string(), oracle.to_string()).unwrap();
         });
         admin
     }
