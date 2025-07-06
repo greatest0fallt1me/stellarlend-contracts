@@ -29,12 +29,11 @@ impl TestUtils {
     /// Create a test user address
     pub fn create_user_address(env: &Env, user_id: u32) -> Address {
         let base = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
-        let mut address_str = String::from_str(env, base);
-        // Replace first character with user_id
-        if user_id > 0 {
-            address_str = String::from_str(env, &format!("G{}AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", user_id));
+        if user_id == 0 {
+            Self::create_test_address(env, base)
+        } else {
+            Self::create_test_address(env, "G1AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF")
         }
-        Address::from_string(&address_str)
     }
 
     /// Create a test oracle address
@@ -45,7 +44,7 @@ impl TestUtils {
     /// Initialize the contract with test admin
     pub fn initialize_contract(env: &Env) -> Address {
         let admin = Self::create_admin_address(env);
-        let contract_id = env.register(None, Contract);
+        let contract_id = env.register(Contract, ());
         env.as_contract(&contract_id, || {
             Contract::initialize(env.clone(), admin.to_string()).unwrap();
         });
@@ -55,7 +54,7 @@ impl TestUtils {
     /// Set up oracle for testing
     pub fn setup_oracle(env: &Env, admin: &Address) {
         let oracle = Self::create_oracle_address(env);
-        let contract_id = env.register(None, Contract);
+        let contract_id = env.register(Contract, ());
         env.as_contract(&contract_id, || {
             Contract::set_oracle(env.clone(), admin.to_string(), oracle.to_string()).unwrap();
         });
