@@ -21,21 +21,21 @@ impl TestUtils {
 
     /// Create a test admin address
     pub fn create_admin_address(env: &Env) -> Address {
-        Self::create_test_address(env, "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF")
+        Self::create_test_address(env, "GCAZYE3EB54VKP3UQBX3H73VQO3SIWTZNR7NJQKJFZZ6XLADWA4C3SOC")
     }
 
     /// Create a test user address
     pub fn create_user_address(env: &Env, user_id: u32) -> Address {
         if user_id == 0 {
-            Self::create_test_address(env, "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF")
+            Self::create_test_address(env, "GCXOTMMXRS24MYZI5FJPUCOEOFNWSR4XX7UXIK3NDGGE6A5QMJ5FF2FS")
         } else {
-            Self::create_test_address(env, "G1AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF")
+            Self::create_test_address(env, "GAUA7XL5K54CC2DDGP77FJ2YBHRJLT36CPZDXWPM6MP7MANOGG77PNJU")
         }
     }
 
     /// Create a test oracle address
     pub fn create_oracle_address(env: &Env) -> Address {
-        Self::create_test_address(env, "GORACLEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF")
+        Self::create_test_address(env, "GAUA7XL5K54CC2DDGP77FJ2YBHRJLT36CPZDXWPM6MP7MANOGG77PNJU")
     }
 
     /// Initialize the contract with test admin
@@ -61,7 +61,9 @@ impl PriceOracle for TestOracle {
 
 #[test]
 fn test_contract_initialization() {
-    let env = TestUtils::create_test_env();
+    let env = Env::default();
+    env.mock_all_auths();
+
     let admin = TestUtils::create_admin_address(&env);
     
     let contract_id = env.register(Contract, ());
