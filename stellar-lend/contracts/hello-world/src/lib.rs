@@ -338,6 +338,31 @@ impl Contract {
     pub fn hello(env: Env, to: String) -> Vec<String> {
         vec![&env, String::from_str(&env, "Hello"), to]
     }
+
+    /// Query a user's position (collateral, debt, dynamic ratio)
+    pub fn get_position(env: Env, user: String) -> (i128, i128, i128) {
+        let user_addr = Address::from_string(&user);
+        let position = StateHelper::get_position(&env, &user_addr)
+            .unwrap_or(Position::new(user_addr, 0, 0));
+        let ratio = StateHelper::dynamic_collateral_ratio::<MockOracle>(&env, &position);
+        (position.collateral, position.debt, ratio)
+    }
+
+    /// Query protocol parameters (admin, oracle, min collateral ratio)
+    pub fn get_protocol_params(env: Env) -> (Address, Address, i128) {
+        let admin = ProtocolConfig::get_admin(&env);
+        let oracle = ProtocolConfig::get_oracle(&env);
+        let min_ratio = ProtocolConfig::get_min_collateral_ratio(&env);
+        (admin, oracle, min_ratio)
+    }
+
+    /// Query system-wide stats (total collateral, total debt)
+    pub fn get_system_stats(env: Env) -> (i128, i128) {
+        // For demo: iterate over all possible addresses (in real, would need an index or event log)
+        // Here, we just return 0, 0 as a placeholder
+        // TODO: Implement real aggregation logic with address index
+        (0, 0)
+    }
 }
 
 mod test;
