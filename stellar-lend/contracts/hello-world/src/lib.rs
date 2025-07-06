@@ -35,10 +35,15 @@ impl Contract {
 
     // --- Core Protocol Function Placeholders ---
 
-    // /// Deposit collateral into the protocol
-    // pub fn deposit_collateral(...) {
-    //     // Implementation will go here
-    // }
+    /// Deposit collateral into the protocol (stub)
+    ///
+    /// # Parameters
+    /// - `env`: The contract environment
+    /// - `depositor`: The address of the user depositing collateral (placeholder type)
+    /// - `amount`: The amount of collateral to deposit (placeholder type)
+    pub fn deposit_collateral(_env: Env, _depositor: String, _amount: i128) {
+        // TODO: Implement deposit logic
+    }
 
     // /// Borrow assets from the protocol
     // pub fn borrow(...) {
