@@ -66,6 +66,17 @@ impl StateHelper {
         // Ratio as percent (e.g., 150 means 150%)
         (position.collateral * 100) / position.debt
     }
+
+    /// Calculate the dynamic collateral ratio for a position using price oracle
+    /// (collateral * price) / debt, scaled by 100 for percent
+    pub fn dynamic_collateral_ratio<P: PriceOracle>(env: &Env, position: &Position) -> i128 {
+        if position.debt == 0 {
+            return i128::MAX;
+        }
+        let price = P::get_price(env); // price is scaled by 1e8
+        // Ratio as percent (e.g., 150 means 150%)
+        ((position.collateral * price * 100) / 100_000_000) / position.debt
+    }
 }
 
 /// Event types for protocol actions
@@ -97,6 +108,22 @@ impl ProtocolEvent {
                 env.events().publish((Symbol::short("liquidate"), Symbol::short("user")), (Symbol::short("user"), *amount));
             }
         }
+    }
+}
+
+/// Trait for price oracle integration
+pub trait PriceOracle {
+    /// Returns the price of the collateral asset in terms of the debt asset (scaled by 1e8)
+    fn get_price(env: &Env) -> i128;
+}
+
+/// Mock implementation of the price oracle
+pub struct MockOracle;
+
+impl PriceOracle for MockOracle {
+    fn get_price(_env: &Env) -> i128 {
+        // For demo: 1 collateral = 2 debt (price = 2e8)
+        200_000_000 // 2.0 * 1e8
     }
 }
 
@@ -141,7 +168,7 @@ impl Contract {
         ProtocolEvent::Deposit { user: depositor, amount }.emit(&env);
     }
 
-    /// Borrow assets from the protocol with risk check
+    /// Borrow assets from the protocol with dynamic risk check
     pub fn borrow(env: Env, borrower: String, amount: i128) {
         if borrower.is_empty() {
             panic!("Borrower address cannot be empty");
@@ -154,7 +181,9 @@ impl Contract {
             .unwrap_or(Position::new(borrower_addr.clone(), 0, 0));
         // Simulate new debt
         let new_debt = position.debt + amount;
-        let ratio = if new_debt == 0 { i128::MAX } else { (position.collateral * 100) / new_debt };
+        let mut new_position = position.clone();
+        new_position.debt = new_debt;
+        let ratio = StateHelper::dynamic_collateral_ratio::<MockOracle>(&env, &new_position);
         if ratio < Self::MIN_COLLATERAL_RATIO {
             panic!("Insufficient collateral ratio for borrow");
         }
@@ -181,7 +210,7 @@ impl Contract {
         ProtocolEvent::Repay { user: repayer, amount }.emit(&env);
     }
 
-    /// Withdraw collateral with risk check
+    /// Withdraw collateral with dynamic risk check
     pub fn withdraw(env: Env, withdrawer: String, amount: i128) {
         if withdrawer.is_empty() {
             panic!("Withdrawer address cannot be empty");
@@ -196,17 +225,18 @@ impl Contract {
             panic!("Insufficient collateral");
         }
         // Simulate new collateral
-        let new_collateral = position.collateral - amount;
-        let ratio = if position.debt == 0 { i128::MAX } else { (new_collateral * 100) / position.debt };
+        let mut new_position = position.clone();
+        new_position.collateral -= amount;
+        let ratio = StateHelper::dynamic_collateral_ratio::<MockOracle>(&env, &new_position);
         if position.debt > 0 && ratio < Self::MIN_COLLATERAL_RATIO {
             panic!("Withdrawal would breach minimum collateral ratio");
         }
-        position.collateral = new_collateral;
+        position.collateral = new_position.collateral;
         StateHelper::save_position(&env, &position);
         ProtocolEvent::Withdraw { user: withdrawer, amount }.emit(&env);
     }
 
-    /// Liquidate undercollateralized positions
+    /// Liquidate undercollateralized positions using dynamic risk check
     pub fn liquidate(env: Env, liquidator: String, amount: i128) {
         if liquidator.is_empty() {
             panic!("Liquidator address cannot be empty");
@@ -215,13 +245,12 @@ impl Contract {
             panic!("Liquidation amount must be positive");
         }
         // For demo: liquidate the first undercollateralized position found (in real, would pass target user)
-        // Here, we expect the liquidator to pass the target user as a string (for demo)
         let target_addr = Address::from_string(&liquidator); // In real, this would be a separate param
         let mut position = match StateHelper::get_position(&env, &target_addr) {
             Some(pos) => pos,
             None => panic!("Target position not found for liquidation"),
         };
-        let ratio = StateHelper::collateral_ratio(&position);
+        let ratio = StateHelper::dynamic_collateral_ratio::<MockOracle>(&env, &position);
         if ratio >= Self::MIN_COLLATERAL_RATIO {
             panic!("Position is not eligible for liquidation");
         }
