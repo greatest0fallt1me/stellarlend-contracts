@@ -4,6 +4,7 @@
     "nonce": 0
   },
   "auth": [
+    [],
     []
   ],
   "ledger": {
@@ -38,7 +39,51 @@
                     "executable": {
                       "wasm": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
                     },
-                    "storage": null
+                    "storage": [
+                      {
+                        "key": {
+                          "symbol": "admin"
+                        },
+                        "val": {
+                          "address": "GCAZYE3EB54VKP3UQBX3H73VQO3SIWTZNR7NJQKJFZZ6XLADWA4C3SOC"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "heartbeat"
+                        },
+                        "val": {
+                          "u64": 100
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "oracle"
+                        },
+                        "val": {
+                          "address": "GCXOTMMXRS24MYZI5FJPUCOEOFNWSR4XX7UXIK3NDGGE6A5QMJ5FF2FS"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "oracle_p"
+                        },
+                        "val": {
+                          "i128": {
+                            "hi": 0,
+                            "lo": 200000000
+                          }
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "oracle_t"
+                        },
+                        "val": {
+                          "u64": 0
+                        }
+                      }
+                    ]
                   }
                 }
               }

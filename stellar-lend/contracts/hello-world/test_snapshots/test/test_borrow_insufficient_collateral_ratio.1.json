@@ -48,6 +48,14 @@
                         "val": {
                           "address": "GCAZYE3EB54VKP3UQBX3H73VQO3SIWTZNR7NJQKJFZZ6XLADWA4C3SOC"
                         }
+                      },
+                      {
+                        "key": {
+                          "symbol": "oracle"
+                        },
+                        "val": {
+                          "address": "GCXOTMMXRS24MYZI5FJPUCOEOFNWSR4XX7UXIK3NDGGE6A5QMJ5FF2FS"
+                        }
                       }
                     ]
                   }
