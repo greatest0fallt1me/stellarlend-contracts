@@ -128,8 +128,13 @@ pub struct RealPriceOracle;
 
 impl PriceOracle for RealPriceOracle {
     fn get_price(env: &Env) -> i128 {
+        // Check if oracle is set, if not return fallback price
+        if !env.storage().instance().has(&ProtocolConfig::oracle_key()) {
+            return OracleConfig::get_fallback_price(env);
+        }
+        
         // Get the configured oracle address
-        let oracle_addr = ProtocolConfig::get_oracle(env);
+        let _oracle_addr = ProtocolConfig::get_oracle(env);
         
         // In a real implementation, this would call the external oracle contract
         // For now, we'll simulate a real price with some variation
@@ -143,7 +148,7 @@ impl PriceOracle for RealPriceOracle {
         // Validate the price
         if !Self::validate_price(env, price) {
             // Fallback to a safe default price
-            return 150_000_000; // 1.5 * 1e8
+            return OracleConfig::get_fallback_price(env);
         }
         
         // Store the price and timestamp
