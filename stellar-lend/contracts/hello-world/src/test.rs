@@ -26,10 +26,11 @@ impl TestUtils {
 
     /// Create a test user address
     pub fn create_user_address(env: &Env, user_id: u32) -> Address {
-        if user_id == 0 {
-            Self::create_test_address(env, "GCXOTMMXRS24MYZI5FJPUCOEOFNWSR4XX7UXIK3NDGGE6A5QMJ5FF2FS")
-        } else {
-            Self::create_test_address(env, "GAUA7XL5K54CC2DDGP77FJ2YBHRJLT36CPZDXWPM6MP7MANOGG77PNJU")
+        match user_id {
+            0 => Self::create_test_address(env, "GCXOTMMXRS24MYZI5FJPUCOEOFNWSR4XX7UXIK3NDGGE6A5QMJ5FF2FS"),
+            1 => Self::create_test_address(env, "GAUA7XL5K54CC2DDGP77FJ2YBHRJLT36CPZDXWPM6MP7MANOGG77PNJU"),
+            2 => Self::create_test_address(env, "GBXOTMMXRS24MYZI5FJPUCOEOFNWSR4XX7UXIK3NDGGE6A5QMJ5FF2FS"),
+            _ => Self::create_test_address(env, "GCUA7XL5K54CC2DDGP77FJ2YBHRJLT36CPZDXWPM6MP7MANOGG77PNJU"),
         }
     }
 
