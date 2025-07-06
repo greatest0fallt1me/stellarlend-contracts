@@ -180,8 +180,8 @@ impl PriceOracle for RealPriceOracle {
 pub struct OracleData;
 
 impl OracleData {
-    fn price_key() -> Symbol { Symbol::short("oracle_price") }
-    fn last_update_key() -> Symbol { Symbol::short("oracle_time") }
+    fn price_key() -> Symbol { Symbol::short("oracle_p") }
+    fn last_update_key() -> Symbol { Symbol::short("oracle_t") }
     
     pub fn set_price(env: &Env, price: i128) {
         env.storage().instance().set(&Self::price_key(), &price);
