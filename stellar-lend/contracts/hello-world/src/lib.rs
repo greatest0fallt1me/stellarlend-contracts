@@ -136,7 +136,7 @@ impl ProtocolConfig {
     /// Storage key for oracle address
     fn oracle_key() -> Symbol { Symbol::short("oracle") }
     /// Storage key for min collateral ratio
-    fn min_collateral_ratio_key() -> Symbol { Symbol::short("min_col_ratio") }
+    fn min_collateral_ratio_key() -> Symbol { Symbol::short("min_ratio") }
 
     /// Set the admin address (only callable once)
     pub fn set_admin(env: &Env, admin: &Address) {
@@ -350,14 +350,14 @@ impl Contract {
     }
 
     /// Liquidate undercollateralized positions using dynamic risk check
-    pub fn liquidate(env: Env, liquidator: String, amount: i128) -> Result<(), ProtocolError> {
-        if liquidator.is_empty() {
+    pub fn liquidate(env: Env, liquidator: String, target: String, amount: i128) -> Result<(), ProtocolError> {
+        if liquidator.is_empty() || target.is_empty() {
             return Err(ProtocolError::InvalidAddress);
         }
         if amount <= 0 {
             return Err(ProtocolError::InvalidAmount);
         }
-        let target_addr = Address::from_string(&liquidator); // In real, this would be a separate param
+        let target_addr = Address::from_string(&target);
         let mut position = match StateHelper::get_position(&env, &target_addr) {
             Some(pos) => pos,
             None => return Err(ProtocolError::PositionNotFound),
@@ -372,7 +372,7 @@ impl Contract {
         let penalty = (position.collateral * 10) / 100;
         position.collateral = position.collateral.saturating_sub(penalty);
         StateHelper::save_position(&env, &position);
-        ProtocolEvent::Liquidate { user: liquidator, amount: repay_amount }.emit(&env);
+        ProtocolEvent::Liquidate { user: target, amount: repay_amount }.emit(&env);
         Ok(())
     }
 
