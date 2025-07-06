@@ -323,8 +323,8 @@ fn test_liquidate_success() {
         Contract::deposit_collateral(env.clone(), user.to_string(), 10).unwrap();
         Contract::borrow(env.clone(), user.to_string(), 1000).unwrap();
         
-        // Liquidate (should succeed as position is severely undercollateralized)
-        let result = Contract::liquidate(env.clone(), liquidator.to_string(), 500);
+        // Liquidate the user's position (not the liquidator's)
+        let result = Contract::liquidate(env.clone(), user.to_string(), 500);
         assert!(result.is_ok());
         
         // Verify position is updated (debt reduced, collateral penalized)
