@@ -310,14 +310,17 @@ fn test_withdraw_insufficient_collateral_ratio() {
 fn test_liquidate_success() {
     let env = Env::default();
     env.mock_all_auths();
-    let _admin = TestUtils::initialize_contract(&env);
+    let admin = TestUtils::create_admin_address(&env);
     let user = TestUtils::create_user_address(&env, 1);
     let liquidator = TestUtils::create_user_address(&env, 2);
     
     let contract_id = env.register(Contract, ());
     env.as_contract(&contract_id, || {
+        // Initialize contract
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
         // Setup: deposit very small collateral and borrow large amount
-        Contract::deposit_collateral(env.clone(), user.to_string(), 50).unwrap();
+        Contract::deposit_collateral(env.clone(), user.to_string(), 10).unwrap();
         Contract::borrow(env.clone(), user.to_string(), 1000).unwrap();
         
         // Liquidate (should succeed as position is severely undercollateralized)
@@ -327,7 +330,7 @@ fn test_liquidate_success() {
         // Verify position is updated (debt reduced, collateral penalized)
         let (collateral, debt, _ratio) = Contract::get_position(env.clone(), user.to_string()).unwrap();
         assert_eq!(debt, 500); // Debt reduced by 500
-        assert!(collateral < 50); // Collateral penalized
+        assert!(collateral < 10); // Collateral penalized
     });
 }
 
@@ -469,12 +472,15 @@ fn test_edge_cases() {
 fn test_multiple_users() {
     let env = Env::default();
     env.mock_all_auths();
-    let _admin = TestUtils::initialize_contract(&env);
+    let admin = TestUtils::create_admin_address(&env);
     let user1 = TestUtils::create_user_address(&env, 1);
     let user2 = TestUtils::create_user_address(&env, 2);
     
     let contract_id = env.register(Contract, ());
     env.as_contract(&contract_id, || {
+        // Initialize contract
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
         // User 1 deposits and borrows
         Contract::deposit_collateral(env.clone(), user1.to_string(), 2000).unwrap();
         Contract::borrow(env.clone(), user1.to_string(), 1000).unwrap();
