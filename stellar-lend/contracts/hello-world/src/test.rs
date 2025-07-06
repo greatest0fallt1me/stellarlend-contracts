@@ -71,8 +71,10 @@ fn test_contract_initialization() {
         let result = Contract::initialize(env.clone(), admin.to_string());
         assert!(result.is_ok());
         
-        // Test that admin is set correctly
-        let (stored_admin, _, _) = Contract::get_protocol_params(env.clone()).unwrap();
+        // Test that admin is set correctly - but don't call get_protocol_params yet
+        // since oracle is not set
+        let admin_key = ProtocolConfig::admin_key();
+        let stored_admin = env.storage().instance().get::<Symbol, Address>(&admin_key).unwrap();
         assert_eq!(stored_admin, admin);
     });
 }
@@ -314,18 +316,18 @@ fn test_liquidate_success() {
     
     let contract_id = env.register(Contract, ());
     env.as_contract(&contract_id, || {
-        // Setup: deposit small collateral and borrow large amount
-        Contract::deposit_collateral(env.clone(), user.to_string(), 100).unwrap();
+        // Setup: deposit very small collateral and borrow large amount
+        Contract::deposit_collateral(env.clone(), user.to_string(), 50).unwrap();
         Contract::borrow(env.clone(), user.to_string(), 1000).unwrap();
         
-        // Liquidate (should succeed as position is undercollateralized)
+        // Liquidate (should succeed as position is severely undercollateralized)
         let result = Contract::liquidate(env.clone(), liquidator.to_string(), 500);
         assert!(result.is_ok());
         
         // Verify position is updated (debt reduced, collateral penalized)
         let (collateral, debt, _ratio) = Contract::get_position(env.clone(), user.to_string()).unwrap();
         assert_eq!(debt, 500); // Debt reduced by 500
-        assert!(collateral < 100); // Collateral penalized
+        assert!(collateral < 50); // Collateral penalized
     });
 }
 
@@ -354,12 +356,16 @@ fn test_liquidate_not_eligible() {
 fn test_admin_functions() {
     let env = Env::default();
     env.mock_all_auths();
-    let admin = TestUtils::initialize_contract(&env);
-    let non_admin = TestUtils::create_user_address(&env, 1);
-    let oracle = TestUtils::create_oracle_address(&env);
     
+    // Initialize contract properly
+    let admin = TestUtils::create_admin_address(&env);
     let contract_id = env.register(Contract, ());
     env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        let non_admin = TestUtils::create_user_address(&env, 1);
+        let oracle = TestUtils::create_oracle_address(&env);
+        
         // Test admin can set oracle
         let result = Contract::set_oracle(env.clone(), admin.to_string(), oracle.to_string());
         assert!(result.is_ok());
@@ -384,11 +390,15 @@ fn test_admin_functions() {
 fn test_protocol_params() {
     let env = Env::default();
     env.mock_all_auths();
-    let admin = TestUtils::initialize_contract(&env);
-    let oracle = TestUtils::create_oracle_address(&env);
     
+    // Initialize contract properly
+    let admin = TestUtils::create_admin_address(&env);
     let contract_id = env.register(Contract, ());
     env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        let oracle = TestUtils::create_oracle_address(&env);
+        
         // Set oracle first
         Contract::set_oracle(env.clone(), admin.to_string(), oracle.to_string()).unwrap();
         
