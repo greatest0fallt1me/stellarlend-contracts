@@ -56,6 +56,36 @@ impl StateHelper {
     pub fn remove_position(env: &Env, user: &Address) {
         let key = (Symbol::short("position"), user.clone());
         env.storage().instance().remove(&key);
+
+/// Event types for protocol actions
+pub enum ProtocolEvent {
+    Deposit { user: String, amount: i128 },
+    Borrow { user: String, amount: i128 },
+    Repay { user: String, amount: i128 },
+    Withdraw { user: String, amount: i128 },
+    Liquidate { user: String, amount: i128 },
+}
+
+impl ProtocolEvent {
+    /// Emit the event using Soroban's event system
+    pub fn emit(&self, env: &Env) {
+        match self {
+            ProtocolEvent::Deposit { user, amount } => {
+                env.events().publish((Symbol::short("deposit"), Symbol::short("user")), (Symbol::short("user"), *amount));
+            }
+            ProtocolEvent::Borrow { user, amount } => {
+                env.events().publish((Symbol::short("borrow"), Symbol::short("user")), (Symbol::short("user"), *amount));
+            }
+            ProtocolEvent::Repay { user, amount } => {
+                env.events().publish((Symbol::short("repay"), Symbol::short("user")), (Symbol::short("user"), *amount));
+            }
+            ProtocolEvent::Withdraw { user, amount } => {
+                env.events().publish((Symbol::short("withdraw"), Symbol::short("user")), (Symbol::short("user"), *amount));
+            }
+            ProtocolEvent::Liquidate { user, amount } => {
+                env.events().publish((Symbol::short("liquidate"), Symbol::short("user")), (Symbol::short("user"), *amount));
+            }
+        }
     }
 }
 
@@ -97,20 +127,35 @@ impl Contract {
         // TODO: Implement borrow logic
     }
 
-    // /// Repay borrowed assets
-    // pub fn repay(...) {
-    //     // Implementation will go here
-    // }
+    /// Repay borrowed assets (stub)
+    ///
+    /// # Parameters
+    /// - `env`: The contract environment
+    /// - `repayer`: The address of the user repaying (placeholder type)
+    /// - `amount`: The amount to repay (placeholder type)
+    pub fn repay(_env: Env, _repayer: String, _amount: i128) {
+        // TODO: Implement repay logic
+    }
 
-    // /// Withdraw collateral
-    // pub fn withdraw(...) {
-    //     // Implementation will go here
-    // }
+    /// Withdraw collateral (stub)
+    ///
+    /// # Parameters
+    /// - `env`: The contract environment
+    /// - `withdrawer`: The address of the user withdrawing (placeholder type)
+    /// - `amount`: The amount to withdraw (placeholder type)
+    pub fn withdraw(_env: Env, _withdrawer: String, _amount: i128) {
+        // TODO: Implement withdraw logic
+    }
 
-    // /// Liquidate undercollateralized positions
-    // pub fn liquidate(...) {
-    //     // Implementation will go here
-    // }
+    /// Liquidate undercollateralized positions (stub)
+    ///
+    /// # Parameters
+    /// - `env`: The contract environment
+    /// - `liquidator`: The address of the user performing liquidation (placeholder type)
+    /// - `amount`: The amount to liquidate (placeholder type)
+    pub fn liquidate(_env: Env, _liquidator: String, _amount: i128) {
+        // TODO: Implement liquidation logic
+    }
 
     pub fn hello(env: Env, to: String) -> Vec<String> {
         vec![&env, String::from_str(&env, "Hello"), to]
