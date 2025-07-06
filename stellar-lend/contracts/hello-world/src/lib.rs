@@ -45,10 +45,15 @@ impl Contract {
         // TODO: Implement deposit logic
     }
 
-    // /// Borrow assets from the protocol
-    // pub fn borrow(...) {
-    //     // Implementation will go here
-    // }
+    /// Borrow assets from the protocol (stub)
+    ///
+    /// # Parameters
+    /// - `env`: The contract environment
+    /// - `borrower`: The address of the user borrowing assets (placeholder type)
+    /// - `amount`: The amount to borrow (placeholder type)
+    pub fn borrow(_env: Env, _borrower: String, _amount: i128) {
+        // TODO: Implement borrow logic
+    }
 
     // /// Repay borrowed assets
     // pub fn repay(...) {
