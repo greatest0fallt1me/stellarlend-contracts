@@ -363,6 +363,48 @@ impl Contract {
         // TODO: Implement real aggregation logic with address index
         (0, 0)
     }
+
+    /// Query event logs for a given user and event type (stub for off-chain indexer)
+    ///
+    /// # Parameters
+    /// - `user`: The user address as a string
+    /// - `event_type`: The event type as a string ("deposit", "borrow", "repay", "withdraw", "liquidate")
+    ///
+    /// # Returns
+    /// A vector of (event_type, amount, block/tx info) tuples (stubbed)
+    pub fn get_user_event_history(_env: Env, _user: String, _event_type: String) -> Vec<(String, i128, String)> {
+        // NOTE: Soroban contracts cannot query historical events on-chain.
+        // This function is a stub for off-chain indexer integration.
+        // In production, an off-chain service would index events and provide this data.
+        Vec::new(&_env)
+    }
+
+    /// Fetch recent protocol events (stub for off-chain indexer)
+    ///
+    /// # Parameters
+    /// - `limit`: The maximum number of events to return
+    ///
+    /// # Returns
+    /// A vector of (event_type, user, amount, block/tx info) tuples (stubbed)
+    pub fn get_recent_events(_env: Env, _limit: u32) -> Vec<(String, String, i128, String)> {
+        // NOTE: Soroban contracts cannot query historical events on-chain.
+        // This function is a stub for off-chain indexer integration.
+        // In production, an off-chain service would index events and provide this data.
+        Vec::new(&_env)
+    }
+
+    /// Example: Document how to use off-chain indexers for event history
+    ///
+    /// # Note
+    /// See the Soroban docs for event indexing: https://soroban.stellar.org/docs/learn/events
+    ///
+    /// # Example
+    /// ```
+    /// // Off-chain indexer would listen for events like:
+    /// // env.events().publish((Symbol::short("deposit"), Symbol::short("user")), (Symbol::short("user"), amount));
+    /// // and store them in a database for querying.
+    /// ```
+    pub fn event_indexer_example_doc() {}
 }
 
 mod test;
