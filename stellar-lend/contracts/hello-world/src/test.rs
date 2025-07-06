@@ -35,7 +35,7 @@ impl TestUtils {
 
     /// Create a test oracle address
     pub fn create_oracle_address(env: &Env) -> Address {
-        Self::create_test_address(env, "GBXOTMMXRS24MYZI5FJPUCOEOFNWSR4XX7UXIK3NDGGE6A5QMJ5FF2FS")
+        Self::create_test_address(env, "GCXOTMMXRS24MYZI5FJPUCOEOFNWSR4XX7UXIK3NDGGE6A5QMJ5FF2FS")
     }
 
     /// Initialize the contract with test admin

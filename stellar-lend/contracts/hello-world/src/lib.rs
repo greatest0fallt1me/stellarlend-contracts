@@ -136,7 +136,7 @@ impl ProtocolConfig {
     /// Storage key for oracle address
     fn oracle_key() -> Symbol { Symbol::short("oracle") }
     /// Storage key for min collateral ratio
-    fn min_collateral_ratio_key() -> Symbol { Symbol::short("min_col_ratio") }
+    fn min_collateral_ratio_key() -> Symbol { Symbol::short("min_ratio") }
 
     /// Set the admin address (only callable once)
     pub fn set_admin(env: &Env, admin: &Address) {
