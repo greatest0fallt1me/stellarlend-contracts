@@ -127,6 +127,61 @@ impl PriceOracle for MockOracle {
     }
 }
 
+/// Protocol configuration and admin management
+pub struct ProtocolConfig;
+
+impl ProtocolConfig {
+    /// Storage key for admin address
+    fn admin_key() -> Symbol { Symbol::short("admin") }
+    /// Storage key for oracle address
+    fn oracle_key() -> Symbol { Symbol::short("oracle") }
+    /// Storage key for min collateral ratio
+    fn min_collateral_ratio_key() -> Symbol { Symbol::short("min_col_ratio") }
+
+    /// Set the admin address (only callable once)
+    pub fn set_admin(env: &Env, admin: &Address) {
+        if env.storage().instance().has(&Self::admin_key()) {
+            panic!("Admin already set");
+        }
+        env.storage().instance().set(&Self::admin_key(), admin);
+    }
+
+    /// Get the admin address
+    pub fn get_admin(env: &Env) -> Address {
+        env.storage().instance().get::<Symbol, Address>(&Self::admin_key()).expect("Admin not set")
+    }
+
+    /// Require that the caller is admin
+    pub fn require_admin(env: &Env, caller: &Address) {
+        let admin = Self::get_admin(env);
+        if &admin != caller {
+            panic!("Only admin can perform this action");
+        }
+    }
+
+    /// Set the oracle address (admin only)
+    pub fn set_oracle(env: &Env, caller: &Address, oracle: &Address) {
+        Self::require_admin(env, caller);
+        env.storage().instance().set(&Self::oracle_key(), oracle);
+    }
+
+    /// Get the oracle address
+    pub fn get_oracle(env: &Env) -> Address {
+        env.storage().instance().get::<Symbol, Address>(&Self::oracle_key()).expect("Oracle not set")
+    }
+
+    /// Set the minimum collateral ratio (admin only)
+    pub fn set_min_collateral_ratio(env: &Env, caller: &Address, ratio: i128) {
+        Self::require_admin(env, caller);
+        env.storage().instance().set(&Self::min_collateral_ratio_key(), &ratio);
+    }
+
+    /// Get the minimum collateral ratio
+    pub fn get_min_collateral_ratio(env: &Env) -> i128 {
+        env.storage().instance().get::<Symbol, i128>(&Self::min_collateral_ratio_key()).unwrap_or(150)
+    }
+}
+
 // This is a sample contract. Replace this placeholder with your own contract logic.
 // A corresponding test example is available in `test.rs`.
 //
@@ -138,9 +193,23 @@ impl PriceOracle for MockOracle {
 // <https://developers.stellar.org/docs/build/smart-contracts/overview>.
 #[contractimpl]
 impl Contract {
-    /// Initializes the contract (placeholder for future state setup)
-    pub fn initialize(_env: Env) {
-        // Initialization logic will go here
+    /// Initializes the contract and sets the admin address
+    pub fn initialize(env: Env, admin: String) {
+        let admin_addr = Address::from_string(&admin);
+        ProtocolConfig::set_admin(&env, &admin_addr);
+    }
+
+    /// Set the oracle address (admin only)
+    pub fn set_oracle(env: Env, caller: String, oracle: String) {
+        let caller_addr = Address::from_string(&caller);
+        let oracle_addr = Address::from_string(&oracle);
+        ProtocolConfig::set_oracle(&env, &caller_addr, &oracle_addr);
+    }
+
+    /// Set the minimum collateral ratio (admin only)
+    pub fn set_min_collateral_ratio(env: Env, caller: String, ratio: i128) {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::set_min_collateral_ratio(&env, &caller_addr, ratio);
     }
 
     /// Minimum collateral ratio required (e.g., 150%)
@@ -183,8 +252,9 @@ impl Contract {
         let new_debt = position.debt + amount;
         let mut new_position = position.clone();
         new_position.debt = new_debt;
+        let min_ratio = ProtocolConfig::get_min_collateral_ratio(&env);
         let ratio = StateHelper::dynamic_collateral_ratio::<MockOracle>(&env, &new_position);
-        if ratio < Self::MIN_COLLATERAL_RATIO {
+        if ratio < min_ratio {
             panic!("Insufficient collateral ratio for borrow");
         }
         // Update debt
@@ -227,8 +297,9 @@ impl Contract {
         // Simulate new collateral
         let mut new_position = position.clone();
         new_position.collateral -= amount;
+        let min_ratio = ProtocolConfig::get_min_collateral_ratio(&env);
         let ratio = StateHelper::dynamic_collateral_ratio::<MockOracle>(&env, &new_position);
-        if position.debt > 0 && ratio < Self::MIN_COLLATERAL_RATIO {
+        if position.debt > 0 && ratio < min_ratio {
             panic!("Withdrawal would breach minimum collateral ratio");
         }
         position.collateral = new_position.collateral;
@@ -244,14 +315,14 @@ impl Contract {
         if amount <= 0 {
             panic!("Liquidation amount must be positive");
         }
-        // For demo: liquidate the first undercollateralized position found (in real, would pass target user)
         let target_addr = Address::from_string(&liquidator); // In real, this would be a separate param
         let mut position = match StateHelper::get_position(&env, &target_addr) {
             Some(pos) => pos,
             None => panic!("Target position not found for liquidation"),
         };
+        let min_ratio = ProtocolConfig::get_min_collateral_ratio(&env);
         let ratio = StateHelper::dynamic_collateral_ratio::<MockOracle>(&env, &position);
-        if ratio >= Self::MIN_COLLATERAL_RATIO {
+        if ratio >= min_ratio {
             panic!("Position is not eligible for liquidation");
         }
         // Liquidate up to the specified amount of debt
