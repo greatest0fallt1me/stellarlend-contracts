@@ -1,9 +1,7 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{
-    Address, Env, String,
-};
+use soroban_sdk::{Address, Env, String};
 
 /// Test utilities for creating test environments and addresses
 pub struct TestUtils;
@@ -28,9 +26,8 @@ impl TestUtils {
 
     /// Create a test user address
     pub fn create_user_address(env: &Env, user_id: u32) -> Address {
-        let base = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
         if user_id == 0 {
-            Self::create_test_address(env, base)
+            Self::create_test_address(env, "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF")
         } else {
             Self::create_test_address(env, "G1AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF")
         }
@@ -50,15 +47,6 @@ impl TestUtils {
         });
         admin
     }
-
-    /// Set up oracle for testing
-    pub fn setup_oracle(env: &Env, admin: &Address) {
-        let oracle = Self::create_oracle_address(env);
-        let contract_id = env.register(Contract, ());
-        env.as_contract(&contract_id, || {
-            Contract::set_oracle(env.clone(), admin.to_string(), oracle.to_string()).unwrap();
-        });
-    }
 }
 
 /// Mock price oracle for testing
@@ -76,7 +64,7 @@ fn test_contract_initialization() {
     let env = TestUtils::create_test_env();
     let admin = TestUtils::create_admin_address(&env);
     
-    let contract_id = env.register(None, Contract);
+    let contract_id = env.register(Contract, ());
     env.as_contract(&contract_id, || {
         let result = Contract::initialize(env.clone(), admin.to_string());
         assert!(result.is_ok());
@@ -92,7 +80,7 @@ fn test_contract_initialization_already_initialized() {
     let env = TestUtils::create_test_env();
     let admin = TestUtils::create_admin_address(&env);
     
-    let contract_id = env.register(None, Contract);
+    let contract_id = env.register(Contract, ());
     env.as_contract(&contract_id, || {
         // First initialization should succeed
         let result = Contract::initialize(env.clone(), admin.to_string());
@@ -111,7 +99,7 @@ fn test_deposit_collateral() {
     let _admin = TestUtils::initialize_contract(&env);
     let user = TestUtils::create_user_address(&env, 1);
     
-    let contract_id = env.register(None, Contract);
+    let contract_id = env.register(Contract, ());
     env.as_contract(&contract_id, || {
         // Test successful deposit
         let result = Contract::deposit_collateral(env.clone(), user.to_string(), 1000);
@@ -130,7 +118,7 @@ fn test_deposit_collateral_invalid_amount() {
     let _admin = TestUtils::initialize_contract(&env);
     let user = TestUtils::create_user_address(&env, 1);
     
-    let contract_id = env.register(None, Contract);
+    let contract_id = env.register(Contract, ());
     env.as_contract(&contract_id, || {
         // Test deposit with zero amount
         let result = Contract::deposit_collateral(env.clone(), user.to_string(), 0);
@@ -149,7 +137,7 @@ fn test_deposit_collateral_invalid_address() {
     let env = TestUtils::create_test_env();
     let _admin = TestUtils::initialize_contract(&env);
     
-    let contract_id = env.register(None, Contract);
+    let contract_id = env.register(Contract, ());
     env.as_contract(&contract_id, || {
         // Test deposit with empty address
         let result = Contract::deposit_collateral(env.clone(), String::from_str(&env, ""), 1000);
@@ -164,7 +152,7 @@ fn test_borrow_success() {
     let _admin = TestUtils::initialize_contract(&env);
     let user = TestUtils::create_user_address(&env, 1);
     
-    let contract_id = env.register(None, Contract);
+    let contract_id = env.register(Contract, ());
     env.as_contract(&contract_id, || {
         // First deposit collateral
         Contract::deposit_collateral(env.clone(), user.to_string(), 2000).unwrap();
@@ -186,7 +174,7 @@ fn test_borrow_insufficient_collateral_ratio() {
     let _admin = TestUtils::initialize_contract(&env);
     let user = TestUtils::create_user_address(&env, 1);
     
-    let contract_id = env.register(None, Contract);
+    let contract_id = env.register(Contract, ());
     env.as_contract(&contract_id, || {
         // Deposit small amount of collateral
         Contract::deposit_collateral(env.clone(), user.to_string(), 100).unwrap();
@@ -204,7 +192,7 @@ fn test_repay_success() {
     let _admin = TestUtils::initialize_contract(&env);
     let user = TestUtils::create_user_address(&env, 1);
     
-    let contract_id = env.register(None, Contract);
+    let contract_id = env.register(Contract, ());
     env.as_contract(&contract_id, || {
         // Setup: deposit and borrow
         Contract::deposit_collateral(env.clone(), user.to_string(), 2000).unwrap();
@@ -227,7 +215,7 @@ fn test_repay_full_amount() {
     let _admin = TestUtils::initialize_contract(&env);
     let user = TestUtils::create_user_address(&env, 1);
     
-    let contract_id = env.register(None, Contract);
+    let contract_id = env.register(Contract, ());
     env.as_contract(&contract_id, || {
         // Setup: deposit and borrow
         Contract::deposit_collateral(env.clone(), user.to_string(), 2000).unwrap();
@@ -250,7 +238,7 @@ fn test_withdraw_success() {
     let _admin = TestUtils::initialize_contract(&env);
     let user = TestUtils::create_user_address(&env, 1);
     
-    let contract_id = env.register(None, Contract);
+    let contract_id = env.register(Contract, ());
     env.as_contract(&contract_id, || {
         // Setup: deposit collateral
         Contract::deposit_collateral(env.clone(), user.to_string(), 2000).unwrap();
@@ -272,7 +260,7 @@ fn test_withdraw_insufficient_collateral() {
     let _admin = TestUtils::initialize_contract(&env);
     let user = TestUtils::create_user_address(&env, 1);
     
-    let contract_id = env.register(None, Contract);
+    let contract_id = env.register(Contract, ());
     env.as_contract(&contract_id, || {
         // Setup: deposit small amount
         Contract::deposit_collateral(env.clone(), user.to_string(), 100).unwrap();
@@ -290,7 +278,7 @@ fn test_withdraw_insufficient_collateral_ratio() {
     let _admin = TestUtils::initialize_contract(&env);
     let user = TestUtils::create_user_address(&env, 1);
     
-    let contract_id = env.register(None, Contract);
+    let contract_id = env.register(Contract, ());
     env.as_contract(&contract_id, || {
         // Setup: deposit and borrow
         Contract::deposit_collateral(env.clone(), user.to_string(), 2000).unwrap();
@@ -310,7 +298,7 @@ fn test_liquidate_success() {
     let user = TestUtils::create_user_address(&env, 1);
     let liquidator = TestUtils::create_user_address(&env, 2);
     
-    let contract_id = env.register(None, Contract);
+    let contract_id = env.register(Contract, ());
     env.as_contract(&contract_id, || {
         // Setup: deposit small collateral and borrow large amount
         Contract::deposit_collateral(env.clone(), user.to_string(), 100).unwrap();
@@ -334,7 +322,7 @@ fn test_liquidate_not_eligible() {
     let user = TestUtils::create_user_address(&env, 1);
     let liquidator = TestUtils::create_user_address(&env, 2);
     
-    let contract_id = env.register(None, Contract);
+    let contract_id = env.register(Contract, ());
     env.as_contract(&contract_id, || {
         // Setup: deposit sufficient collateral and borrow small amount
         Contract::deposit_collateral(env.clone(), user.to_string(), 2000).unwrap();
@@ -354,7 +342,7 @@ fn test_admin_functions() {
     let non_admin = TestUtils::create_user_address(&env, 1);
     let oracle = TestUtils::create_oracle_address(&env);
     
-    let contract_id = env.register(None, Contract);
+    let contract_id = env.register(Contract, ());
     env.as_contract(&contract_id, || {
         // Test admin can set oracle
         let result = Contract::set_oracle(env.clone(), admin.to_string(), oracle.to_string());
@@ -382,7 +370,7 @@ fn test_protocol_params() {
     let admin = TestUtils::initialize_contract(&env);
     let oracle = TestUtils::create_oracle_address(&env);
     
-    let contract_id = env.register(None, Contract);
+    let contract_id = env.register(Contract, ());
     env.as_contract(&contract_id, || {
         // Set oracle
         Contract::set_oracle(env.clone(), admin.to_string(), oracle.to_string()).unwrap();
@@ -400,7 +388,7 @@ fn test_system_stats() {
     let env = TestUtils::create_test_env();
     let _admin = TestUtils::initialize_contract(&env);
     
-    let contract_id = env.register(None, Contract);
+    let contract_id = env.register(Contract, ());
     env.as_contract(&contract_id, || {
         let (total_collateral, total_debt) = Contract::get_system_stats(env.clone()).unwrap();
         // For now, these are stubbed to return (0, 0)
@@ -415,7 +403,7 @@ fn test_event_history_stubs() {
     let _admin = TestUtils::initialize_contract(&env);
     let user = TestUtils::create_user_address(&env, 1);
     
-    let contract_id = env.register(None, Contract);
+    let contract_id = env.register(Contract, ());
     env.as_contract(&contract_id, || {
         // Test user event history (stubbed)
         let events = Contract::get_user_event_history(env.clone(), user.to_string(), String::from_str(&env, "deposit")).unwrap();
@@ -427,14 +415,13 @@ fn test_event_history_stubs() {
     });
 }
 
-/// Property-based tests for edge cases
 #[test]
 fn test_edge_cases() {
     let env = TestUtils::create_test_env();
     let _admin = TestUtils::initialize_contract(&env);
     let user = TestUtils::create_user_address(&env, 1);
     
-    let contract_id = env.register(None, Contract);
+    let contract_id = env.register(Contract, ());
     env.as_contract(&contract_id, || {
         // Test with maximum i128 values
         let max_amount = i128::MAX;
@@ -455,7 +442,7 @@ fn test_multiple_users() {
     let user1 = TestUtils::create_user_address(&env, 1);
     let user2 = TestUtils::create_user_address(&env, 2);
     
-    let contract_id = env.register(None, Contract);
+    let contract_id = env.register(Contract, ());
     env.as_contract(&contract_id, || {
         // User 1 deposits and borrows
         Contract::deposit_collateral(env.clone(), user1.to_string(), 2000).unwrap();
