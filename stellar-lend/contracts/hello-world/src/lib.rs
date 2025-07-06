@@ -14,7 +14,8 @@ use soroban_sdk::{contract, contractimpl, vec, Env, String, Vec};
 // mod liquidate;
 
 /// The main contract struct for StellarLend
-pub struct StellarLendContract;
+#[contract]
+pub struct Contract;
 
 // This is a sample contract. Replace this placeholder with your own contract logic.
 // A corresponding test example is available in `test.rs`.
@@ -26,7 +27,7 @@ pub struct StellarLendContract;
 // Refer to the official documentation:
 // <https://developers.stellar.org/docs/build/smart-contracts/overview>.
 #[contractimpl]
-impl StellarLendContract {
+impl Contract {
     /// Initializes the contract (placeholder for future state setup)
     pub fn initialize(_env: Env) {
         // Initialization logic will go here
