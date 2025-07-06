@@ -56,6 +56,8 @@ impl StateHelper {
     pub fn remove_position(env: &Env, user: &Address) {
         let key = (Symbol::short("position"), user.clone());
         env.storage().instance().remove(&key);
+    }
+}
 
 /// Event types for protocol actions
 pub enum ProtocolEvent {
@@ -113,7 +115,16 @@ impl Contract {
     /// - `env`: The contract environment
     /// - `depositor`: The address of the user depositing collateral (placeholder type)
     /// - `amount`: The amount of collateral to deposit (placeholder type)
-    pub fn deposit_collateral(_env: Env, _depositor: String, _amount: i128) {
+    pub fn deposit_collateral(env: Env, depositor: String, amount: i128) {
+        // Access control: check that the depositor signed the transaction
+        // (In real implementation, use Address and require_auth)
+        if depositor.is_empty() {
+            panic!("Depositor address cannot be empty");
+        }
+        if amount <= 0 {
+            panic!("Deposit amount must be positive");
+        }
+        // TODO: Implement require_auth/depositor signature check
         // TODO: Implement deposit logic
     }
 
@@ -123,7 +134,15 @@ impl Contract {
     /// - `env`: The contract environment
     /// - `borrower`: The address of the user borrowing assets (placeholder type)
     /// - `amount`: The amount to borrow (placeholder type)
-    pub fn borrow(_env: Env, _borrower: String, _amount: i128) {
+    pub fn borrow(env: Env, borrower: String, amount: i128) {
+        // Access control: check that the borrower signed the transaction
+        if borrower.is_empty() {
+            panic!("Borrower address cannot be empty");
+        }
+        if amount <= 0 {
+            panic!("Borrow amount must be positive");
+        }
+        // TODO: Implement require_auth/borrower signature check
         // TODO: Implement borrow logic
     }
 
@@ -133,7 +152,15 @@ impl Contract {
     /// - `env`: The contract environment
     /// - `repayer`: The address of the user repaying (placeholder type)
     /// - `amount`: The amount to repay (placeholder type)
-    pub fn repay(_env: Env, _repayer: String, _amount: i128) {
+    pub fn repay(env: Env, repayer: String, amount: i128) {
+        // Access control: check that the repayer signed the transaction
+        if repayer.is_empty() {
+            panic!("Repayer address cannot be empty");
+        }
+        if amount <= 0 {
+            panic!("Repay amount must be positive");
+        }
+        // TODO: Implement require_auth/repayer signature check
         // TODO: Implement repay logic
     }
 
@@ -143,7 +170,15 @@ impl Contract {
     /// - `env`: The contract environment
     /// - `withdrawer`: The address of the user withdrawing (placeholder type)
     /// - `amount`: The amount to withdraw (placeholder type)
-    pub fn withdraw(_env: Env, _withdrawer: String, _amount: i128) {
+    pub fn withdraw(env: Env, withdrawer: String, amount: i128) {
+        // Access control: check that the withdrawer signed the transaction
+        if withdrawer.is_empty() {
+            panic!("Withdrawer address cannot be empty");
+        }
+        if amount <= 0 {
+            panic!("Withdraw amount must be positive");
+        }
+        // TODO: Implement require_auth/withdrawer signature check
         // TODO: Implement withdraw logic
     }
 
@@ -153,7 +188,15 @@ impl Contract {
     /// - `env`: The contract environment
     /// - `liquidator`: The address of the user performing liquidation (placeholder type)
     /// - `amount`: The amount to liquidate (placeholder type)
-    pub fn liquidate(_env: Env, _liquidator: String, _amount: i128) {
+    pub fn liquidate(env: Env, liquidator: String, amount: i128) {
+        // Access control: check that the liquidator signed the transaction
+        if liquidator.is_empty() {
+            panic!("Liquidator address cannot be empty");
+        }
+        if amount <= 0 {
+            panic!("Liquidation amount must be positive");
+        }
+        // TODO: Implement require_auth/liquidator signature check
         // TODO: Implement liquidation logic
     }
 
