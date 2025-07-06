@@ -4,7 +4,7 @@
 //! Core features will be implemented incrementally in separate modules.
 
 #![no_std]
-use soroban_sdk::{contract, contractimpl, vec, Env, String, Vec};
+use soroban_sdk::{contract, contractimpl, vec, Env, String, Vec, Symbol, Address, storage, contracttype};
 
 // Module placeholders for future expansion
 // mod deposit;
@@ -16,6 +16,48 @@ use soroban_sdk::{contract, contractimpl, vec, Env, String, Vec};
 /// The main contract struct for StellarLend
 #[contract]
 pub struct Contract;
+
+/// Represents a user's position in the protocol
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct Position {
+    /// The address of the user
+    pub user: Address,
+    /// The amount of collateral deposited
+    pub collateral: i128,
+    /// The amount borrowed
+    pub debt: i128,
+}
+
+impl Position {
+    /// Create a new position
+    pub fn new(user: Address, collateral: i128, debt: i128) -> Self {
+        Self { user, collateral, debt }
+    }
+}
+
+/// Helper functions for state management
+pub struct StateHelper;
+
+impl StateHelper {
+    /// Save a position to storage
+    pub fn save_position(env: &Env, position: &Position) {
+        let key = (Symbol::short("position"), position.user.clone());
+        env.storage().instance().set(&key, position);
+    }
+
+    /// Retrieve a position from storage
+    pub fn get_position(env: &Env, user: &Address) -> Option<Position> {
+        let key = (Symbol::short("position"), user.clone());
+        env.storage().instance().get(&key)
+    }
+
+    /// Remove a position from storage
+    pub fn remove_position(env: &Env, user: &Address) {
+        let key = (Symbol::short("position"), user.clone());
+        env.storage().instance().remove(&key);
+    }
+}
 
 // This is a sample contract. Replace this placeholder with your own contract logic.
 // A corresponding test example is available in `test.rs`.
@@ -78,3 +120,7 @@ impl Contract {
 mod test;
 
 // Additional documentation and module expansion will be added as features are implemented.
+
+// Add doc comments and placeholder for future event logic
+// pub enum ProtocolEvent { ... }
+// impl ProtocolEvent { ... }
