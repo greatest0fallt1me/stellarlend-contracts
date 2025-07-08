@@ -2402,3 +2402,68 @@ fn test_activity_tracking_integration_with_lending() {
         assert_eq!(debt, 1000);
     });
 }
+
+#[test]
+fn test_account_freeze_and_unfreeze() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::initialize_contract(&env);
+    let user = TestUtils::create_user_address(&env, 1);
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        // Initially not frozen
+        assert!(!Contract::is_account_frozen(env.clone(), user.to_string()));
+        // Freeze account
+        let result = Contract::freeze_account(env.clone(), admin.to_string(), user.to_string());
+        assert!(result.is_ok());
+        assert!(Contract::is_account_frozen(env.clone(), user.to_string()));
+        // Unfreeze account
+        let result = Contract::unfreeze_account(env.clone(), admin.to_string(), user.to_string());
+        assert!(result.is_ok());
+        assert!(!Contract::is_account_frozen(env.clone(), user.to_string()));
+    });
+}
+
+#[test]
+fn test_account_freeze_enforcement_on_actions() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::initialize_contract(&env);
+    let user = TestUtils::create_user_address(&env, 1);
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        // Freeze account
+        Contract::freeze_account(env.clone(), admin.to_string(), user.to_string()).unwrap();
+        // All actions should fail
+        let deposit = Contract::deposit_collateral(env.clone(), user.to_string(), 1000);
+        assert!(deposit.is_err());
+        let borrow = Contract::borrow(env.clone(), user.to_string(), 1000);
+        assert!(borrow.is_err());
+        let repay = Contract::repay(env.clone(), user.to_string(), 1000);
+        assert!(repay.is_err());
+        let withdraw = Contract::withdraw(env.clone(), user.to_string(), 1000);
+        assert!(withdraw.is_err());
+        // Unfreeze and actions should succeed
+        Contract::unfreeze_account(env.clone(), admin.to_string(), user.to_string()).unwrap();
+        let deposit = Contract::deposit_collateral(env.clone(), user.to_string(), 1000);
+        assert!(deposit.is_ok());
+    });
+}
+
+#[test]
+fn test_account_freeze_unauthorized() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let _admin = TestUtils::initialize_contract(&env);
+    let user = TestUtils::create_user_address(&env, 1);
+    let not_admin = TestUtils::create_user_address(&env, 2);
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        // Non-admin cannot freeze
+        let result = Contract::freeze_account(env.clone(), not_admin.to_string(), user.to_string());
+        assert!(result.is_err());
+        // Non-admin cannot unfreeze
+        let result = Contract::unfreeze_account(env.clone(), not_admin.to_string(), user.to_string());
+        assert!(result.is_err());
+    });
+}
