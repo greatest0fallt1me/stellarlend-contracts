@@ -144,7 +144,7 @@
                               "val": {
                                 "i128": {
                                   "hi": 0,
-                                  "lo": 0
+                                  "lo": 10000000
                                 }
                               }
                             },
@@ -201,33 +201,6 @@
                               }
                             }
                           ]
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "oracle"
-                        },
-                        "val": {
-                          "address": "GCXOTMMXRS24MYZI5FJPUCOEOFNWSR4XX7UXIK3NDGGE6A5QMJ5FF2FS"
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "oracle_p"
-                        },
-                        "val": {
-                          "i128": {
-                            "hi": 0,
-                            "lo": 250000000
-                          }
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "oracle_t"
-                        },
-                        "val": {
-                          "u64": 0
                         }
                       }
                     ]

@@ -788,3 +788,278 @@ fn test_oracle_price_storage() {
         assert!(timestamp2 >= timestamp1);
     });
 }
+
+// --- Interest Rate Management Tests ---
+
+#[test]
+fn test_interest_rate_initialization() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Check that interest rate config is initialized with defaults
+        let (base_rate, kink_utilization, multiplier, reserve_factor, rate_floor, rate_ceiling, _) = 
+            Contract::get_interest_rate_config(env.clone()).unwrap();
+        
+        assert_eq!(base_rate, 2000000);        // 2%
+        assert_eq!(kink_utilization, 80000000); // 80%
+        assert_eq!(multiplier, 10000000);       // 10x
+        assert_eq!(reserve_factor, 10000000);   // 10%
+        assert_eq!(rate_floor, 100000);         // 0.1%
+        assert_eq!(rate_ceiling, 50000000);     // 50%
+    });
+}
+
+#[test]
+fn test_interest_rate_calculation() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Test initial rates (no utilization)
+        let (borrow_rate, supply_rate) = Contract::get_current_rates(env.clone()).unwrap();
+        assert_eq!(borrow_rate, 2000000); // Base rate (2%)
+        assert_eq!(supply_rate, 0);       // No utilization = no supply rate
+        
+        // Test utilization metrics
+        let (utilization, total_borrowed, total_supplied) = Contract::get_utilization_metrics(env.clone()).unwrap();
+        assert_eq!(utilization, 0);
+        assert_eq!(total_borrowed, 0);
+        assert_eq!(total_supplied, 0);
+    });
+}
+
+#[test]
+fn test_interest_rate_admin_functions() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    let non_admin = TestUtils::create_user_address(&env, 1);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Test admin can set base rate
+        let result = Contract::set_base_rate(env.clone(), admin.to_string(), 3000000); // 3%
+        assert!(result.is_ok());
+        
+        // Test non-admin cannot set base rate
+        let result = Contract::set_base_rate(env.clone(), non_admin.to_string(), 4000000);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ProtocolError::NotAdmin);
+        
+        // Test admin can set kink utilization
+        let result = Contract::set_kink_utilization(env.clone(), admin.to_string(), 70000000); // 70%
+        assert!(result.is_ok());
+        
+        // Test admin can set multiplier
+        let result = Contract::set_multiplier(env.clone(), admin.to_string(), 15000000); // 15x
+        assert!(result.is_ok());
+        
+        // Test admin can set reserve factor
+        let result = Contract::set_reserve_factor(env.clone(), admin.to_string(), 15000000); // 15%
+        assert!(result.is_ok());
+        
+        // Test admin can set rate limits
+        let result = Contract::set_rate_limits(env.clone(), admin.to_string(), 50000, 75000000); // 0.05% to 75%
+        assert!(result.is_ok());
+        
+        // Verify config was updated
+        let (base_rate, kink_utilization, multiplier, reserve_factor, rate_floor, rate_ceiling, _) = 
+            Contract::get_interest_rate_config(env.clone()).unwrap();
+        
+        assert_eq!(base_rate, 3000000);
+        assert_eq!(kink_utilization, 70000000);
+        assert_eq!(multiplier, 15000000);
+        assert_eq!(reserve_factor, 15000000);
+        assert_eq!(rate_floor, 50000);
+        assert_eq!(rate_ceiling, 75000000);
+    });
+}
+
+#[test]
+fn test_interest_rate_with_utilization() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    let user = TestUtils::create_user_address(&env, 1);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Set oracle address for borrowing
+        let oracle = TestUtils::create_oracle_address(&env);
+        Contract::set_oracle(env.clone(), admin.to_string(), oracle.to_string()).unwrap();
+        
+        // Deposit collateral
+        Contract::deposit_collateral(env.clone(), user.to_string(), 10000).unwrap();
+        
+        // Check utilization after deposit
+        let (utilization, total_borrowed, total_supplied) = Contract::get_utilization_metrics(env.clone()).unwrap();
+        assert_eq!(utilization, 0);
+        assert_eq!(total_borrowed, 0);
+        assert_eq!(total_supplied, 10000);
+        
+        // Borrow some amount
+        Contract::borrow(env.clone(), user.to_string(), 5000).unwrap();
+        
+        // Check utilization after borrow (50%)
+        let (utilization, total_borrowed, total_supplied) = Contract::get_utilization_metrics(env.clone()).unwrap();
+        assert_eq!(utilization, 50000000); // 50% * 1e8
+        assert_eq!(total_borrowed, 5000);
+        assert_eq!(total_supplied, 10000);
+        
+        // Check rates with 50% utilization
+        let (borrow_rate, supply_rate) = Contract::get_current_rates(env.clone()).unwrap();
+        assert_eq!(borrow_rate, 2000000); // Still base rate (below kink)
+        assert!(supply_rate > 0); // Should have some supply rate now
+    });
+}
+
+#[test]
+fn test_interest_accrual() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    let user = TestUtils::create_user_address(&env, 1);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Set oracle address
+        let oracle = TestUtils::create_oracle_address(&env);
+        Contract::set_oracle(env.clone(), admin.to_string(), oracle.to_string()).unwrap();
+        
+        // Deposit and borrow
+        Contract::deposit_collateral(env.clone(), user.to_string(), 10000).unwrap();
+        Contract::borrow(env.clone(), user.to_string(), 5000).unwrap();
+        
+        // Check initial accrued interest
+        let (borrow_interest, supply_interest) = Contract::get_user_accrued_interest(env.clone(), user.to_string()).unwrap();
+        assert_eq!(borrow_interest, 0);
+        assert_eq!(supply_interest, 0);
+        
+        // Manually accrue interest
+        Contract::accrue_interest(env.clone()).unwrap();
+        
+        // Check accrued interest again (should still be 0 due to minimal time)
+        let (borrow_interest, supply_interest) = Contract::get_user_accrued_interest(env.clone(), user.to_string()).unwrap();
+        assert!(borrow_interest >= 0);
+        assert!(supply_interest >= 0);
+    });
+}
+
+#[test]
+fn test_emergency_rate_adjustment() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    let non_admin = TestUtils::create_user_address(&env, 1);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Test admin can make emergency rate adjustment
+        let result = Contract::emergency_rate_adjustment(env.clone(), admin.to_string(), 10000000); // 10%
+        assert!(result.is_ok());
+        
+        // Test non-admin cannot make emergency adjustment
+        let result = Contract::emergency_rate_adjustment(env.clone(), non_admin.to_string(), 15000000);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ProtocolError::NotAdmin);
+        
+        // Verify rate was updated (get directly from state to avoid recalculation)
+        let state = InterestRateStorage::get_state(&env);
+        assert_eq!(state.current_borrow_rate, 10000000);
+    });
+}
+
+#[test]
+fn test_interest_rate_integration_with_lending() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    let user = TestUtils::create_user_address(&env, 1);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Set oracle address
+        let oracle = TestUtils::create_oracle_address(&env);
+        Contract::set_oracle(env.clone(), admin.to_string(), oracle.to_string()).unwrap();
+        
+        // Get initial rates
+        let (initial_borrow_rate, initial_supply_rate) = Contract::get_current_rates(env.clone()).unwrap();
+        
+        // Deposit collateral
+        Contract::deposit_collateral(env.clone(), user.to_string(), 10000).unwrap();
+        
+        // Borrow (should trigger interest accrual)
+        Contract::borrow(env.clone(), user.to_string(), 5000).unwrap();
+        
+        // Check that rates are updated
+        let (borrow_rate, supply_rate) = Contract::get_current_rates(env.clone()).unwrap();
+        assert_eq!(borrow_rate, initial_borrow_rate); // Should still be base rate
+        assert!(supply_rate > initial_supply_rate); // Should have supply rate now
+        
+        // Check utilization
+        let (utilization, total_borrowed, total_supplied) = Contract::get_utilization_metrics(env.clone()).unwrap();
+        assert_eq!(utilization, 50000000); // 50%
+        assert_eq!(total_borrowed, 5000);
+        assert_eq!(total_supplied, 10000);
+        
+        // Repay some debt
+        Contract::repay(env.clone(), user.to_string(), 2000).unwrap();
+        
+        // Check updated utilization
+        let (utilization, total_borrowed, total_supplied) = Contract::get_utilization_metrics(env.clone()).unwrap();
+        assert_eq!(utilization, 30000000); // 30%
+        assert_eq!(total_borrowed, 3000);
+        assert_eq!(total_supplied, 10000);
+    });
+}
+
+#[test]
+fn test_interest_rate_edge_cases() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Test with zero utilization
+        let (borrow_rate, supply_rate) = Contract::get_current_rates(env.clone()).unwrap();
+        assert_eq!(borrow_rate, 2000000); // Base rate
+        assert_eq!(supply_rate, 0);       // No supply rate
+        
+        // Test rate limits
+        Contract::set_rate_limits(env.clone(), admin.to_string(), 1000000, 3000000).unwrap(); // 1% to 3%
+        
+        // Set very high base rate (should be capped)
+        Contract::set_base_rate(env.clone(), admin.to_string(), 10000000).unwrap(); // 10%
+        
+        let (borrow_rate, _) = Contract::get_current_rates(env.clone()).unwrap();
+        assert_eq!(borrow_rate, 3000000); // Should be capped at 3%
+        
+        // Set very low base rate (should be floored)
+        Contract::set_base_rate(env.clone(), admin.to_string(), 50000).unwrap(); // 0.05%
+        
+        let (borrow_rate, _) = Contract::get_current_rates(env.clone()).unwrap();
+        assert_eq!(borrow_rate, 1000000); // Should be floored at 1%
+    });
+}
