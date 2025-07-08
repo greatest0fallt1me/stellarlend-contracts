@@ -223,8 +223,8 @@ impl RevenueMetrics {
 pub struct ReserveStorage;
 
 impl ReserveStorage {
-    fn reserve_key() -> Symbol { Symbol::short("reserve_data") }
-    fn metrics_key() -> Symbol { Symbol::short("revenue_metrics") }
+    fn reserve_key() -> Symbol { Symbol::short("reserve") }
+    fn metrics_key() -> Symbol { Symbol::short("metrics") }
     
     pub fn save_reserve_data(env: &Env, data: &ReserveData) {
         env.storage().instance().set(&Self::reserve_key(), data);
