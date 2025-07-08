@@ -351,11 +351,11 @@ impl ActivityStorage {
     fn protocol_activity_key() -> Symbol { Symbol::short("protocol_activity") }
     
     pub fn save_user_activity(env: &Env, user: &Address, activity: &UserActivity) {
-        env.storage().instance().set(&Self::user_activity_key(user), activity);
+        env.storage().instance().set(&Self::user_activity_key(env, user), activity);
     }
     
     pub fn get_user_activity(env: &Env, user: &Address) -> Option<UserActivity> {
-        env.storage().instance().get(&Self::user_activity_key(user))
+        env.storage().instance().get(&Self::user_activity_key(env, user))
     }
     
     pub fn save_protocol_activity(env: &Env, activity: &ProtocolActivity) {
@@ -2092,12 +2092,16 @@ impl Contract {
         let mut activity = ActivityStorage::get_user_activity(&env, &user_addr)
             .unwrap_or_else(UserActivity::new);
         
-        match action.as_str() {
-            "deposit" => activity.record_deposit(amount, timestamp),
-            "withdrawal" => activity.record_withdrawal(amount, timestamp),
-            "borrow" => activity.record_borrow(amount, timestamp),
-            "repayment" => activity.record_repayment(amount, timestamp),
-            _ => return Err(ProtocolError::Unknown),
+        if action == String::from_str(&env, "deposit") {
+            activity.record_deposit(amount, timestamp);
+        } else if action == String::from_str(&env, "withdrawal") {
+            activity.record_withdrawal(amount, timestamp);
+        } else if action == String::from_str(&env, "borrow") {
+            activity.record_borrow(amount, timestamp);
+        } else if action == String::from_str(&env, "repayment") {
+            activity.record_repayment(amount, timestamp);
+        } else {
+            return Err(ProtocolError::Unknown);
         }
         
         ActivityStorage::save_user_activity(&env, &user_addr, &activity);
