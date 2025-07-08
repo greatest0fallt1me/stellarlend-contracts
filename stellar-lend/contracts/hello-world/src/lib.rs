@@ -497,7 +497,7 @@ impl ProtocolEvent {
             ProtocolEvent::TreasuryUpdated { old_address, new_address } => {
                 env.events().publish(
                     (Symbol::short("treasury_updated"), Symbol::short("old_address")), 
-                    (Symbol::short("new_address"), new_address)
+                    (Symbol::short("new_address"), new_address.clone())
                 );
             }
             ProtocolEvent::ReserveUpdated { total_collected, current_reserves } => {
@@ -1460,9 +1460,9 @@ impl Contract {
         
         // Update revenue metrics
         let mut metrics = ReserveStorage::get_revenue_metrics(&env);
-        if source == "borrow" {
+        if source == String::from_str(&env, "borrow") {
             metrics.total_borrow_fees += amount;
-        } else if source == "supply" {
+        } else if source == String::from_str(&env, "supply") {
             metrics.total_supply_fees += amount;
         }
         ReserveStorage::save_revenue_metrics(&env, &metrics);
