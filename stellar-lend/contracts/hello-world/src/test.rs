@@ -2505,3 +2505,195 @@ fn test_multi_admin_support() {
     let admins = get_admins(e.clone());
     assert_eq!(admins.len(), 2); // user and admin3
 }
+
+#[test]
+fn test_permissionless_market_listing() {
+    let e = Env::default();
+    let admin = Address::generate(&e);
+    let proposer = Address::generate(&e);
+    let oracle = Address::generate(&e);
+    
+    // Initialize contract
+    initialize(&e, admin.clone());
+    
+    // Propose new asset
+    let proposal_id = propose_asset(
+        e.clone(),
+        proposer.clone(),
+        String::from_slice(&e, "BTC"),
+        String::from_slice(&e, "Bitcoin"),
+        oracle.clone(),
+        8000, // 80% collateral factor
+        7500, // 75% borrow factor
+    ).unwrap();
+    
+    assert_eq!(proposal_id, 1);
+    
+    // Check proposal exists
+    let proposal = get_proposal_by_id(e.clone(), proposal_id).unwrap();
+    assert_eq!(proposal.proposer, proposer);
+    assert_eq!(proposal.symbol, String::from_slice(&e, "BTC"));
+    assert_eq!(proposal.status, ProposalStatus::Pending);
+    
+    // Admin approves proposal
+    assert!(approve_proposal(e.clone(), admin.clone(), proposal_id).is_ok());
+    
+    // Check proposal status updated
+    let updated_proposal = get_proposal_by_id(e.clone(), proposal_id).unwrap();
+    assert_eq!(updated_proposal.status, ProposalStatus::Approved);
+    
+    // Check asset was created
+    let asset_info = get_asset_info(e.clone(), String::from_slice(&e, "BTC")).unwrap();
+    assert_eq!(asset_info.symbol, String::from_slice(&e, "BTC"));
+    assert_eq!(asset_info.name, String::from_slice(&e, "Bitcoin"));
+    
+    // Propose another asset
+    let proposal_id2 = propose_asset(
+        e.clone(),
+        proposer.clone(),
+        String::from_slice(&e, "ETH"),
+        String::from_slice(&e, "Ethereum"),
+        oracle.clone(),
+        7500,
+        7000,
+    ).unwrap();
+    
+    // Admin rejects proposal
+    assert!(reject_proposal(e.clone(), admin.clone(), proposal_id2).is_ok());
+    
+    let rejected_proposal = get_proposal_by_id(e.clone(), proposal_id2).unwrap();
+    assert_eq!(rejected_proposal.status, ProposalStatus::Rejected);
+    
+    // Proposer cancels their own proposal
+    let proposal_id3 = propose_asset(
+        e.clone(),
+        proposer.clone(),
+        String::from_slice(&e, "LTC"),
+        String::from_slice(&e, "Litecoin"),
+        oracle.clone(),
+        7000,
+        6500,
+    ).unwrap();
+    
+    assert!(cancel_proposal(e.clone(), proposer.clone(), proposal_id3).is_ok());
+    
+    let cancelled_proposal = get_proposal_by_id(e.clone(), proposal_id3).unwrap();
+    assert_eq!(cancelled_proposal.status, ProposalStatus::Cancelled);
+    
+    // Test unauthorized operations
+    let not_admin = Address::generate(&e);
+    assert!(approve_proposal(e.clone(), not_admin.clone(), proposal_id).is_err());
+    assert!(reject_proposal(e.clone(), not_admin.clone(), proposal_id2).is_err());
+    
+    let not_proposer = Address::generate(&e);
+    assert!(cancel_proposal(e.clone(), not_proposer.clone(), proposal_id3).is_err());
+    
+    // Test query functions
+    let all_proposals = get_all_proposals(e.clone());
+    assert_eq!(all_proposals.len(), 3);
+    
+    let pending_proposals = get_proposals_by_status(e.clone(), ProposalStatus::Pending);
+    assert_eq!(pending_proposals.len(), 0);
+    
+    let approved_proposals = get_proposals_by_status(e.clone(), ProposalStatus::Approved);
+    assert_eq!(approved_proposals.len(), 1);
+    
+    let rejected_proposals = get_proposals_by_status(e.clone(), ProposalStatus::Rejected);
+    assert_eq!(rejected_proposals.len(), 1);
+    
+    let cancelled_proposals = get_proposals_by_status(e.clone(), ProposalStatus::Cancelled);
+    assert_eq!(cancelled_proposals.len(), 1);
+}
+
+#[test]
+fn test_proposal_validation() {
+    let e = Env::default();
+    let admin = Address::generate(&e);
+    let proposer = Address::generate(&e);
+    let oracle = Address::generate(&e);
+    
+    initialize(&e, admin.clone());
+    
+    // Test invalid symbol length
+    let result = propose_asset(
+        e.clone(),
+        proposer.clone(),
+        String::from_slice(&e, "VERYLONGSYMBOL"), // > 10 chars
+        String::from_slice(&e, "Test Asset"),
+        oracle.clone(),
+        8000,
+        7500,
+    );
+    assert!(result.is_err());
+    
+    // Test invalid name length
+    let result = propose_asset(
+        e.clone(),
+        proposer.clone(),
+        String::from_slice(&e, "TEST"),
+        String::from_slice(&e, "This is a very long asset name that exceeds the maximum allowed length of 50 characters"), // > 50 chars
+        oracle.clone(),
+        8000,
+        7500,
+    );
+    assert!(result.is_err());
+    
+    // Test invalid factors
+    let result = propose_asset(
+        e.clone(),
+        proposer.clone(),
+        String::from_slice(&e, "TEST"),
+        String::from_slice(&e, "Test Asset"),
+        oracle.clone(),
+        15000, // > 10000
+        7500,
+    );
+    assert!(result.is_err());
+    
+    let result = propose_asset(
+        e.clone(),
+        proposer.clone(),
+        String::from_slice(&e, "TEST"),
+        String::from_slice(&e, "Test Asset"),
+        oracle.clone(),
+        8000,
+        15000, // > 10000
+    );
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_proposal_lifecycle_errors() {
+    let e = Env::default();
+    let admin = Address::generate(&e);
+    let proposer = Address::generate(&e);
+    let oracle = Address::generate(&e);
+    
+    initialize(&e, admin.clone());
+    
+    // Create a proposal
+    let proposal_id = propose_asset(
+        e.clone(),
+        proposer.clone(),
+        String::from_slice(&e, "TEST"),
+        String::from_slice(&e, "Test Asset"),
+        oracle.clone(),
+        8000,
+        7500,
+    ).unwrap();
+    
+    // Approve it
+    assert!(approve_proposal(e.clone(), admin.clone(), proposal_id).is_ok());
+    
+    // Try to approve again (should fail)
+    assert!(approve_proposal(e.clone(), admin.clone(), proposal_id).is_err());
+    
+    // Try to reject approved proposal (should fail)
+    assert!(reject_proposal(e.clone(), admin.clone(), proposal_id).is_err());
+    
+    // Try to cancel approved proposal (should fail)
+    assert!(cancel_proposal(e.clone(), proposer.clone(), proposal_id).is_err());
+    
+    // Try to get non-existent proposal
+    assert!(get_proposal_by_id(e.clone(), 999).is_none());
+}

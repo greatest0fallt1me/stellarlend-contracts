@@ -4,7 +4,7 @@
 //! Core features will be implemented incrementally in separate modules.
 
 #![no_std]
-use soroban_sdk::{contract, contractimpl, vec, Env, String, Vec, Symbol, Address, storage, contracttype, contracterror, IntoVal, Set};
+use soroban_sdk::{contract, contractimpl, vec, Env, String, Vec, Symbol, Address, storage, contracttype, contracterror, IntoVal};
 
 
 // Module placeholders for future expansion
@@ -2292,25 +2292,26 @@ pub enum GovernanceEvent {
 }
 
 // Helper: get admin set
-fn get_admin_set(e: &Env) -> Set<Address> {
+fn get_admin_set(e: &Env) -> Vec<Address> {
     e.storage().instance().get(&ADMIN_SET_KEY).unwrap_or_else(|| {
-        let mut set = Set::new(e);
+        let mut set = Vec::new(e);
         // Fallback: add legacy single admin if present
         if let Some(admin) = e.storage().instance().get::<_, Address>(&"admin") {
-            set.insert(admin.clone());
+            set.push_back(admin.clone());
         }
         set
     })
 }
 
 // Helper: save admin set
-fn save_admin_set(e: &Env, set: &Set<Address>) {
+fn save_admin_set(e: &Env, set: &Vec<Address>) {
     e.storage().instance().set(&ADMIN_SET_KEY, set);
 }
 
 // Helper: is admin
 fn is_admin(e: &Env, addr: &Address) -> bool {
-    get_admin_set(e).contains(addr)
+    let admins = get_admin_set(e);
+    admins.contains(addr)
 }
 
 // Add admin (admin only)
@@ -2318,12 +2319,12 @@ pub fn add_admin(e: Env, admin: Address, new_admin: Address) -> Result<(), Proto
     if !is_admin(&e, &admin) {
         return Err(ProtocolError::Unauthorized)
     }
-    let mut set = get_admin_set(&e);
-    if set.contains(&new_admin) {
+    let mut admins = get_admin_set(&e);
+    if admins.contains(&new_admin) {
         return Err(ProtocolError::AlreadyExists)
     }
-    set.insert(new_admin.clone());
-    save_admin_set(&e, &set);
+    admins.push_back(new_admin.clone());
+    save_admin_set(&e, &admins);
     publish_event!(e, GovernanceEvent::AdminAdded { admin: new_admin, by: admin });
     Ok(())
 }
@@ -2333,15 +2334,21 @@ pub fn remove_admin(e: Env, admin: Address, remove_admin: Address) -> Result<(),
     if !is_admin(&e, &admin) {
         return Err(ProtocolError::Unauthorized)
     }
-    let mut set = get_admin_set(&e);
-    if !set.contains(&remove_admin) {
+    let mut admins = get_admin_set(&e);
+    if !admins.contains(&remove_admin) {
         return Err(ProtocolError::NotFound)
     }
-    if set.len() == 1 {
+    if admins.len() == 1 {
         return Err(ProtocolError::InvalidOperation) // cannot remove last admin
     }
-    set.remove(&remove_admin);
-    save_admin_set(&e, &set);
+    // Remove the admin by finding its index and removing it
+    for i in 0..admins.len() {
+        if admins.get(i).unwrap() == remove_admin {
+            admins.remove(i);
+            break;
+        }
+    }
+    save_admin_set(&e, &admins);
     publish_event!(e, GovernanceEvent::AdminRemoved { admin: remove_admin, by: admin });
     Ok(())
 }
@@ -2351,13 +2358,19 @@ pub fn transfer_admin(e: Env, admin: Address, new_admin: Address) -> Result<(), 
     if !is_admin(&e, &admin) {
         return Err(ProtocolError::Unauthorized)
     }
-    let mut set = get_admin_set(&e);
-    if !set.contains(&admin) {
+    let mut admins = get_admin_set(&e);
+    if !admins.contains(&admin) {
         return Err(ProtocolError::NotFound)
     }
-    set.remove(&admin);
-    set.insert(new_admin.clone());
-    save_admin_set(&e, &set);
+    // Remove the old admin and add the new one
+    for i in 0..admins.len() {
+        if admins.get(i).unwrap() == admin {
+            admins.remove(i);
+            break;
+        }
+    }
+    admins.push_back(new_admin.clone());
+    save_admin_set(&e, &admins);
     publish_event!(e, GovernanceEvent::AdminTransferred { old_admin: admin, new_admin: new_admin.clone(), by: admin });
     Ok(())
 }
@@ -2370,4 +2383,230 @@ pub fn get_admins(e: Env) -> Vec<Address> {
 // Query: is address admin
 pub fn is_address_admin(e: Env, addr: Address) -> bool {
     is_admin(&e, &addr)
+}
+
+// --- Permissionless Market Listing ---
+
+// Storage keys for proposals
+const PROPOSAL_COUNTER_KEY: &str = "proposal_counter";
+const PROPOSAL_PREFIX: &str = "proposal_";
+
+// Proposal status enum
+#[soroban_sdk::contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ProposalStatus {
+    Pending,
+    Approved,
+    Rejected,
+    Cancelled,
+}
+
+// Asset proposal struct
+#[soroban_sdk::contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AssetProposal {
+    pub id: u32,
+    pub proposer: Address,
+    pub symbol: String,
+    pub name: String,
+    pub oracle_address: Address,
+    pub collateral_factor: u32,
+    pub borrow_factor: u32,
+    pub status: ProposalStatus,
+    pub created_at: u64,
+}
+
+// Event types for proposal actions
+#[soroban_sdk::contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ProposalEvent {
+    AssetProposed(u32, Address, String, String),
+    AssetApproved(u32, Address, String),
+    AssetRejected(u32, Address, String),
+    AssetCancelled(u32, Address, String),
+}
+
+// Helper: get next proposal ID
+fn get_next_proposal_id(e: &Env) -> u32 {
+    let current = e.storage().instance().get(&PROPOSAL_COUNTER_KEY).unwrap_or(0u32);
+    let next = current + 1;
+    e.storage().instance().set(&PROPOSAL_COUNTER_KEY, &next);
+    next
+}
+
+// Helper: get proposal storage key
+fn get_proposal_key(proposal_id: u32) -> String {
+    let mut key = String::from_slice(&soroban_sdk::env::Env::default(), PROPOSAL_PREFIX);
+    let id_str = proposal_id.to_string();
+    key.append(&id_str);
+    key
+}
+
+// Helper: save proposal
+fn save_proposal(e: &Env, proposal: &AssetProposal) {
+    let key = get_proposal_key(proposal.id);
+    e.storage().instance().set(&key, proposal);
+}
+
+// Helper: get proposal
+fn get_proposal(e: &Env, proposal_id: u32) -> Option<AssetProposal> {
+    let key = get_proposal_key(proposal_id);
+    e.storage().instance().get(&key)
+}
+
+// Propose new asset (anyone can propose)
+pub fn propose_asset(
+    e: Env,
+    proposer: Address,
+    symbol: String,
+    name: String,
+    oracle_address: Address,
+    collateral_factor: u32,
+    borrow_factor: u32,
+) -> Result<u32, ProtocolError> {
+    // Validate inputs
+    if symbol.len() > 10 || name.len() > 50 {
+        return Err(ProtocolError::InvalidInput)
+    }
+    if collateral_factor > 10000 || borrow_factor > 10000 {
+        return Err(ProtocolError::InvalidInput)
+    }
+    
+    let proposal_id = get_next_proposal_id(&e);
+    let proposal = AssetProposal {
+        id: proposal_id,
+        proposer: proposer.clone(),
+        symbol: symbol.clone(),
+        name: name.clone(),
+        oracle_address,
+        collateral_factor,
+        borrow_factor,
+        status: ProposalStatus::Pending,
+        created_at: e.ledger().timestamp(),
+    };
+    
+    save_proposal(&e, &proposal);
+    publish_event!(e, ProposalEvent::AssetProposed(proposal_id, proposer, symbol, name));
+    
+    Ok(proposal_id)
+}
+
+// Approve asset proposal (admin only)
+pub fn approve_proposal(e: Env, admin: Address, proposal_id: u32) -> Result<(), ProtocolError> {
+    if !is_admin(&e, &admin) {
+        return Err(ProtocolError::Unauthorized)
+    }
+    
+    let mut proposal = get_proposal(&e, proposal_id)
+        .ok_or(ProtocolError::NotFound)?;
+    
+    if proposal.status != ProposalStatus::Pending {
+        return Err(ProtocolError::InvalidOperation)
+    }
+    
+    // Create the asset
+    add_asset(
+        e.clone(),
+        admin.clone(),
+        proposal.symbol.clone(),
+        proposal.name.clone(),
+        proposal.oracle_address.clone(),
+        proposal.collateral_factor,
+        proposal.borrow_factor,
+    )?;
+    
+    // Update proposal status
+    proposal.status = ProposalStatus::Approved;
+    save_proposal(&e, &proposal);
+    
+    publish_event!(e, ProposalEvent::AssetApproved { 
+        proposal_id, 
+        admin, 
+        symbol: proposal.symbol 
+    });
+    
+    Ok(())
+}
+
+// Reject asset proposal (admin only)
+pub fn reject_proposal(e: Env, admin: Address, proposal_id: u32) -> Result<(), ProtocolError> {
+    if !is_admin(&e, &admin) {
+        return Err(ProtocolError::Unauthorized)
+    }
+    
+    let mut proposal = get_proposal(&e, proposal_id)
+        .ok_or(ProtocolError::NotFound)?;
+    
+    if proposal.status != ProposalStatus::Pending {
+        return Err(ProtocolError::InvalidOperation)
+    }
+    
+    proposal.status = ProposalStatus::Rejected;
+    save_proposal(&e, &proposal);
+    
+    publish_event!(e, ProposalEvent::AssetRejected { 
+        proposal_id, 
+        admin, 
+        symbol: proposal.symbol 
+    });
+    
+    Ok(())
+}
+
+// Cancel proposal (proposer only)
+pub fn cancel_proposal(e: Env, proposer: Address, proposal_id: u32) -> Result<(), ProtocolError> {
+    let mut proposal = get_proposal(&e, proposal_id)
+        .ok_or(ProtocolError::NotFound)?;
+    
+    if proposal.proposer != proposer {
+        return Err(ProtocolError::Unauthorized)
+    }
+    
+    if proposal.status != ProposalStatus::Pending {
+        return Err(ProtocolError::InvalidOperation)
+    }
+    
+    proposal.status = ProposalStatus::Cancelled;
+    save_proposal(&e, &proposal);
+    
+    publish_event!(e, ProposalEvent::AssetCancelled { 
+        proposal_id, 
+        proposer, 
+        symbol: proposal.symbol 
+    });
+    
+    Ok(())
+}
+
+// Query: get proposal by ID
+pub fn get_proposal_by_id(e: Env, proposal_id: u32) -> Option<AssetProposal> {
+    get_proposal(&e, proposal_id)
+}
+
+// Query: get all proposals (basic implementation)
+pub fn get_all_proposals(e: Env) -> Vec<AssetProposal> {
+    let mut proposals = Vec::new(&e);
+    let counter = e.storage().instance().get(&PROPOSAL_COUNTER_KEY).unwrap_or(0u32);
+    
+    for i in 1..=counter {
+        if let Some(proposal) = get_proposal(&e, i) {
+            proposals.push_back(proposal);
+        }
+    }
+    
+    proposals
+}
+
+// Query: get proposals by status
+pub fn get_proposals_by_status(e: Env, status: ProposalStatus) -> Vec<AssetProposal> {
+    let all_proposals = get_all_proposals(e.clone());
+    let mut filtered = Vec::new(&e);
+    
+    for proposal in all_proposals.iter() {
+        if proposal.status == status {
+            filtered.push_back(proposal);
+        }
+    }
+    
+    filtered
 }
