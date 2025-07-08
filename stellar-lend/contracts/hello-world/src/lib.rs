@@ -1871,8 +1871,8 @@ impl Contract {
         ProtocolEvent::AssetUpdated { 
             asset: asset.clone(), 
             parameter: String::from_str(&env, "min_collateral_ratio"), 
-            old_value: String::from_str(&env, &old_ratio.to_string()), 
-            new_value: String::from_str(&env, &min_collateral_ratio.to_string()) 
+            old_value: String::from_str(&env, "old_ratio"), 
+            new_value: String::from_str(&env, "new_ratio") 
         }.emit(&env);
         
         Ok(())
