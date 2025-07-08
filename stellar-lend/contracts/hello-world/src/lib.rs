@@ -2358,13 +2358,19 @@ pub fn transfer_admin(e: Env, admin: Address, new_admin: Address) -> Result<(), 
     if !is_admin(&e, &admin) {
         return Err(ProtocolError::Unauthorized)
     }
-    let mut set = get_admin_set(&e);
-    if !set.contains(&admin) {
+    let mut admins = get_admin_set(&e);
+    if !admins.contains(&admin) {
         return Err(ProtocolError::NotFound)
     }
-    set.remove(&admin);
-    set.insert(new_admin.clone());
-    save_admin_set(&e, &set);
+    // Remove the old admin and add the new one
+    for i in 0..admins.len() {
+        if admins.get(i).unwrap() == admin {
+            admins.remove(i);
+            break;
+        }
+    }
+    admins.push_back(new_admin.clone());
+    save_admin_set(&e, &admins);
     publish_event!(e, GovernanceEvent::AdminTransferred { old_admin: admin, new_admin: new_admin.clone(), by: admin });
     Ok(())
 }
