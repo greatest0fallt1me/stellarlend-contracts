@@ -184,7 +184,7 @@ impl ReserveData {
             total_fees_collected: 0,
             total_fees_distributed: 0,
             current_reserves: 0,
-            treasury_address: Address::random(&Env::default()), // Placeholder
+            treasury_address: Address::from_string(&String::from_str(&Env::default(), "GCXOTMMXRS24MYZI5FJPUCOEOFNWSR4XX7UXIK3NDGGE6A5QMJ5FF2FS")), // Placeholder
             last_distribution_time: 0,
             distribution_frequency: 86400, // 24 hours
         }
@@ -485,13 +485,13 @@ impl ProtocolEvent {
             ProtocolEvent::FeesCollected { amount, source } => {
                 env.events().publish(
                     (Symbol::short("fees_collected"), Symbol::short("amount")), 
-                    (Symbol::short("source"), source)
+                    (Symbol::short("source"), source.clone())
                 );
             }
             ProtocolEvent::FeesDistributed { amount, treasury } => {
                 env.events().publish(
                     (Symbol::short("fees_distributed"), Symbol::short("amount")), 
-                    (Symbol::short("treasury"), treasury)
+                    (Symbol::short("treasury"), treasury.clone())
                 );
             }
             ProtocolEvent::TreasuryUpdated { old_address, new_address } => {
