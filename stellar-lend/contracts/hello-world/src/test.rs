@@ -1346,3 +1346,296 @@ fn test_risk_management_integration() {
         assert!(collateral < 10000); // Should be reduced by debt + incentive
     });
 }
+
+// --- Reserve Management & Protocol Revenue Tests ---
+
+#[test]
+fn test_reserve_management_initialization() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Check that reserve data is initialized with defaults
+        let (total_collected, total_distributed, current_reserves, treasury, last_dist, freq) = 
+            Contract::get_reserve_data(env.clone());
+        
+        assert_eq!(total_collected, 0);
+        assert_eq!(total_distributed, 0);
+        assert_eq!(current_reserves, 0);
+        assert_eq!(treasury, admin.to_string());
+        assert_eq!(last_dist, 0);
+        assert_eq!(freq, 86400); // 24 hours
+        
+        // Check revenue metrics
+        let (daily, weekly, monthly, total_borrow, total_supply) = 
+            Contract::get_revenue_metrics(env.clone());
+        
+        assert_eq!(daily, 0);
+        assert_eq!(weekly, 0);
+        assert_eq!(monthly, 0);
+        assert_eq!(total_borrow, 0);
+        assert_eq!(total_supply, 0);
+    });
+}
+
+#[test]
+fn test_treasury_management() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    let new_treasury = TestUtils::create_user_address(&env, 1);
+    let non_admin = TestUtils::create_user_address(&env, 2);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Test admin can set treasury address
+        let result = Contract::set_treasury_address(env.clone(), admin.to_string(), new_treasury.to_string());
+        assert!(result.is_ok());
+        
+        // Test non-admin cannot set treasury address
+        let result = Contract::set_treasury_address(env.clone(), non_admin.to_string(), admin.to_string());
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ProtocolError::NotAdmin);
+        
+        // Verify treasury was updated
+        let (_, _, _, treasury, _, _) = Contract::get_reserve_data(env.clone());
+        assert_eq!(treasury, new_treasury.to_string());
+    });
+}
+
+#[test]
+fn test_protocol_fee_collection() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    let non_admin = TestUtils::create_user_address(&env, 1);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Test admin can collect fees
+        let result = Contract::collect_protocol_fees(env.clone(), admin.to_string(), 1000, String::from_str(&env, "borrow"));
+        assert!(result.is_ok());
+        
+        // Test non-admin cannot collect fees
+        let result = Contract::collect_protocol_fees(env.clone(), non_admin.to_string(), 500, String::from_str(&env, "supply"));
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ProtocolError::NotAdmin);
+        
+        // Test invalid amount
+        let result = Contract::collect_protocol_fees(env.clone(), admin.to_string(), 0, String::from_str(&env, "borrow"));
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ProtocolError::InvalidAmount);
+        
+        // Verify fees were collected
+        let (total_collected, _, current_reserves, _, _, _) = Contract::get_reserve_data(env.clone());
+        assert_eq!(total_collected, 1000);
+        assert_eq!(current_reserves, 1000);
+        
+        // Verify revenue metrics were updated
+        let (_, _, _, total_borrow, total_supply) = Contract::get_revenue_metrics(env.clone());
+        assert_eq!(total_borrow, 1000);
+        assert_eq!(total_supply, 0);
+    });
+}
+
+#[test]
+fn test_fee_distribution() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    let treasury = TestUtils::create_user_address(&env, 1);
+    let non_admin = TestUtils::create_user_address(&env, 2);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Set treasury address
+        Contract::set_treasury_address(env.clone(), admin.to_string(), treasury.to_string()).unwrap();
+        
+        // Collect some fees first
+        Contract::collect_protocol_fees(env.clone(), admin.to_string(), 2000, String::from_str(&env, "borrow")).unwrap();
+        
+        // Test admin can distribute fees
+        let result = Contract::distribute_fees_to_treasury(env.clone(), admin.to_string(), 1000);
+        assert!(result.is_ok());
+        
+        // Test non-admin cannot distribute fees
+        let result = Contract::distribute_fees_to_treasury(env.clone(), non_admin.to_string(), 500);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ProtocolError::NotAdmin);
+        
+        // Test cannot distribute more than available
+        let result = Contract::distribute_fees_to_treasury(env.clone(), admin.to_string(), 2000);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ProtocolError::InsufficientCollateral);
+        
+        // Verify distribution worked
+        let (total_collected, total_distributed, current_reserves, _, last_dist, _) = Contract::get_reserve_data(env.clone());
+        assert_eq!(total_collected, 2000);
+        assert_eq!(total_distributed, 1000);
+        assert_eq!(current_reserves, 1000);
+        assert!(last_dist > 0);
+    });
+}
+
+#[test]
+fn test_emergency_withdrawal() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    let non_admin = TestUtils::create_user_address(&env, 1);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Collect some fees first
+        Contract::collect_protocol_fees(env.clone(), admin.to_string(), 1500, String::from_str(&env, "supply")).unwrap();
+        
+        // Test admin can emergency withdraw
+        let result = Contract::emergency_withdraw_fees(env.clone(), admin.to_string(), 800);
+        assert!(result.is_ok());
+        
+        // Test non-admin cannot emergency withdraw
+        let result = Contract::emergency_withdraw_fees(env.clone(), non_admin.to_string(), 500);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ProtocolError::NotAdmin);
+        
+        // Test cannot withdraw more than available
+        let result = Contract::emergency_withdraw_fees(env.clone(), admin.to_string(), 1000);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ProtocolError::InsufficientCollateral);
+        
+        // Verify withdrawal worked
+        let (total_collected, total_distributed, current_reserves, _, _, _) = Contract::get_reserve_data(env.clone());
+        assert_eq!(total_collected, 1500);
+        assert_eq!(total_distributed, 0); // Emergency withdrawal doesn't count as distribution
+        assert_eq!(current_reserves, 700); // 1500 - 800
+    });
+}
+
+#[test]
+fn test_fee_integration_with_interest() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    let user = TestUtils::create_user_address(&env, 1);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Set oracle address
+        let oracle = TestUtils::create_oracle_address(&env);
+        Contract::set_oracle(env.clone(), admin.to_string(), oracle.to_string()).unwrap();
+        
+        // Set a higher reserve factor to make fees more visible
+        Contract::set_reserve_factor(env.clone(), admin.to_string(), 20000000).unwrap(); // 20%
+        
+        // Create position and accrue interest
+        Contract::deposit_collateral(env.clone(), user.to_string(), 10000).unwrap();
+        Contract::borrow(env.clone(), user.to_string(), 5000).unwrap();
+        
+        // Manually accrue interest to generate fees
+        Contract::accrue_interest(env.clone()).unwrap();
+        
+        // Check that fees were collected during operations
+        let (total_collected, _, current_reserves, _, _, _) = Contract::get_reserve_data(env.clone());
+        assert!(total_collected > 0);
+        assert!(current_reserves > 0);
+        
+        // Check revenue metrics
+        let (_, _, _, total_borrow, total_supply) = Contract::get_revenue_metrics(env.clone());
+        assert!(total_borrow > 0 || total_supply > 0);
+    });
+}
+
+#[test]
+fn test_distribution_frequency_setting() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    let non_admin = TestUtils::create_user_address(&env, 1);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Test admin can set distribution frequency
+        let result = Contract::set_distribution_frequency(env.clone(), admin.to_string(), 3600); // 1 hour
+        assert!(result.is_ok());
+        
+        // Test non-admin cannot set distribution frequency
+        let result = Contract::set_distribution_frequency(env.clone(), non_admin.to_string(), 7200);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ProtocolError::NotAdmin);
+        
+        // Verify frequency was updated
+        let (_, _, _, _, _, freq) = Contract::get_reserve_data(env.clone());
+        assert_eq!(freq, 3600);
+    });
+}
+
+#[test]
+fn test_reserve_management_integration() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    let treasury = TestUtils::create_user_address(&env, 1);
+    let user = TestUtils::create_user_address(&env, 2);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Set oracle address
+        let oracle = TestUtils::create_oracle_address(&env);
+        Contract::set_oracle(env.clone(), admin.to_string(), oracle.to_string()).unwrap();
+        
+        // Set treasury address
+        Contract::set_treasury_address(env.clone(), admin.to_string(), treasury.to_string()).unwrap();
+        
+        // Set higher reserve factor for testing
+        Contract::set_reserve_factor(env.clone(), admin.to_string(), 15000000).unwrap(); // 15%
+        
+        // Create position and generate fees
+        Contract::deposit_collateral(env.clone(), user.to_string(), 10000).unwrap();
+        Contract::borrow(env.clone(), user.to_string(), 6000).unwrap();
+        
+        // Accrue interest to generate fees
+        Contract::accrue_interest(env.clone()).unwrap();
+        
+        // Check initial reserve state
+        let (total_collected, total_distributed, current_reserves, _, _, _) = Contract::get_reserve_data(env.clone());
+        assert!(total_collected > 0);
+        assert_eq!(total_distributed, 0);
+        assert_eq!(current_reserves, total_collected);
+        
+        // Distribute some fees to treasury
+        Contract::distribute_fees_to_treasury(env.clone(), admin.to_string(), total_collected / 2).unwrap();
+        
+        // Verify distribution
+        let (new_total_collected, new_total_distributed, new_current_reserves, _, _, _) = Contract::get_reserve_data(env.clone());
+        assert_eq!(new_total_collected, total_collected);
+        assert_eq!(new_total_distributed, total_collected / 2);
+        assert_eq!(new_current_reserves, total_collected / 2);
+        
+        // Test emergency withdrawal
+        Contract::emergency_withdraw_fees(env.clone(), admin.to_string(), new_current_reserves / 2).unwrap();
+        
+        // Verify final state
+        let (final_total_collected, final_total_distributed, final_current_reserves, _, _, _) = Contract::get_reserve_data(env.clone());
+        assert_eq!(final_total_collected, total_collected);
+        assert_eq!(final_total_distributed, total_collected / 2);
+        assert_eq!(final_current_reserves, total_collected / 4);
+    });
+}
