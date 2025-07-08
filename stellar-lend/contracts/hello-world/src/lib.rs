@@ -339,12 +339,12 @@ impl ReserveStorage {
 pub struct ActivityStorage;
 
 impl ActivityStorage {
-    fn user_activity_key(user: &Address) -> Symbol { 
+    fn user_activity_key(env: &Env, user: &Address) -> Symbol { 
         let user_str = user.to_string();
         if user_str.len() <= 10 {
             Symbol::short(&user_str)
         } else {
-            Symbol::new(&user_str[..10])
+            Symbol::new(env, &user_str[..10])
         }
     }
     
