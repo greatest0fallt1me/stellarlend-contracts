@@ -357,20 +357,22 @@ pub struct AssetStorage;
 impl AssetStorage {
     fn registry_key() -> Symbol { Symbol::short("asset_reg") }
     fn asset_info_key(asset: &str) -> Symbol { 
-        let key = if asset.len() <= 5 { 
-            String::from_str(&Env::default(), &("asset_".to_string() + asset))
-        } else {
-            String::from_str(&Env::default(), &("asset_".to_string() + &asset[..5]))
-        };
-        Symbol::short(&key)
+        match asset {
+            "XLM" => Symbol::short("asset_xlm"),
+            "USDC" => Symbol::short("asset_usdc"),
+            "BTC" => Symbol::short("asset_btc"),
+            "ETH" => Symbol::short("asset_eth"),
+            _ => Symbol::short("asset_def"),
+        }
     }
     fn position_key(user: &Address, asset: &str) -> Symbol { 
-        let key = if asset.len() <= 5 { 
-            String::from_str(&Env::default(), &("pos_".to_string() + asset))
-        } else {
-            String::from_str(&Env::default(), &("pos_".to_string() + &asset[..5]))
-        };
-        Symbol::short(&key)
+        match asset {
+            "XLM" => Symbol::short("pos_xlm"),
+            "USDC" => Symbol::short("pos_usdc"),
+            "BTC" => Symbol::short("pos_btc"),
+            "ETH" => Symbol::short("pos_eth"),
+            _ => Symbol::short("pos_def"),
+        }
     }
     
     pub fn save_registry(env: &Env, registry: &AssetRegistry) {
