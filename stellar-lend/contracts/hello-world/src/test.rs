@@ -29,7 +29,7 @@ impl TestUtils {
         match user_id {
             0 => Self::create_test_address(env, "GCXOTMMXRS24MYZI5FJPUCOEOFNWSR4XX7UXIK3NDGGE6A5QMJ5FF2FS"),
             1 => Self::create_test_address(env, "GAUA7XL5K54CC2DDGP77FJ2YBHRJLT36CPZDXWPM6MP7MANOGG77PNJU"),
-            2 => Self::create_test_address(env, "GBXOTMMXRS24MYZI5FJPUCOEOFNWSR4XX7UXIK3NDGGE6A5QMJ5FF2FS"),
+            2 => Self::create_test_address(env, "GCUA7XL5K54CC2DDGP77FJ2YBHRJLT36CPZDXWPM6MP7MANOGG77PNJU"),
             _ => Self::create_test_address(env, "GCUA7XL5K54CC2DDGP77FJ2YBHRJLT36CPZDXWPM6MP7MANOGG77PNJU"),
         }
     }
@@ -1061,5 +1061,288 @@ fn test_interest_rate_edge_cases() {
         
         let (borrow_rate, _) = Contract::get_current_rates(env.clone()).unwrap();
         assert_eq!(borrow_rate, 1000000); // Should be floored at 1%
+    });
+}
+
+// --- Risk Management & Liquidation Enhancement Tests ---
+
+#[test]
+fn test_risk_config_initialization() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Check that risk config is initialized with defaults
+        let (close_factor, liquidation_incentive, pause_borrow, pause_deposit, pause_withdraw, pause_liquidate, _) = 
+            Contract::get_risk_config(env.clone());
+        
+        assert_eq!(close_factor, 50000000);        // 50%
+        assert_eq!(liquidation_incentive, 10000000); // 10%
+        assert_eq!(pause_borrow, false);
+        assert_eq!(pause_deposit, false);
+        assert_eq!(pause_withdraw, false);
+        assert_eq!(pause_liquidate, false);
+    });
+}
+
+#[test]
+fn test_risk_params_admin_functions() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    let non_admin = TestUtils::create_user_address(&env, 1);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Test admin can set risk parameters
+        let result = Contract::set_risk_params(env.clone(), admin.to_string(), 60000000, 15000000); // 60%, 15%
+        assert!(result.is_ok());
+        
+        // Test non-admin cannot set risk parameters
+        let result = Contract::set_risk_params(env.clone(), non_admin.to_string(), 70000000, 20000000);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ProtocolError::NotAdmin);
+        
+        // Verify config was updated
+        let (close_factor, liquidation_incentive, _, _, _, _, _) = Contract::get_risk_config(env.clone());
+        assert_eq!(close_factor, 60000000);
+        assert_eq!(liquidation_incentive, 15000000);
+    });
+}
+
+#[test]
+fn test_pause_switches_admin_functions() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    let non_admin = TestUtils::create_user_address(&env, 1);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Test admin can set pause switches
+        let result = Contract::set_pause_switches(env.clone(), admin.to_string(), true, false, true, false);
+        assert!(result.is_ok());
+        
+        // Test non-admin cannot set pause switches
+        let result = Contract::set_pause_switches(env.clone(), non_admin.to_string(), false, true, false, true);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ProtocolError::NotAdmin);
+        
+        // Verify config was updated
+        let (_, _, pause_borrow, pause_deposit, pause_withdraw, pause_liquidate, _) = Contract::get_risk_config(env.clone());
+        assert_eq!(pause_borrow, true);
+        assert_eq!(pause_deposit, false);
+        assert_eq!(pause_withdraw, true);
+        assert_eq!(pause_liquidate, false);
+    });
+}
+
+#[test]
+fn test_pause_switches_enforcement() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    let user = TestUtils::create_user_address(&env, 1);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Set oracle address
+        let oracle = TestUtils::create_oracle_address(&env);
+        Contract::set_oracle(env.clone(), admin.to_string(), oracle.to_string()).unwrap();
+        
+        // Pause borrow
+        Contract::set_pause_switches(env.clone(), admin.to_string(), true, false, false, false).unwrap();
+        
+        // Try to borrow (should fail)
+        Contract::deposit_collateral(env.clone(), user.to_string(), 10000).unwrap();
+        let result = Contract::borrow(env.clone(), user.to_string(), 5000);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ProtocolError::ProtocolPaused);
+        
+        // Unpause borrow and pause deposit
+        Contract::set_pause_switches(env.clone(), admin.to_string(), false, true, false, false).unwrap();
+        
+        // Try to deposit (should fail)
+        let result = Contract::deposit_collateral(env.clone(), user.to_string(), 5000);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ProtocolError::ProtocolPaused);
+        
+        // Pause withdraw
+        Contract::set_pause_switches(env.clone(), admin.to_string(), false, false, true, false).unwrap();
+        
+        // Try to withdraw (should fail)
+        let result = Contract::withdraw(env.clone(), user.to_string(), 1000);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ProtocolError::ProtocolPaused);
+    });
+}
+
+#[test]
+fn test_enhanced_liquidation_with_close_factor() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    let user = TestUtils::create_user_address(&env, 1);
+    let liquidator = TestUtils::create_user_address(&env, 2);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Set oracle address
+        let oracle = TestUtils::create_oracle_address(&env);
+        Contract::set_oracle(env.clone(), admin.to_string(), oracle.to_string()).unwrap();
+        
+        // Set close factor to 30%
+        Contract::set_risk_params(env.clone(), admin.to_string(), 30000000, 10000000).unwrap();
+        
+        // Create undercollateralized position by setting a higher minimum ratio
+        Contract::set_min_collateral_ratio(env.clone(), admin.to_string(), 200).unwrap(); // 200%
+        
+        // Create position that will be undercollateralized
+        Contract::deposit_collateral(env.clone(), user.to_string(), 1000).unwrap();
+        Contract::borrow(env.clone(), user.to_string(), 800).unwrap();
+        
+        // Try to liquidate more than close factor allows (should be limited)
+        let result = Contract::liquidate(env.clone(), liquidator.to_string(), user.to_string(), 500);
+        assert!(result.is_ok());
+        
+        // Check position - should only have 30% of debt liquidated
+        let (collateral, debt, _) = Contract::get_position(env.clone(), user.to_string()).unwrap();
+        assert_eq!(debt, 560); // 800 - (800 * 0.3) = 800 - 240 = 560
+    });
+}
+
+#[test]
+fn test_enhanced_liquidation_with_incentive() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    let user = TestUtils::create_user_address(&env, 1);
+    let liquidator = TestUtils::create_user_address(&env, 2);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Set oracle address
+        let oracle = TestUtils::create_oracle_address(&env);
+        Contract::set_oracle(env.clone(), admin.to_string(), oracle.to_string()).unwrap();
+        
+        // Set liquidation incentive to 20%
+        Contract::set_risk_params(env.clone(), admin.to_string(), 50000000, 20000000).unwrap();
+        
+        // Create undercollateralized position by setting a higher minimum ratio
+        Contract::set_min_collateral_ratio(env.clone(), admin.to_string(), 200).unwrap(); // 200%
+        
+        // Create position that will be undercollateralized
+        Contract::deposit_collateral(env.clone(), user.to_string(), 1000).unwrap();
+        Contract::borrow(env.clone(), user.to_string(), 800).unwrap();
+        
+        // Record initial collateral
+        let (initial_collateral, _, _) = Contract::get_position(env.clone(), user.to_string()).unwrap();
+        
+        // Liquidate
+        let result = Contract::liquidate(env.clone(), liquidator.to_string(), user.to_string(), 400);
+        assert!(result.is_ok());
+        
+        // Check position - should have lost debt + incentive
+        let (collateral, debt, _) = Contract::get_position(env.clone(), user.to_string()).unwrap();
+        assert_eq!(debt, 400); // 800 - 400 = 400
+        
+        // Collateral should be reduced by debt + incentive
+        let expected_collateral_loss = 400 + (400 * 20000000 / 100_000_000); // debt + 20% incentive
+        assert_eq!(collateral, initial_collateral - expected_collateral_loss);
+    });
+}
+
+#[test]
+fn test_liquidation_pause_enforcement() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    let user = TestUtils::create_user_address(&env, 1);
+    let liquidator = TestUtils::create_user_address(&env, 2);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Set oracle address
+        let oracle = TestUtils::create_oracle_address(&env);
+        Contract::set_oracle(env.clone(), admin.to_string(), oracle.to_string()).unwrap();
+        
+        // Create undercollateralized position by setting a higher minimum ratio
+        Contract::set_min_collateral_ratio(env.clone(), admin.to_string(), 200).unwrap(); // 200%
+        
+        // Create position that will be undercollateralized
+        Contract::deposit_collateral(env.clone(), user.to_string(), 1000).unwrap();
+        Contract::borrow(env.clone(), user.to_string(), 800).unwrap();
+        
+        // Pause liquidation
+        Contract::set_pause_switches(env.clone(), admin.to_string(), false, false, false, true).unwrap();
+        
+        // Try to liquidate (should fail)
+        let result = Contract::liquidate(env.clone(), liquidator.to_string(), user.to_string(), 400);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ProtocolError::ProtocolPaused);
+    });
+}
+
+#[test]
+fn test_risk_management_integration() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    let user = TestUtils::create_user_address(&env, 1);
+    let liquidator = TestUtils::create_user_address(&env, 2);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Set oracle address
+        let oracle = TestUtils::create_oracle_address(&env);
+        Contract::set_oracle(env.clone(), admin.to_string(), oracle.to_string()).unwrap();
+        
+        // Configure risk parameters
+        Contract::set_risk_params(env.clone(), admin.to_string(), 40000000, 12000000).unwrap(); // 40%, 12%
+        
+        // Create position and test full risk management flow
+        Contract::deposit_collateral(env.clone(), user.to_string(), 10000).unwrap();
+        Contract::borrow(env.clone(), user.to_string(), 8000).unwrap();
+        
+        // Pause borrow
+        Contract::set_pause_switches(env.clone(), admin.to_string(), true, false, false, false).unwrap();
+        
+        // Try to borrow more (should fail)
+        let result = Contract::borrow(env.clone(), user.to_string(), 1000);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ProtocolError::ProtocolPaused);
+        
+        // Unpause and test liquidation
+        Contract::set_pause_switches(env.clone(), admin.to_string(), false, false, false, false).unwrap();
+        
+        // Create undercollateralized position for liquidation test
+        Contract::set_min_collateral_ratio(env.clone(), admin.to_string(), 200).unwrap(); // 200%
+        
+        // Liquidate with close factor and incentive
+        let result = Contract::liquidate(env.clone(), liquidator.to_string(), user.to_string(), 2000);
+        assert!(result.is_ok());
+        
+        // Verify liquidation worked with risk parameters
+        let (collateral, debt, _) = Contract::get_position(env.clone(), user.to_string()).unwrap();
+        assert!(debt < 8000); // Should be reduced
+        assert!(collateral < 10000); // Should be reduced by debt + incentive
     });
 }
