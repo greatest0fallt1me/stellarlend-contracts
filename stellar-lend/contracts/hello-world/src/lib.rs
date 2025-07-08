@@ -160,6 +160,89 @@ impl RiskConfigStorage {
     }
 }
 
+/// Reserve management data structure
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct ReserveData {
+    /// Total fees collected by the protocol
+    pub total_fees_collected: i128,
+    /// Total fees distributed to treasury
+    pub total_fees_distributed: i128,
+    /// Current reserves held by the protocol
+    pub current_reserves: i128,
+    /// Treasury address for fee distribution
+    pub treasury_address: Address,
+    /// Last time fees were distributed
+    pub last_distribution_time: u64,
+    /// Frequency of fee distribution (in seconds)
+    pub distribution_frequency: u64,
+}
+
+impl ReserveData {
+    pub fn default() -> Self {
+        Self {
+            total_fees_collected: 0,
+            total_fees_distributed: 0,
+            current_reserves: 0,
+            treasury_address: Address::random(&Env::default()), // Placeholder
+            last_distribution_time: 0,
+            distribution_frequency: 86400, // 24 hours
+        }
+    }
+}
+
+/// Revenue metrics for analytics
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct RevenueMetrics {
+    /// Daily fees collected
+    pub daily_fees: i128,
+    /// Weekly fees collected
+    pub weekly_fees: i128,
+    /// Monthly fees collected
+    pub monthly_fees: i128,
+    /// Total borrow fees collected
+    pub total_borrow_fees: i128,
+    /// Total supply fees collected
+    pub total_supply_fees: i128,
+}
+
+impl RevenueMetrics {
+    pub fn default() -> Self {
+        Self {
+            daily_fees: 0,
+            weekly_fees: 0,
+            monthly_fees: 0,
+            total_borrow_fees: 0,
+            total_supply_fees: 0,
+        }
+    }
+}
+
+/// Storage helper for reserve management
+pub struct ReserveStorage;
+
+impl ReserveStorage {
+    fn reserve_key() -> Symbol { Symbol::short("reserve_data") }
+    fn metrics_key() -> Symbol { Symbol::short("revenue_metrics") }
+    
+    pub fn save_reserve_data(env: &Env, data: &ReserveData) {
+        env.storage().instance().set(&Self::reserve_key(), data);
+    }
+    
+    pub fn get_reserve_data(env: &Env) -> ReserveData {
+        env.storage().instance().get(&Self::reserve_key()).unwrap_or_else(ReserveData::default)
+    }
+    
+    pub fn save_revenue_metrics(env: &Env, metrics: &RevenueMetrics) {
+        env.storage().instance().set(&Self::metrics_key(), metrics);
+    }
+    
+    pub fn get_revenue_metrics(env: &Env) -> RevenueMetrics {
+        env.storage().instance().get(&Self::metrics_key()).unwrap_or_else(RevenueMetrics::default)
+    }
+}
+
 /// Interest rate management helper
 pub struct InterestRateManager;
 
@@ -250,6 +333,25 @@ impl InterestRateManager {
             position.last_accrual_time = current_time;
         }
     }
+
+    /// Calculate and collect protocol fees from interest
+    pub fn collect_fees_from_interest(
+        env: &Env,
+        borrow_interest: i128,
+        supply_interest: i128,
+        reserve_factor: i128,
+    ) -> (i128, i128) {
+        // Calculate protocol fees (reserve factor is already applied in supply rate calculation)
+        // For borrow interest: protocol fee = borrow_interest * reserve_factor
+        let borrow_fee = (borrow_interest * reserve_factor) / 100_000_000;
+        
+        // For supply interest: the difference between what user should get vs what they get
+        // Supply rate already accounts for reserve factor, so we calculate the fee from the difference
+        let total_supply_interest_without_fee = (supply_interest * 100_000_000) / (100_000_000 - reserve_factor);
+        let supply_fee = total_supply_interest_without_fee - supply_interest;
+        
+        (borrow_fee, supply_fee)
+    }
 }
 
 /// Storage helper for interest rate configuration
@@ -337,6 +439,10 @@ pub enum ProtocolEvent {
     InterestAccrued { user: String, borrow_interest: i128, supply_interest: i128 },
     RateUpdated { borrow_rate: i128, supply_rate: i128, utilization: i128 },
     ConfigUpdated { parameter: String, old_value: i128, new_value: i128 },
+    FeesCollected { amount: i128, source: String },
+    FeesDistributed { amount: i128, treasury: String },
+    TreasuryUpdated { old_address: String, new_address: String },
+    ReserveUpdated { total_collected: i128, current_reserves: i128 },
 }
 
 impl ProtocolEvent {
@@ -374,6 +480,30 @@ impl ProtocolEvent {
                 env.events().publish(
                     (Symbol::short("config_updated"), Symbol::short("parameter")), 
                     (Symbol::short("old_value"), *old_value, Symbol::short("new_value"), *new_value)
+                );
+            }
+            ProtocolEvent::FeesCollected { amount, source } => {
+                env.events().publish(
+                    (Symbol::short("fees_collected"), Symbol::short("amount")), 
+                    (Symbol::short("source"), source)
+                );
+            }
+            ProtocolEvent::FeesDistributed { amount, treasury } => {
+                env.events().publish(
+                    (Symbol::short("fees_distributed"), Symbol::short("amount")), 
+                    (Symbol::short("treasury"), treasury)
+                );
+            }
+            ProtocolEvent::TreasuryUpdated { old_address, new_address } => {
+                env.events().publish(
+                    (Symbol::short("treasury_updated"), Symbol::short("old_address")), 
+                    (Symbol::short("new_address"), new_address)
+                );
+            }
+            ProtocolEvent::ReserveUpdated { total_collected, current_reserves } => {
+                env.events().publish(
+                    (Symbol::short("reserve_updated"), Symbol::short("total_collected")), 
+                    (Symbol::short("current_reserves"), *current_reserves)
                 );
             }
         }
@@ -666,6 +796,14 @@ impl Contract {
         let risk_config = RiskConfig::default();
         RiskConfigStorage::save(&env, &risk_config);
         
+        // Initialize reserve management system with default configuration
+        let mut reserve_data = ReserveData::default();
+        reserve_data.treasury_address = admin_addr.clone();
+        ReserveStorage::save_reserve_data(&env, &reserve_data);
+        
+        let revenue_metrics = RevenueMetrics::default();
+        ReserveStorage::save_revenue_metrics(&env, &revenue_metrics);
+        
         Ok(())
     }
 
@@ -914,6 +1052,30 @@ impl Contract {
         ir_state.total_supplied += amount;
         InterestRateStorage::save_state(&env, &ir_state);
         
+        // Collect any accrued supply interest as protocol fees
+        if position.supply_interest > 0 {
+            let config = InterestRateStorage::get_config(&env);
+            let (_, supply_fee) = InterestRateManager::collect_fees_from_interest(
+                &env, 0, position.supply_interest, config.reserve_factor
+            );
+            if supply_fee > 0 {
+                let mut reserve_data = ReserveStorage::get_reserve_data(&env);
+                reserve_data.total_fees_collected += supply_fee;
+                reserve_data.current_reserves += supply_fee;
+                ReserveStorage::save_reserve_data(&env, &reserve_data);
+                
+                // Update revenue metrics
+                let mut metrics = ReserveStorage::get_revenue_metrics(&env);
+                metrics.total_supply_fees += supply_fee;
+                ReserveStorage::save_revenue_metrics(&env, &metrics);
+                
+                ProtocolEvent::FeesCollected { 
+                    amount: supply_fee, 
+                    source: String::from_str(&env, "supply") 
+                }.emit(&env);
+            }
+        }
+        
         ProtocolEvent::Deposit { user: depositor, amount }.emit(&env);
         Ok(())
     }
@@ -960,6 +1122,30 @@ impl Contract {
         let mut ir_state = InterestRateStorage::get_state(&env);
         ir_state.total_borrowed += amount;
         InterestRateStorage::save_state(&env, &ir_state);
+        
+        // Collect any accrued borrow interest as protocol fees
+        if position.borrow_interest > 0 {
+            let config = InterestRateStorage::get_config(&env);
+            let (borrow_fee, _) = InterestRateManager::collect_fees_from_interest(
+                &env, position.borrow_interest, 0, config.reserve_factor
+            );
+            if borrow_fee > 0 {
+                let mut reserve_data = ReserveStorage::get_reserve_data(&env);
+                reserve_data.total_fees_collected += borrow_fee;
+                reserve_data.current_reserves += borrow_fee;
+                ReserveStorage::save_reserve_data(&env, &reserve_data);
+                
+                // Update revenue metrics
+                let mut metrics = ReserveStorage::get_revenue_metrics(&env);
+                metrics.total_borrow_fees += borrow_fee;
+                ReserveStorage::save_revenue_metrics(&env, &metrics);
+                
+                ProtocolEvent::FeesCollected { 
+                    amount: borrow_fee, 
+                    source: String::from_str(&env, "borrow") 
+                }.emit(&env);
+            }
+        }
         
         ProtocolEvent::Borrow { user: borrower, amount }.emit(&env);
         Ok(())
@@ -1235,6 +1421,150 @@ impl Contract {
             config.pause_liquidate,
             config.last_update,
         )
+    }
+
+    // --- Reserve Management & Protocol Revenue Functions ---
+
+    /// Set treasury address (admin only)
+    pub fn set_treasury_address(env: Env, caller: String, treasury: String) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+        
+        let treasury_addr = Address::from_string(&treasury);
+        let mut reserve_data = ReserveStorage::get_reserve_data(&env);
+        let old_address = reserve_data.treasury_address.to_string();
+        reserve_data.treasury_address = treasury_addr;
+        ReserveStorage::save_reserve_data(&env, &reserve_data);
+        
+        ProtocolEvent::TreasuryUpdated { 
+            old_address, 
+            new_address: treasury 
+        }.emit(&env);
+        
+        Ok(())
+    }
+
+    /// Collect protocol fees from interest payments
+    pub fn collect_protocol_fees(env: Env, caller: String, amount: i128, source: String) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+        
+        if amount <= 0 {
+            return Err(ProtocolError::InvalidAmount);
+        }
+        
+        let mut reserve_data = ReserveStorage::get_reserve_data(&env);
+        reserve_data.total_fees_collected += amount;
+        reserve_data.current_reserves += amount;
+        ReserveStorage::save_reserve_data(&env, &reserve_data);
+        
+        // Update revenue metrics
+        let mut metrics = ReserveStorage::get_revenue_metrics(&env);
+        if source == "borrow" {
+            metrics.total_borrow_fees += amount;
+        } else if source == "supply" {
+            metrics.total_supply_fees += amount;
+        }
+        ReserveStorage::save_revenue_metrics(&env, &metrics);
+        
+        ProtocolEvent::FeesCollected { amount, source }.emit(&env);
+        ProtocolEvent::ReserveUpdated { 
+            total_collected: reserve_data.total_fees_collected, 
+            current_reserves: reserve_data.current_reserves 
+        }.emit(&env);
+        
+        Ok(())
+    }
+
+    /// Distribute fees to treasury
+    pub fn distribute_fees_to_treasury(env: Env, caller: String, amount: i128) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+        
+        if amount <= 0 {
+            return Err(ProtocolError::InvalidAmount);
+        }
+        
+        let mut reserve_data = ReserveStorage::get_reserve_data(&env);
+        if amount > reserve_data.current_reserves {
+            return Err(ProtocolError::InsufficientCollateral);
+        }
+        
+        reserve_data.total_fees_distributed += amount;
+        reserve_data.current_reserves -= amount;
+        reserve_data.last_distribution_time = env.ledger().timestamp();
+        ReserveStorage::save_reserve_data(&env, &reserve_data);
+        
+        let treasury = reserve_data.treasury_address.to_string();
+        ProtocolEvent::FeesDistributed { amount, treasury }.emit(&env);
+        ProtocolEvent::ReserveUpdated { 
+            total_collected: reserve_data.total_fees_collected, 
+            current_reserves: reserve_data.current_reserves 
+        }.emit(&env);
+        
+        Ok(())
+    }
+
+    /// Emergency withdrawal of fees (admin only)
+    pub fn emergency_withdraw_fees(env: Env, caller: String, amount: i128) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+        
+        if amount <= 0 {
+            return Err(ProtocolError::InvalidAmount);
+        }
+        
+        let mut reserve_data = ReserveStorage::get_reserve_data(&env);
+        if amount > reserve_data.current_reserves {
+            return Err(ProtocolError::InsufficientCollateral);
+        }
+        
+        reserve_data.current_reserves -= amount;
+        ReserveStorage::save_reserve_data(&env, &reserve_data);
+        
+        ProtocolEvent::ReserveUpdated { 
+            total_collected: reserve_data.total_fees_collected, 
+            current_reserves: reserve_data.current_reserves 
+        }.emit(&env);
+        
+        Ok(())
+    }
+
+    /// Get reserve data
+    pub fn get_reserve_data(env: Env) -> (i128, i128, i128, String, u64, u64) {
+        let reserve_data = ReserveStorage::get_reserve_data(&env);
+        (
+            reserve_data.total_fees_collected,
+            reserve_data.total_fees_distributed,
+            reserve_data.current_reserves,
+            reserve_data.treasury_address.to_string(),
+            reserve_data.last_distribution_time,
+            reserve_data.distribution_frequency,
+        )
+    }
+
+    /// Get revenue metrics
+    pub fn get_revenue_metrics(env: Env) -> (i128, i128, i128, i128, i128) {
+        let metrics = ReserveStorage::get_revenue_metrics(&env);
+        (
+            metrics.daily_fees,
+            metrics.weekly_fees,
+            metrics.monthly_fees,
+            metrics.total_borrow_fees,
+            metrics.total_supply_fees,
+        )
+    }
+
+    /// Set distribution frequency (admin only)
+    pub fn set_distribution_frequency(env: Env, caller: String, frequency: u64) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+        
+        let mut reserve_data = ReserveStorage::get_reserve_data(&env);
+        reserve_data.distribution_frequency = frequency;
+        ReserveStorage::save_reserve_data(&env, &reserve_data);
+        
+        Ok(())
     }
 }
 
