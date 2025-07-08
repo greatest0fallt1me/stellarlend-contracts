@@ -357,8 +357,8 @@ pub struct AssetStorage;
 
 impl AssetStorage {
     fn registry_key() -> Symbol { Symbol::short("asset_reg") }
-    fn asset_info_key(asset: &str) -> Symbol { 
-        match asset {
+    fn asset_info_key(asset: &String) -> Symbol { 
+        match asset.as_str() {
             "XLM" => Symbol::short("asset_xlm"),
             "USDC" => Symbol::short("asset_usdc"),
             "BTC" => Symbol::short("asset_btc"),
@@ -386,12 +386,12 @@ impl AssetStorage {
         })
     }
     
-    pub fn save_asset_info(env: &Env, asset: &str, info: &AssetInfo) {
+    pub fn save_asset_info(env: &Env, asset: &String, info: &AssetInfo) {
         let key = Self::asset_info_key(asset);
         env.storage().instance().set(&key, info);
     }
     
-    pub fn get_asset_info(env: &Env, asset: &str) -> Option<AssetInfo> {
+    pub fn get_asset_info(env: &Env, asset: &String) -> Option<AssetInfo> {
         let key = Self::asset_info_key(asset);
         env.storage().instance().get(&key)
     }
