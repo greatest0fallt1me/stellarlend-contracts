@@ -116,6 +116,50 @@ impl InterestRateState {
     }
 }
 
+/// Risk management configuration
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct RiskConfig {
+    /// Max % of debt that can be repaid in a single liquidation (scaled by 1e8)
+    pub close_factor: i128,
+    /// % bonus collateral given to liquidators (scaled by 1e8)
+    pub liquidation_incentive: i128,
+    /// Pause switches for protocol actions
+    pub pause_borrow: bool,
+    pub pause_deposit: bool,
+    pub pause_withdraw: bool,
+    pub pause_liquidate: bool,
+    /// Last time config was updated
+    pub last_update: u64,
+}
+
+impl RiskConfig {
+    pub fn default() -> Self {
+        Self {
+            close_factor: 50000000, // 50%
+            liquidation_incentive: 10000000, // 10%
+            pause_borrow: false,
+            pause_deposit: false,
+            pause_withdraw: false,
+            pause_liquidate: false,
+            last_update: 0,
+        }
+    }
+}
+
+/// Storage helper for risk config
+pub struct RiskConfigStorage;
+
+impl RiskConfigStorage {
+    fn key() -> Symbol { Symbol::short("risk_cfg") }
+    pub fn save(env: &Env, config: &RiskConfig) {
+        env.storage().instance().set(&Self::key(), config);
+    }
+    pub fn get(env: &Env) -> RiskConfig {
+        env.storage().instance().get(&Self::key()).unwrap_or_else(RiskConfig::default)
+    }
+}
+
 /// Interest rate management helper
 pub struct InterestRateManager;
 
@@ -568,7 +612,8 @@ pub enum ProtocolError {
     OracleNotSet = 9,
     AdminNotSet = 10,
     NotEligibleForLiquidation = 11,
-    Unknown = 12,
+    ProtocolPaused = 12,
+    Unknown = 13,
 }
 
 impl ProtocolError {
@@ -585,6 +630,7 @@ impl ProtocolError {
             ProtocolError::OracleNotSet => "OracleNotSet",
             ProtocolError::AdminNotSet => "AdminNotSet",
             ProtocolError::NotEligibleForLiquidation => "NotEligibleForLiquidation",
+            ProtocolError::ProtocolPaused => "ProtocolPaused",
             ProtocolError::Unknown => "Unknown",
         }
     }
@@ -615,6 +661,10 @@ impl Contract {
         
         let state = InterestRateState::initial();
         InterestRateStorage::save_state(&env, &state);
+        
+        // Initialize risk management system with default configuration
+        let risk_config = RiskConfig::default();
+        RiskConfigStorage::save(&env, &risk_config);
         
         Ok(())
     }
@@ -837,6 +887,12 @@ impl Contract {
         if amount <= 0 {
             return Err(ProtocolError::InvalidAmount);
         }
+        
+        // Check if deposit is paused
+        let risk_config = RiskConfigStorage::get(&env);
+        if risk_config.pause_deposit {
+            return Err(ProtocolError::ProtocolPaused);
+        }
         let depositor_addr = Address::from_string(&depositor);
         let mut position = StateHelper::get_position(&env, &depositor_addr)
             .unwrap_or(Position::new(depositor_addr.clone(), 0, 0));
@@ -869,6 +925,12 @@ impl Contract {
         }
         if amount <= 0 {
             return Err(ProtocolError::InvalidAmount);
+        }
+        
+        // Check if borrow is paused
+        let risk_config = RiskConfigStorage::get(&env);
+        if risk_config.pause_borrow {
+            return Err(ProtocolError::ProtocolPaused);
         }
         let borrower_addr = Address::from_string(&borrower);
         let mut position = StateHelper::get_position(&env, &borrower_addr)
@@ -911,6 +973,9 @@ impl Contract {
         if amount <= 0 {
             return Err(ProtocolError::InvalidAmount);
         }
+        
+        // Note: Repay is typically not paused as it's beneficial for the protocol
+        // But we can add pause check here if needed in the future
         let repayer_addr = Address::from_string(&repayer);
         let mut position = StateHelper::get_position(&env, &repayer_addr)
             .unwrap_or(Position::new(repayer_addr.clone(), 0, 0));
@@ -944,6 +1009,12 @@ impl Contract {
         }
         if amount <= 0 {
             return Err(ProtocolError::InvalidAmount);
+        }
+        
+        // Check if withdraw is paused
+        let risk_config = RiskConfigStorage::get(&env);
+        if risk_config.pause_withdraw {
+            return Err(ProtocolError::ProtocolPaused);
         }
         let withdrawer_addr = Address::from_string(&withdrawer);
         let mut position = StateHelper::get_position(&env, &withdrawer_addr)
@@ -988,21 +1059,59 @@ impl Contract {
         if amount <= 0 {
             return Err(ProtocolError::InvalidAmount);
         }
+        
+        // Check if liquidation is paused
+        let risk_config = RiskConfigStorage::get(&env);
+        if risk_config.pause_liquidate {
+            return Err(ProtocolError::ProtocolPaused);
+        }
+        
         let target_addr = Address::from_string(&target);
         let mut position = match StateHelper::get_position(&env, &target_addr) {
             Some(pos) => pos,
             None => return Err(ProtocolError::PositionNotFound),
         };
+        
+        // Accrue interest before liquidation
+        let state = InterestRateStorage::update_state(&env);
+        InterestRateManager::accrue_interest_for_position(
+            &env,
+            &mut position,
+            state.current_borrow_rate,
+            state.current_supply_rate,
+        );
+        
         let min_ratio = ProtocolConfig::get_min_collateral_ratio(&env);
         let ratio = StateHelper::dynamic_collateral_ratio::<RealPriceOracle>(&env, &position);
         if ratio >= min_ratio {
             return Err(ProtocolError::NotEligibleForLiquidation);
         }
-        let repay_amount = amount.min(position.debt);
+        
+        // Apply close factor to limit liquidation amount
+        let max_repay_amount = (position.debt * risk_config.close_factor) / 100_000_000;
+        let repay_amount = amount.min(position.debt).min(max_repay_amount);
+        
+        if repay_amount == 0 {
+            return Err(ProtocolError::InvalidAmount);
+        }
+        
+        // Calculate liquidation incentive
+        let incentive_amount = (repay_amount * risk_config.liquidation_incentive) / 100_000_000;
+        let total_collateral_seized = repay_amount + incentive_amount;
+        
+        // Ensure we don't seize more collateral than available
+        let actual_collateral_seized = total_collateral_seized.min(position.collateral);
+        
+        // Update position
         position.debt -= repay_amount;
-        let penalty = (position.collateral * 10) / 100;
-        position.collateral = position.collateral.saturating_sub(penalty);
+        position.collateral -= actual_collateral_seized;
         StateHelper::save_position(&env, &position);
+        
+        // Update total borrowed amount
+        let mut ir_state = InterestRateStorage::get_state(&env);
+        ir_state.total_borrowed -= repay_amount;
+        InterestRateStorage::save_state(&env, &ir_state);
+        
         ProtocolEvent::Liquidate { user: target, amount: repay_amount }.emit(&env);
         Ok(())
     }
@@ -1075,6 +1184,58 @@ impl Contract {
     /// ```
 
     pub fn event_indexer_example_doc() -> Result<(), ProtocolError> { Ok(()) }
+
+    /// Set risk parameters (admin only)
+    pub fn set_risk_params(
+        env: Env,
+        caller: String,
+        close_factor: i128,
+        liquidation_incentive: i128,
+    ) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+        let mut config = RiskConfigStorage::get(&env);
+        config.close_factor = close_factor;
+        config.liquidation_incentive = liquidation_incentive;
+        config.last_update = env.ledger().timestamp();
+        RiskConfigStorage::save(&env, &config);
+        Ok(())
+    }
+
+    /// Set protocol pause switches (admin only)
+    pub fn set_pause_switches(
+        env: Env,
+        caller: String,
+        pause_borrow: bool,
+        pause_deposit: bool,
+        pause_withdraw: bool,
+        pause_liquidate: bool,
+    ) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+        let mut config = RiskConfigStorage::get(&env);
+        config.pause_borrow = pause_borrow;
+        config.pause_deposit = pause_deposit;
+        config.pause_withdraw = pause_withdraw;
+        config.pause_liquidate = pause_liquidate;
+        config.last_update = env.ledger().timestamp();
+        RiskConfigStorage::save(&env, &config);
+        Ok(())
+    }
+
+    /// Get risk config
+    pub fn get_risk_config(env: Env) -> (i128, i128, bool, bool, bool, bool, u64) {
+        let config = RiskConfigStorage::get(&env);
+        (
+            config.close_factor,
+            config.liquidation_incentive,
+            config.pause_borrow,
+            config.pause_deposit,
+            config.pause_withdraw,
+            config.pause_liquidate,
+            config.last_update,
+        )
+    }
 }
 
 mod test;
