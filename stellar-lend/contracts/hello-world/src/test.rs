@@ -29,7 +29,7 @@ impl TestUtils {
         match user_id {
             0 => Self::create_test_address(env, "GCXOTMMXRS24MYZI5FJPUCOEOFNWSR4XX7UXIK3NDGGE6A5QMJ5FF2FS"),
             1 => Self::create_test_address(env, "GAUA7XL5K54CC2DDGP77FJ2YBHRJLT36CPZDXWPM6MP7MANOGG77PNJU"),
-            2 => Self::create_test_address(env, "GBXOTMMXRS24MYZI5FJPUCOEOFNWSR4XX7UXIK3NDGGE6A5QMJ5FF2FS"),
+            2 => Self::create_test_address(env, "GCUA7XL5K54CC2DDGP77FJ2YBHRJLT36CPZDXWPM6MP7MANOGG77PNJU"),
             _ => Self::create_test_address(env, "GCUA7XL5K54CC2DDGP77FJ2YBHRJLT36CPZDXWPM6MP7MANOGG77PNJU"),
         }
     }
@@ -1332,6 +1332,9 @@ fn test_risk_management_integration() {
         
         // Unpause and test liquidation
         Contract::set_pause_switches(env.clone(), admin.to_string(), false, false, false, false).unwrap();
+        
+        // Create undercollateralized position for liquidation test
+        Contract::set_min_collateral_ratio(env.clone(), admin.to_string(), 200).unwrap(); // 200%
         
         // Liquidate with close factor and incentive
         let result = Contract::liquidate(env.clone(), liquidator.to_string(), user.to_string(), 2000);
