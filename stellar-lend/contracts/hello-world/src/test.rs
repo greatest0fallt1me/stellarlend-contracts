@@ -2467,3 +2467,41 @@ fn test_account_freeze_unauthorized() {
         assert!(result.is_err());
     });
 }
+
+#[test]
+fn test_multi_admin_support() {
+    let e = Env::default();
+    let admin1 = Address::generate(&e);
+    let admin2 = Address::generate(&e);
+    let user = Address::generate(&e);
+    // Initialize with admin1
+    initialize(&e, admin1.clone());
+    // admin1 is admin
+    assert!(is_address_admin(e.clone(), admin1.clone()));
+    // Add admin2
+    assert!(add_admin(e.clone(), admin1.clone(), admin2.clone()).is_ok());
+    assert!(is_address_admin(e.clone(), admin2.clone()));
+    // admin2 can add another admin
+    let admin3 = Address::generate(&e);
+    assert!(add_admin(e.clone(), admin2.clone(), admin3.clone()).is_ok());
+    assert!(is_address_admin(e.clone(), admin3.clone()));
+    // Remove admin2
+    assert!(remove_admin(e.clone(), admin1.clone(), admin2.clone()).is_ok());
+    assert!(!is_address_admin(e.clone(), admin2.clone()));
+    // Cannot remove last admin
+    assert!(remove_admin(e.clone(), admin1.clone(), admin1.clone()).is_err());
+    // Transfer admin1 to user
+    assert!(transfer_admin(e.clone(), admin1.clone(), user.clone()).is_ok());
+    assert!(!is_address_admin(e.clone(), admin1.clone()));
+    assert!(is_address_admin(e.clone(), user.clone()));
+    // Unauthorized add
+    let not_admin = Address::generate(&e);
+    assert!(add_admin(e.clone(), not_admin.clone(), admin1.clone()).is_err());
+    // Unauthorized remove
+    assert!(remove_admin(e.clone(), not_admin.clone(), user.clone()).is_err());
+    // Unauthorized transfer
+    assert!(transfer_admin(e.clone(), not_admin.clone(), admin1.clone()).is_err());
+    // Query admin list
+    let admins = get_admins(e.clone());
+    assert_eq!(admins.len(), 2); // user and admin3
+}
