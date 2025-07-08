@@ -4,7 +4,7 @@
 //! Core features will be implemented incrementally in separate modules.
 
 #![no_std]
-use soroban_sdk::{contract, contractimpl, vec, Env, String, Vec, Symbol, Address, storage, contracttype, contracterror, IntoVal};
+use soroban_sdk::{contract, contractimpl, vec, Env, String, Vec, Symbol, Address, storage, contracttype, contracterror, IntoVal, Set};
 
 
 // Module placeholders for future expansion
@@ -2276,4 +2276,98 @@ impl FrozenAccounts {
     pub fn is_frozen(env: &Env, user: &Address) -> bool {
         env.storage().instance().get::<Symbol, bool>(&Self::key(user)).unwrap_or(false)
     }
+}
+
+// --- Governance: Multi-Admin Support ---
+
+// Storage key for admin set
+const ADMIN_SET_KEY: &str = "admin_set";
+
+// Event types for admin changes
+#[derive(Clone, Debug, Eq, PartialEq, soroban_sdk::contracttype)]
+pub enum GovernanceEvent {
+    AdminAdded { admin: Address, by: Address },
+    AdminRemoved { admin: Address, by: Address },
+    AdminTransferred { old_admin: Address, new_admin: Address, by: Address },
+}
+
+// Helper: get admin set
+fn get_admin_set(e: &Env) -> Set<Address> {
+    e.storage().instance().get(&ADMIN_SET_KEY).unwrap_or_else(|| {
+        let mut set = Set::new(e);
+        // Fallback: add legacy single admin if present
+        if let Some(admin) = e.storage().instance().get::<_, Address>(&"admin") {
+            set.insert(admin.clone());
+        }
+        set
+    })
+}
+
+// Helper: save admin set
+fn save_admin_set(e: &Env, set: &Set<Address>) {
+    e.storage().instance().set(&ADMIN_SET_KEY, set);
+}
+
+// Helper: is admin
+fn is_admin(e: &Env, addr: &Address) -> bool {
+    get_admin_set(e).contains(addr)
+}
+
+// Add admin (admin only)
+pub fn add_admin(e: Env, admin: Address, new_admin: Address) -> Result<(), ProtocolError> {
+    if !is_admin(&e, &admin) {
+        return Err(ProtocolError::Unauthorized)
+    }
+    let mut set = get_admin_set(&e);
+    if set.contains(&new_admin) {
+        return Err(ProtocolError::AlreadyExists)
+    }
+    set.insert(new_admin.clone());
+    save_admin_set(&e, &set);
+    publish_event!(e, GovernanceEvent::AdminAdded { admin: new_admin, by: admin });
+    Ok(())
+}
+
+// Remove admin (admin only, cannot remove last admin)
+pub fn remove_admin(e: Env, admin: Address, remove_admin: Address) -> Result<(), ProtocolError> {
+    if !is_admin(&e, &admin) {
+        return Err(ProtocolError::Unauthorized)
+    }
+    let mut set = get_admin_set(&e);
+    if !set.contains(&remove_admin) {
+        return Err(ProtocolError::NotFound)
+    }
+    if set.len() == 1 {
+        return Err(ProtocolError::InvalidOperation) // cannot remove last admin
+    }
+    set.remove(&remove_admin);
+    save_admin_set(&e, &set);
+    publish_event!(e, GovernanceEvent::AdminRemoved { admin: remove_admin, by: admin });
+    Ok(())
+}
+
+// Transfer admin (admin only)
+pub fn transfer_admin(e: Env, admin: Address, new_admin: Address) -> Result<(), ProtocolError> {
+    if !is_admin(&e, &admin) {
+        return Err(ProtocolError::Unauthorized)
+    }
+    let mut set = get_admin_set(&e);
+    if !set.contains(&admin) {
+        return Err(ProtocolError::NotFound)
+    }
+    set.remove(&admin);
+    set.insert(new_admin.clone());
+    save_admin_set(&e, &set);
+    publish_event!(e, GovernanceEvent::AdminTransferred { old_admin: admin, new_admin: new_admin.clone(), by: admin });
+    Ok(())
+}
+
+// Query: get admin list
+pub fn get_admins(e: Env) -> Vec<Address> {
+    get_admin_set(&e).iter().collect()
+}
+
+// Query: is address admin
+pub fn is_address_admin(e: Env, addr: Address) -> bool {
+    is_admin(&e, &addr)
 }
