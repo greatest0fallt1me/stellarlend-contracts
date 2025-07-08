@@ -243,6 +243,172 @@ impl ReserveStorage {
     }
 }
 
+// --- Multi-Asset Support Data Structures ---
+
+/// Asset information and configuration
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct AssetInfo {
+    /// Asset symbol (e.g., "XLM", "USDC")
+    pub symbol: String,
+    /// Asset decimals
+    pub decimals: u32,
+    /// Oracle address for this asset
+    pub oracle_address: Address,
+    /// Minimum collateral ratio for this asset (scaled by 100)
+    pub min_collateral_ratio: i128,
+    /// Asset-specific risk configuration
+    pub risk_config: RiskConfig,
+    /// Asset-specific interest rate configuration
+    pub interest_config: InterestRateConfig,
+    /// Asset-specific interest rate state
+    pub interest_state: InterestRateState,
+    /// Whether this asset is enabled for deposits
+    pub deposit_enabled: bool,
+    /// Whether this asset is enabled for borrowing
+    pub borrow_enabled: bool,
+    /// Last time asset config was updated
+    pub last_update: u64,
+}
+
+impl AssetInfo {
+    pub fn new(
+        symbol: String,
+        decimals: u32,
+        oracle_address: Address,
+        min_collateral_ratio: i128,
+    ) -> Self {
+        Self {
+            symbol,
+            decimals,
+            oracle_address,
+            min_collateral_ratio,
+            risk_config: RiskConfig::default(),
+            interest_config: InterestRateConfig::default(),
+            interest_state: InterestRateState::initial(),
+            deposit_enabled: true,
+            borrow_enabled: true,
+            last_update: 0,
+        }
+    }
+}
+
+/// User position for a specific asset
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct AssetPosition {
+    /// The user address
+    pub user: Address,
+    /// The asset symbol
+    pub asset: String,
+    /// Amount of collateral deposited for this asset
+    pub collateral: i128,
+    /// Amount borrowed for this asset
+    pub debt: i128,
+    /// Accrued borrow interest for this asset (scaled by 1e8)
+    pub borrow_interest: i128,
+    /// Accrued supply interest for this asset (scaled by 1e8)
+    pub supply_interest: i128,
+    /// Last time interest was accrued for this position
+    pub last_accrual_time: u64,
+}
+
+impl AssetPosition {
+    pub fn new(user: Address, asset: String, collateral: i128, debt: i128) -> Self {
+        Self {
+            user,
+            asset,
+            collateral,
+            debt,
+            borrow_interest: 0,
+            supply_interest: 0,
+            last_accrual_time: 0,
+        }
+    }
+}
+
+/// Asset registry for managing all supported assets
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct AssetRegistry {
+    /// List of all supported asset symbols
+    pub supported_assets: Vec<String>,
+    /// Default asset for backward compatibility
+    pub default_asset: String,
+    /// Last time registry was updated
+    pub last_update: u64,
+}
+
+impl AssetRegistry {
+    pub fn new(default_asset: String) -> Self {
+        let mut assets = Vec::new(&Env::default());
+        assets.push_back(default_asset.clone());
+        Self {
+            supported_assets: assets,
+            default_asset,
+            last_update: 0,
+        }
+    }
+}
+
+/// Storage helper for multi-asset support
+pub struct AssetStorage;
+
+impl AssetStorage {
+    fn registry_key() -> Symbol { Symbol::short("asset_reg") }
+    fn asset_info_key(asset: &str) -> Symbol { 
+        let key = if asset.len() <= 5 { 
+            String::from_str(&Env::default(), &("asset_".to_string() + asset))
+        } else {
+            String::from_str(&Env::default(), &("asset_".to_string() + &asset[..5]))
+        };
+        Symbol::short(&key)
+    }
+    fn position_key(user: &Address, asset: &str) -> Symbol { 
+        let key = if asset.len() <= 5 { 
+            String::from_str(&Env::default(), &("pos_".to_string() + asset))
+        } else {
+            String::from_str(&Env::default(), &("pos_".to_string() + &asset[..5]))
+        };
+        Symbol::short(&key)
+    }
+    
+    pub fn save_registry(env: &Env, registry: &AssetRegistry) {
+        env.storage().instance().set(&Self::registry_key(), registry);
+    }
+    
+    pub fn get_registry(env: &Env) -> AssetRegistry {
+        env.storage().instance().get(&Self::registry_key()).unwrap_or_else(|| {
+            AssetRegistry::new(String::from_str(env, "XLM"))
+        })
+    }
+    
+    pub fn save_asset_info(env: &Env, asset: &str, info: &AssetInfo) {
+        let key = Self::asset_info_key(asset);
+        env.storage().instance().set(&key, info);
+    }
+    
+    pub fn get_asset_info(env: &Env, asset: &str) -> Option<AssetInfo> {
+        let key = Self::asset_info_key(asset);
+        env.storage().instance().get(&key)
+    }
+    
+    pub fn save_asset_position(env: &Env, user: &Address, asset: &str, position: &AssetPosition) {
+        let key = (Self::position_key(user, asset), user.clone());
+        env.storage().instance().set(&key, position);
+    }
+    
+    pub fn get_asset_position(env: &Env, user: &Address, asset: &str) -> Option<AssetPosition> {
+        let key = (Self::position_key(user, asset), user.clone());
+        env.storage().instance().get(&key)
+    }
+    
+    pub fn remove_asset_position(env: &Env, user: &Address, asset: &str) {
+        let key = (Self::position_key(user, asset), user.clone());
+        env.storage().instance().remove(&key);
+    }
+}
+
 /// Interest rate management helper
 pub struct InterestRateManager;
 
@@ -431,49 +597,67 @@ impl StateHelper {
 
 /// Event types for protocol actions
 pub enum ProtocolEvent {
-    Deposit { user: String, amount: i128 },
-    Borrow { user: String, amount: i128 },
-    Repay { user: String, amount: i128 },
-    Withdraw { user: String, amount: i128 },
-    Liquidate { user: String, amount: i128 },
-    InterestAccrued { user: String, borrow_interest: i128, supply_interest: i128 },
-    RateUpdated { borrow_rate: i128, supply_rate: i128, utilization: i128 },
+    Deposit { user: String, amount: i128, asset: String },
+    Borrow { user: String, amount: i128, asset: String },
+    Repay { user: String, amount: i128, asset: String },
+    Withdraw { user: String, amount: i128, asset: String },
+    Liquidate { user: String, amount: i128, asset: String },
+    InterestAccrued { user: String, borrow_interest: i128, supply_interest: i128, asset: String },
+    RateUpdated { borrow_rate: i128, supply_rate: i128, utilization: i128, asset: String },
     ConfigUpdated { parameter: String, old_value: i128, new_value: i128 },
     FeesCollected { amount: i128, source: String },
     FeesDistributed { amount: i128, treasury: String },
     TreasuryUpdated { old_address: String, new_address: String },
     ReserveUpdated { total_collected: i128, current_reserves: i128 },
+    AssetAdded { asset: String, symbol: String, decimals: u32 },
+    AssetUpdated { asset: String, parameter: String, old_value: String, new_value: String },
+    AssetDisabled { asset: String, reason: String },
 }
 
 impl ProtocolEvent {
     /// Emit the event using Soroban's event system
     pub fn emit(&self, env: &Env) {
         match self {
-            ProtocolEvent::Deposit { user, amount } => {
-                env.events().publish((Symbol::short("deposit"), Symbol::short("user")), (Symbol::short("user"), *amount));
-            }
-            ProtocolEvent::Borrow { user, amount } => {
-                env.events().publish((Symbol::short("borrow"), Symbol::short("user")), (Symbol::short("user"), *amount));
-            }
-            ProtocolEvent::Repay { user, amount } => {
-                env.events().publish((Symbol::short("repay"), Symbol::short("user")), (Symbol::short("user"), *amount));
-            }
-            ProtocolEvent::Withdraw { user, amount } => {
-                env.events().publish((Symbol::short("withdraw"), Symbol::short("user")), (Symbol::short("user"), *amount));
-            }
-            ProtocolEvent::Liquidate { user, amount } => {
-                env.events().publish((Symbol::short("liquidate"), Symbol::short("user")), (Symbol::short("user"), *amount));
-            }
-            ProtocolEvent::InterestAccrued { user, borrow_interest, supply_interest } => {
+            ProtocolEvent::Deposit { user, amount, asset } => {
                 env.events().publish(
-                    (Symbol::short("interest_accrued"), Symbol::short("user")), 
-                    (Symbol::short("borrow_interest"), *borrow_interest, Symbol::short("supply_interest"), *supply_interest)
+                    (Symbol::short("deposit"), Symbol::short("user")), 
+                    (Symbol::short("user"), *amount, Symbol::short("asset"), asset.clone())
                 );
             }
-            ProtocolEvent::RateUpdated { borrow_rate, supply_rate, utilization } => {
+            ProtocolEvent::Borrow { user, amount, asset } => {
+                env.events().publish(
+                    (Symbol::short("borrow"), Symbol::short("user")), 
+                    (Symbol::short("user"), *amount, Symbol::short("asset"), asset.clone())
+                );
+            }
+            ProtocolEvent::Repay { user, amount, asset } => {
+                env.events().publish(
+                    (Symbol::short("repay"), Symbol::short("user")), 
+                    (Symbol::short("user"), *amount, Symbol::short("asset"), asset.clone())
+                );
+            }
+            ProtocolEvent::Withdraw { user, amount, asset } => {
+                env.events().publish(
+                    (Symbol::short("withdraw"), Symbol::short("user")), 
+                    (Symbol::short("user"), *amount, Symbol::short("asset"), asset.clone())
+                );
+            }
+            ProtocolEvent::Liquidate { user, amount, asset } => {
+                env.events().publish(
+                    (Symbol::short("liquidate"), Symbol::short("user")), 
+                    (Symbol::short("user"), *amount, Symbol::short("asset"), asset.clone())
+                );
+            }
+            ProtocolEvent::InterestAccrued { user, borrow_interest, supply_interest, asset } => {
+                env.events().publish(
+                    (Symbol::short("interest_accrued"), Symbol::short("user")), 
+                    (Symbol::short("borrow_interest"), *borrow_interest, Symbol::short("supply_interest"), *supply_interest, Symbol::short("asset"), asset.clone())
+                );
+            }
+            ProtocolEvent::RateUpdated { borrow_rate, supply_rate, utilization, asset } => {
                 env.events().publish(
                     (Symbol::short("rate_updated"), Symbol::short("borrow_rate")), 
-                    (Symbol::short("supply_rate"), *supply_rate, Symbol::short("utilization"), *utilization)
+                    (Symbol::short("supply_rate"), *supply_rate, Symbol::short("utilization"), *utilization, Symbol::short("asset"), asset.clone())
                 );
             }
             ProtocolEvent::ConfigUpdated { parameter, old_value, new_value } => {
@@ -504,6 +688,24 @@ impl ProtocolEvent {
                 env.events().publish(
                     (Symbol::short("reserve_updated"), Symbol::short("total_collected")), 
                     (Symbol::short("current_reserves"), *current_reserves)
+                );
+            }
+            ProtocolEvent::AssetAdded { asset, symbol, decimals } => {
+                env.events().publish(
+                    (Symbol::short("asset_added"), Symbol::short("asset")), 
+                    (Symbol::short("symbol"), symbol.clone(), Symbol::short("decimals"), *decimals)
+                );
+            }
+            ProtocolEvent::AssetUpdated { asset, parameter, old_value, new_value } => {
+                env.events().publish(
+                    (Symbol::short("asset_updated"), Symbol::short("asset")), 
+                    (Symbol::short("parameter"), parameter.clone(), Symbol::short("old_value"), old_value.clone(), Symbol::short("new_value"), new_value.clone())
+                );
+            }
+            ProtocolEvent::AssetDisabled { asset, reason } => {
+                env.events().publish(
+                    (Symbol::short("asset_disabled"), Symbol::short("asset")), 
+                    (Symbol::short("reason"), reason.clone())
                 );
             }
         }
@@ -743,7 +945,10 @@ pub enum ProtocolError {
     AdminNotSet = 10,
     NotEligibleForLiquidation = 11,
     ProtocolPaused = 12,
-    Unknown = 13,
+    AssetNotSupported = 13,
+    AssetDisabled = 14,
+    InvalidAsset = 15,
+    Unknown = 16,
 }
 
 impl ProtocolError {
@@ -761,6 +966,9 @@ impl ProtocolError {
             ProtocolError::AdminNotSet => "AdminNotSet",
             ProtocolError::NotEligibleForLiquidation => "NotEligibleForLiquidation",
             ProtocolError::ProtocolPaused => "ProtocolPaused",
+            ProtocolError::AssetNotSupported => "AssetNotSupported",
+            ProtocolError::AssetDisabled => "AssetDisabled",
+            ProtocolError::InvalidAsset => "InvalidAsset",
             ProtocolError::Unknown => "Unknown",
         }
     }
@@ -803,6 +1011,20 @@ impl Contract {
         
         let revenue_metrics = RevenueMetrics::default();
         ReserveStorage::save_revenue_metrics(&env, &revenue_metrics);
+        
+        // Initialize multi-asset support
+        let asset_registry = AssetRegistry::new(String::from_str(&env, "XLM"));
+        AssetStorage::save_registry(&env, &asset_registry);
+        
+        // Initialize default XLM asset
+        let xlm_oracle = Address::from_string(&String::from_str(&env, "GCXOTMMXRS24MYZI5FJPUCOEOFNWSR4XX7UXIK3NDGGE6A5QMJ5FF2FS"));
+        let xlm_asset_info = AssetInfo::new(
+            String::from_str(&env, "XLM"),
+            7, // XLM has 7 decimals
+            xlm_oracle,
+            150, // 150% minimum collateral ratio
+        );
+        AssetStorage::save_asset_info(&env, "XLM", &xlm_asset_info);
         
         Ok(())
     }
@@ -1076,7 +1298,7 @@ impl Contract {
             }
         }
         
-        ProtocolEvent::Deposit { user: depositor, amount }.emit(&env);
+        ProtocolEvent::Deposit { user: depositor, amount, asset: String::from_str(&env, "XLM") }.emit(&env);
         Ok(())
     }
 
@@ -1147,7 +1369,7 @@ impl Contract {
             }
         }
         
-        ProtocolEvent::Borrow { user: borrower, amount }.emit(&env);
+        ProtocolEvent::Borrow { user: borrower, amount, asset: String::from_str(&env, "XLM") }.emit(&env);
         Ok(())
     }
 
@@ -1184,7 +1406,7 @@ impl Contract {
         ir_state.total_borrowed -= (old_debt - position.debt);
         InterestRateStorage::save_state(&env, &ir_state);
         
-        ProtocolEvent::Repay { user: repayer, amount }.emit(&env);
+        ProtocolEvent::Repay { user: repayer, amount, asset: String::from_str(&env, "XLM") }.emit(&env);
         Ok(())
     }
 
@@ -1233,7 +1455,7 @@ impl Contract {
         ir_state.total_supplied -= amount;
         InterestRateStorage::save_state(&env, &ir_state);
         
-        ProtocolEvent::Withdraw { user: withdrawer, amount }.emit(&env);
+        ProtocolEvent::Withdraw { user: withdrawer, amount, asset: String::from_str(&env, "XLM") }.emit(&env);
         Ok(())
     }
 
@@ -1298,7 +1520,7 @@ impl Contract {
         ir_state.total_borrowed -= repay_amount;
         InterestRateStorage::save_state(&env, &ir_state);
         
-        ProtocolEvent::Liquidate { user: target, amount: repay_amount }.emit(&env);
+        ProtocolEvent::Liquidate { user: target, amount: repay_amount, asset: String::from_str(&env, "XLM") }.emit(&env);
         Ok(())
     }
 
@@ -1563,6 +1785,155 @@ impl Contract {
         let mut reserve_data = ReserveStorage::get_reserve_data(&env);
         reserve_data.distribution_frequency = frequency;
         ReserveStorage::save_reserve_data(&env, &reserve_data);
+        
+        Ok(())
+    }
+
+    // --- Multi-Asset Support Functions ---
+
+    /// Add a new asset to the protocol (admin only)
+    pub fn add_asset(
+        env: Env,
+        caller: String,
+        symbol: String,
+        decimals: u32,
+        oracle_address: String,
+        min_collateral_ratio: i128,
+    ) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+        
+        if symbol.is_empty() {
+            return Err(ProtocolError::InvalidAsset);
+        }
+        
+        if decimals == 0 {
+            return Err(ProtocolError::InvalidAmount);
+        }
+        
+        let oracle_addr = Address::from_string(&oracle_address);
+        
+        // Check if asset already exists
+        if AssetStorage::get_asset_info(&env, &symbol).is_some() {
+            return Err(ProtocolError::AlreadyInitialized);
+        }
+        
+        // Create new asset info
+        let asset_info = AssetInfo::new(symbol.clone(), decimals, oracle_addr, min_collateral_ratio);
+        AssetStorage::save_asset_info(&env, &symbol, &asset_info);
+        
+        // Update registry
+        let mut registry = AssetStorage::get_registry(&env);
+        registry.supported_assets.push_back(symbol.clone());
+        registry.last_update = env.ledger().timestamp();
+        AssetStorage::save_registry(&env, &registry);
+        
+        ProtocolEvent::AssetAdded { 
+            asset: symbol.clone(), 
+            symbol: asset_info.symbol, 
+            decimals: asset_info.decimals 
+        }.emit(&env);
+        
+        Ok(())
+    }
+
+    /// Set asset parameters (admin only)
+    pub fn set_asset_params(
+        env: Env,
+        caller: String,
+        asset: String,
+        min_collateral_ratio: i128,
+        close_factor: i128,
+        liquidation_incentive: i128,
+        base_rate: i128,
+        reserve_factor: i128,
+    ) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+        
+        let mut asset_info = AssetStorage::get_asset_info(&env, &asset)
+            .ok_or(ProtocolError::AssetNotSupported)?;
+        
+        // Update parameters
+        let old_ratio = asset_info.min_collateral_ratio;
+        asset_info.min_collateral_ratio = min_collateral_ratio;
+        asset_info.risk_config.close_factor = close_factor;
+        asset_info.risk_config.liquidation_incentive = liquidation_incentive;
+        asset_info.interest_config.base_rate = base_rate;
+        asset_info.interest_config.reserve_factor = reserve_factor;
+        asset_info.last_update = env.ledger().timestamp();
+        
+        AssetStorage::save_asset_info(&env, &asset, &asset_info);
+        
+        ProtocolEvent::AssetUpdated { 
+            asset: asset.clone(), 
+            parameter: String::from_str(&env, "min_collateral_ratio"), 
+            old_value: old_ratio.to_string(), 
+            new_value: min_collateral_ratio.to_string() 
+        }.emit(&env);
+        
+        Ok(())
+    }
+
+    /// Get asset information
+    pub fn get_asset_info(env: Env, asset: String) -> Result<(String, u32, String, i128, bool, bool), ProtocolError> {
+        let asset_info = AssetStorage::get_asset_info(&env, &asset)
+            .ok_or(ProtocolError::AssetNotSupported)?;
+        
+        Ok((
+            asset_info.symbol,
+            asset_info.decimals,
+            asset_info.oracle_address.to_string(),
+            asset_info.min_collateral_ratio,
+            asset_info.deposit_enabled,
+            asset_info.borrow_enabled,
+        ))
+    }
+
+    /// Get list of supported assets
+    pub fn get_supported_assets(env: Env) -> Vec<String> {
+        let registry = AssetStorage::get_registry(&env);
+        registry.supported_assets
+    }
+
+    /// Enable/disable asset for deposits (admin only)
+    pub fn set_asset_deposit_enabled(env: Env, caller: String, asset: String, enabled: bool) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+        
+        let mut asset_info = AssetStorage::get_asset_info(&env, &asset)
+            .ok_or(ProtocolError::AssetNotSupported)?;
+        
+        asset_info.deposit_enabled = enabled;
+        asset_info.last_update = env.ledger().timestamp();
+        AssetStorage::save_asset_info(&env, &asset, &asset_info);
+        
+        let reason = if enabled { "enabled" } else { "disabled" };
+        ProtocolEvent::AssetDisabled { 
+            asset: asset.clone(), 
+            reason: String::from_str(&env, reason) 
+        }.emit(&env);
+        
+        Ok(())
+    }
+
+    /// Enable/disable asset for borrowing (admin only)
+    pub fn set_asset_borrow_enabled(env: Env, caller: String, asset: String, enabled: bool) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+        
+        let mut asset_info = AssetStorage::get_asset_info(&env, &asset)
+            .ok_or(ProtocolError::AssetNotSupported)?;
+        
+        asset_info.borrow_enabled = enabled;
+        asset_info.last_update = env.ledger().timestamp();
+        AssetStorage::save_asset_info(&env, &asset, &asset_info);
+        
+        let reason = if enabled { "enabled" } else { "disabled" };
+        ProtocolEvent::AssetDisabled { 
+            asset: asset.clone(), 
+            reason: String::from_str(&env, reason) 
+        }.emit(&env);
         
         Ok(())
     }
