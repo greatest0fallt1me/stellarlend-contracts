@@ -1854,7 +1854,7 @@ impl Contract {
         let caller_addr = Address::from_string(&caller);
         ProtocolConfig::require_admin(&env, &caller_addr)?;
         
-        let mut asset_info = AssetStorage::get_asset_info(&env, &asset.as_str())
+        let mut asset_info = AssetStorage::get_asset_info(&env, &asset)
             .ok_or(ProtocolError::AssetNotSupported)?;
         
         // Update parameters
@@ -1866,7 +1866,7 @@ impl Contract {
         asset_info.interest_config.reserve_factor = reserve_factor;
         asset_info.last_update = env.ledger().timestamp();
         
-        AssetStorage::save_asset_info(&env, &asset.as_str(), &asset_info);
+        AssetStorage::save_asset_info(&env, &asset, &asset_info);
         
         ProtocolEvent::AssetUpdated { 
             asset: asset.clone(), 
@@ -1880,7 +1880,7 @@ impl Contract {
 
     /// Get asset information
     pub fn get_asset_info(env: Env, asset: String) -> Result<(String, u32, String, i128, bool, bool), ProtocolError> {
-        let asset_info = AssetStorage::get_asset_info(&env, &asset.as_str())
+        let asset_info = AssetStorage::get_asset_info(&env, &asset)
             .ok_or(ProtocolError::AssetNotSupported)?;
         
         Ok((
