@@ -1206,7 +1206,10 @@ fn test_enhanced_liquidation_with_close_factor() {
         // Set close factor to 30%
         Contract::set_risk_params(env.clone(), admin.to_string(), 30000000, 10000000).unwrap();
         
-        // Create undercollateralized position
+        // Create undercollateralized position by setting a higher minimum ratio
+        Contract::set_min_collateral_ratio(env.clone(), admin.to_string(), 200).unwrap(); // 200%
+        
+        // Create position that will be undercollateralized
         Contract::deposit_collateral(env.clone(), user.to_string(), 1000).unwrap();
         Contract::borrow(env.clone(), user.to_string(), 800).unwrap();
         
@@ -1239,7 +1242,10 @@ fn test_enhanced_liquidation_with_incentive() {
         // Set liquidation incentive to 20%
         Contract::set_risk_params(env.clone(), admin.to_string(), 50000000, 20000000).unwrap();
         
-        // Create undercollateralized position
+        // Create undercollateralized position by setting a higher minimum ratio
+        Contract::set_min_collateral_ratio(env.clone(), admin.to_string(), 200).unwrap(); // 200%
+        
+        // Create position that will be undercollateralized
         Contract::deposit_collateral(env.clone(), user.to_string(), 1000).unwrap();
         Contract::borrow(env.clone(), user.to_string(), 800).unwrap();
         
@@ -1276,7 +1282,10 @@ fn test_liquidation_pause_enforcement() {
         let oracle = TestUtils::create_oracle_address(&env);
         Contract::set_oracle(env.clone(), admin.to_string(), oracle.to_string()).unwrap();
         
-        // Create undercollateralized position
+        // Create undercollateralized position by setting a higher minimum ratio
+        Contract::set_min_collateral_ratio(env.clone(), admin.to_string(), 200).unwrap(); // 200%
+        
+        // Create position that will be undercollateralized
         Contract::deposit_collateral(env.clone(), user.to_string(), 1000).unwrap();
         Contract::borrow(env.clone(), user.to_string(), 800).unwrap();
         
