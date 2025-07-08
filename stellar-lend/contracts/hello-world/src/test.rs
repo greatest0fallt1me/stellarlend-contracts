@@ -2057,7 +2057,7 @@ fn test_multi_asset_registry_management() {
         
         // Verify each asset has correct info
         let btc_info = Contract::get_asset_info(env.clone(), String::from_str(&env, "BTC")).unwrap();
-        assert_eq!(btc_info.0, "BTC");
+        assert_eq!(btc_info.0, String::from_str(&env, "BTC"));
         assert_eq!(btc_info.1, 8);
         assert_eq!(btc_info.3, 200);
     });
