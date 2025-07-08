@@ -1904,12 +1904,12 @@ impl Contract {
         let caller_addr = Address::from_string(&caller);
         ProtocolConfig::require_admin(&env, &caller_addr)?;
         
-        let mut asset_info = AssetStorage::get_asset_info(&env, &asset.as_str())
+        let mut asset_info = AssetStorage::get_asset_info(&env, &asset)
             .ok_or(ProtocolError::AssetNotSupported)?;
         
         asset_info.deposit_enabled = enabled;
         asset_info.last_update = env.ledger().timestamp();
-        AssetStorage::save_asset_info(&env, &asset.as_str(), &asset_info);
+        AssetStorage::save_asset_info(&env, &asset, &asset_info);
         
         let reason = if enabled { "enabled" } else { "disabled" };
         ProtocolEvent::AssetDisabled { 
