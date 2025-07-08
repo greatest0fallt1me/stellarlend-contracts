@@ -6,6 +6,7 @@
 #![no_std]
 use soroban_sdk::{contract, contractimpl, vec, Env, String, Vec, Symbol, Address, storage, contracttype, contracterror, IntoVal};
 
+
 // Module placeholders for future expansion
 // mod deposit;
 // mod borrow;
@@ -1816,13 +1817,13 @@ impl Contract {
         let oracle_addr = Address::from_string(&oracle_address);
         
         // Check if asset already exists
-        if AssetStorage::get_asset_info(&env, &symbol.as_str()).is_some() {
+        if AssetStorage::get_asset_info(&env, &symbol).is_some() {
             return Err(ProtocolError::AlreadyInitialized);
         }
         
         // Create new asset info
         let asset_info = AssetInfo::new(symbol.clone(), decimals, oracle_addr, min_collateral_ratio);
-        AssetStorage::save_asset_info(&env, &symbol.as_str(), &asset_info);
+        AssetStorage::save_asset_info(&env, &symbol, &asset_info);
         
         // Update registry
         let mut registry = AssetStorage::get_registry(&env);
