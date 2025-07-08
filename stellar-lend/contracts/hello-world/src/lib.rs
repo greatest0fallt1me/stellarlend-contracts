@@ -1816,13 +1816,13 @@ impl Contract {
         let oracle_addr = Address::from_string(&oracle_address);
         
         // Check if asset already exists
-        if AssetStorage::get_asset_info(&env, &symbol).is_some() {
+        if AssetStorage::get_asset_info(&env, &symbol.as_str()).is_some() {
             return Err(ProtocolError::AlreadyInitialized);
         }
         
         // Create new asset info
         let asset_info = AssetInfo::new(symbol.clone(), decimals, oracle_addr, min_collateral_ratio);
-        AssetStorage::save_asset_info(&env, &symbol, &asset_info);
+        AssetStorage::save_asset_info(&env, &symbol.as_str(), &asset_info);
         
         // Update registry
         let mut registry = AssetStorage::get_registry(&env);
@@ -1853,7 +1853,7 @@ impl Contract {
         let caller_addr = Address::from_string(&caller);
         ProtocolConfig::require_admin(&env, &caller_addr)?;
         
-        let mut asset_info = AssetStorage::get_asset_info(&env, &asset)
+        let mut asset_info = AssetStorage::get_asset_info(&env, &asset.as_str())
             .ok_or(ProtocolError::AssetNotSupported)?;
         
         // Update parameters
@@ -1865,13 +1865,13 @@ impl Contract {
         asset_info.interest_config.reserve_factor = reserve_factor;
         asset_info.last_update = env.ledger().timestamp();
         
-        AssetStorage::save_asset_info(&env, &asset, &asset_info);
+        AssetStorage::save_asset_info(&env, &asset.as_str(), &asset_info);
         
         ProtocolEvent::AssetUpdated { 
             asset: asset.clone(), 
             parameter: String::from_str(&env, "min_collateral_ratio"), 
-            old_value: old_ratio.to_string(), 
-            new_value: min_collateral_ratio.to_string() 
+            old_value: String::from_str(&env, &old_ratio.to_string()), 
+            new_value: String::from_str(&env, &min_collateral_ratio.to_string()) 
         }.emit(&env);
         
         Ok(())
