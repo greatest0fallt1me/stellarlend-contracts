@@ -1639,3 +1639,426 @@ fn test_reserve_management_integration() {
         assert_eq!(final_current_reserves, total_collected / 4);
     });
 }
+
+// --- Multi-Asset Support Tests ---
+
+#[test]
+fn test_multi_asset_initialization() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Test that asset registry is initialized
+        let supported_assets = Contract::get_supported_assets(env.clone());
+        assert_eq!(supported_assets.len(), 1);
+        assert_eq!(supported_assets.get(0), String::from_str(&env, "XLM"));
+        
+        // Test that default XLM asset is configured
+        let xlm_info = Contract::get_asset_info(env.clone(), String::from_str(&env, "XLM")).unwrap();
+        assert_eq!(xlm_info.0, "XLM"); // symbol
+        assert_eq!(xlm_info.1, 7); // decimals
+        assert_eq!(xlm_info.3, 150); // min_collateral_ratio
+        assert_eq!(xlm_info.4, true); // deposit_enabled
+        assert_eq!(xlm_info.5, true); // borrow_enabled
+    });
+}
+
+#[test]
+fn test_add_asset() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Add USDC asset
+        let result = Contract::add_asset(
+            env.clone(),
+            admin.to_string(),
+            String::from_str(&env, "USDC"),
+            6,
+            TestUtils::create_oracle_address(&env).to_string(),
+            120, // 120% collateral ratio
+        );
+        assert!(result.is_ok());
+        
+        // Verify asset is added to registry
+        let supported_assets = Contract::get_supported_assets(env.clone());
+        assert_eq!(supported_assets.len(), 2);
+        assert!(supported_assets.contains(&String::from_str(&env, "USDC")));
+        
+        // Verify asset info is stored
+        let usdc_info = Contract::get_asset_info(env.clone(), String::from_str(&env, "USDC")).unwrap();
+        assert_eq!(usdc_info.0, "USDC");
+        assert_eq!(usdc_info.1, 6);
+        assert_eq!(usdc_info.3, 120);
+    });
+}
+
+#[test]
+fn test_add_asset_unauthorized() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    let user = TestUtils::create_user_address(&env, 1);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Try to add asset as non-admin
+        let result = Contract::add_asset(
+            env.clone(),
+            user.to_string(),
+            String::from_str(&env, "USDC"),
+            6,
+            TestUtils::create_oracle_address(&env).to_string(),
+            120,
+        );
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ProtocolError::NotAdmin);
+    });
+}
+
+#[test]
+fn test_add_asset_invalid_params() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Try to add asset with empty symbol
+        let result = Contract::add_asset(
+            env.clone(),
+            admin.to_string(),
+            String::from_str(&env, ""),
+            6,
+            TestUtils::create_oracle_address(&env).to_string(),
+            120,
+        );
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ProtocolError::InvalidAsset);
+        
+        // Try to add asset with zero decimals
+        let result = Contract::add_asset(
+            env.clone(),
+            admin.to_string(),
+            String::from_str(&env, "USDC"),
+            0,
+            TestUtils::create_oracle_address(&env).to_string(),
+            120,
+        );
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ProtocolError::InvalidAmount);
+    });
+}
+
+#[test]
+fn test_add_duplicate_asset() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Add USDC asset
+        Contract::add_asset(
+            env.clone(),
+            admin.to_string(),
+            String::from_str(&env, "USDC"),
+            6,
+            TestUtils::create_oracle_address(&env).to_string(),
+            120,
+        ).unwrap();
+        
+        // Try to add USDC again
+        let result = Contract::add_asset(
+            env.clone(),
+            admin.to_string(),
+            String::from_str(&env, "USDC"),
+            6,
+            TestUtils::create_oracle_address(&env).to_string(),
+            120,
+        );
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ProtocolError::AlreadyInitialized);
+    });
+}
+
+#[test]
+fn test_set_asset_params() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Add USDC asset
+        Contract::add_asset(
+            env.clone(),
+            admin.to_string(),
+            String::from_str(&env, "USDC"),
+            6,
+            TestUtils::create_oracle_address(&env).to_string(),
+            120,
+        ).unwrap();
+        
+        // Update asset parameters
+        let result = Contract::set_asset_params(
+            env.clone(),
+            admin.to_string(),
+            String::from_str(&env, "USDC"),
+            130, // new collateral ratio
+            60000000, // close factor 60%
+            15000000, // liquidation incentive 15%
+            3000000, // base rate 3%
+            12000000, // reserve factor 12%
+        );
+        assert!(result.is_ok());
+        
+        // Verify parameters are updated
+        let usdc_info = Contract::get_asset_info(env.clone(), String::from_str(&env, "USDC")).unwrap();
+        assert_eq!(usdc_info.3, 130); // min_collateral_ratio
+    });
+}
+
+#[test]
+fn test_set_asset_params_unauthorized() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    let user = TestUtils::create_user_address(&env, 1);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Add USDC asset
+        Contract::add_asset(
+            env.clone(),
+            admin.to_string(),
+            String::from_str(&env, "USDC"),
+            6,
+            TestUtils::create_oracle_address(&env).to_string(),
+            120,
+        ).unwrap();
+        
+        // Try to update as non-admin
+        let result = Contract::set_asset_params(
+            env.clone(),
+            user.to_string(),
+            String::from_str(&env, "USDC"),
+            130,
+            60000000,
+            15000000,
+            3000000,
+            12000000,
+        );
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ProtocolError::NotAdmin);
+    });
+}
+
+#[test]
+fn test_set_asset_params_invalid_asset() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Try to update non-existent asset
+        let result = Contract::set_asset_params(
+            env.clone(),
+            admin.to_string(),
+            String::from_str(&env, "INVALID"),
+            130,
+            60000000,
+            15000000,
+            3000000,
+            12000000,
+        );
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ProtocolError::AssetNotSupported);
+    });
+}
+
+#[test]
+fn test_get_asset_info_invalid_asset() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Try to get info for non-existent asset
+        let result = Contract::get_asset_info(env.clone(), String::from_str(&env, "INVALID"));
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ProtocolError::AssetNotSupported);
+    });
+}
+
+#[test]
+fn test_set_asset_deposit_enabled() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Add USDC asset
+        Contract::add_asset(
+            env.clone(),
+            admin.to_string(),
+            String::from_str(&env, "USDC"),
+            6,
+            TestUtils::create_oracle_address(&env).to_string(),
+            120,
+        ).unwrap();
+        
+        // Disable deposits
+        let result = Contract::set_asset_deposit_enabled(
+            env.clone(),
+            admin.to_string(),
+            String::from_str(&env, "USDC"),
+            false,
+        );
+        assert!(result.is_ok());
+        
+        // Verify deposit is disabled
+        let usdc_info = Contract::get_asset_info(env.clone(), String::from_str(&env, "USDC")).unwrap();
+        assert_eq!(usdc_info.4, false); // deposit_enabled
+        
+        // Re-enable deposits
+        Contract::set_asset_deposit_enabled(
+            env.clone(),
+            admin.to_string(),
+            String::from_str(&env, "USDC"),
+            true,
+        ).unwrap();
+        
+        // Verify deposit is enabled
+        let usdc_info = Contract::get_asset_info(env.clone(), String::from_str(&env, "USDC")).unwrap();
+        assert_eq!(usdc_info.4, true); // deposit_enabled
+    });
+}
+
+#[test]
+fn test_set_asset_borrow_enabled() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Add USDC asset
+        Contract::add_asset(
+            env.clone(),
+            admin.to_string(),
+            String::from_str(&env, "USDC"),
+            6,
+            TestUtils::create_oracle_address(&env).to_string(),
+            120,
+        ).unwrap();
+        
+        // Disable borrowing
+        let result = Contract::set_asset_borrow_enabled(
+            env.clone(),
+            admin.to_string(),
+            String::from_str(&env, "USDC"),
+            false,
+        );
+        assert!(result.is_ok());
+        
+        // Verify borrowing is disabled
+        let usdc_info = Contract::get_asset_info(env.clone(), String::from_str(&env, "USDC")).unwrap();
+        assert_eq!(usdc_info.5, false); // borrow_enabled
+        
+        // Re-enable borrowing
+        Contract::set_asset_borrow_enabled(
+            env.clone(),
+            admin.to_string(),
+            String::from_str(&env, "USDC"),
+            true,
+        ).unwrap();
+        
+        // Verify borrowing is enabled
+        let usdc_info = Contract::get_asset_info(env.clone(), String::from_str(&env, "USDC")).unwrap();
+        assert_eq!(usdc_info.5, true); // borrow_enabled
+    });
+}
+
+#[test]
+fn test_multi_asset_registry_management() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::create_admin_address(&env);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        
+        // Add multiple assets
+        Contract::add_asset(
+            env.clone(),
+            admin.to_string(),
+            String::from_str(&env, "USDC"),
+            6,
+            TestUtils::create_oracle_address(&env).to_string(),
+            120,
+        ).unwrap();
+        
+        Contract::add_asset(
+            env.clone(),
+            admin.to_string(),
+            String::from_str(&env, "BTC"),
+            8,
+            TestUtils::create_oracle_address(&env).to_string(),
+            200,
+        ).unwrap();
+        
+        Contract::add_asset(
+            env.clone(),
+            admin.to_string(),
+            String::from_str(&env, "ETH"),
+            18,
+            TestUtils::create_oracle_address(&env).to_string(),
+            150,
+        ).unwrap();
+        
+        // Verify all assets are in registry
+        let supported_assets = Contract::get_supported_assets(env.clone());
+        assert_eq!(supported_assets.len(), 4); // XLM + 3 new assets
+        assert!(supported_assets.contains(&String::from_str(&env, "XLM")));
+        assert!(supported_assets.contains(&String::from_str(&env, "USDC")));
+        assert!(supported_assets.contains(&String::from_str(&env, "BTC")));
+        assert!(supported_assets.contains(&String::from_str(&env, "ETH")));
+        
+        // Verify each asset has correct info
+        let btc_info = Contract::get_asset_info(env.clone(), String::from_str(&env, "BTC")).unwrap();
+        assert_eq!(btc_info.0, "BTC");
+        assert_eq!(btc_info.1, 8);
+        assert_eq!(btc_info.3, 200);
+    });
+}
