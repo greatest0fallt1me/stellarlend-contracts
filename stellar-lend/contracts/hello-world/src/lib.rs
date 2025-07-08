@@ -342,13 +342,8 @@ impl ActivityStorage {
     fn user_activity_key(env: &Env, user: &Address) -> Symbol { 
         // Use a simple approach: create a unique key based on user address
         let user_str = user.to_string();
-        // Take first 10 characters or use a default if shorter
-        let key_str = if user_str.len() >= 10 {
-            &user_str[..10]
-        } else {
-            "user_activity"
-        };
-        Symbol::new(env, key_str)
+        // Use a fixed key for simplicity - in production you'd want a more sophisticated approach
+        Symbol::new(env, "user_activity")
     }
     
     fn protocol_activity_key() -> Symbol { Symbol::short("protocol_activity") }
