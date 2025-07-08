@@ -27,12 +27,216 @@ pub struct Position {
     pub collateral: i128,
     /// The amount borrowed
     pub debt: i128,
+    /// Accrued borrow interest (scaled by 1e8)
+    pub borrow_interest: i128,
+    /// Accrued supply interest (scaled by 1e8)
+    pub supply_interest: i128,
+    /// Last time interest was accrued for this position
+    pub last_accrual_time: u64,
 }
 
 impl Position {
     /// Create a new position
     pub fn new(user: Address, collateral: i128, debt: i128) -> Self {
-        Self { user, collateral, debt }
+        Self { 
+            user, 
+            collateral, 
+            debt, 
+            borrow_interest: 0,
+            supply_interest: 0,
+            last_accrual_time: 0,
+        }
+    }
+}
+
+/// Interest rate configuration parameters
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct InterestRateConfig {
+    /// Base interest rate (scaled by 1e8, e.g., 2% = 2000000)
+    pub base_rate: i128,
+    /// Utilization point where rate increases (scaled by 1e8, e.g., 80% = 80000000)
+    pub kink_utilization: i128,
+    /// Rate multiplier above kink (scaled by 1e8, e.g., 10x = 10000000)
+    pub multiplier: i128,
+    /// Protocol fee percentage (scaled by 1e8, e.g., 10% = 10000000)
+    pub reserve_factor: i128,
+    /// Maximum allowed rate (scaled by 1e8, e.g., 50% = 50000000)
+    pub rate_ceiling: i128,
+    /// Minimum allowed rate (scaled by 1e8, e.g., 0.1% = 100000)
+    pub rate_floor: i128,
+    /// Last time config was updated
+    pub last_update: u64,
+}
+
+impl InterestRateConfig {
+    /// Create default interest rate configuration
+    pub fn default() -> Self {
+        Self {
+            base_rate: 2000000,        // 2%
+            kink_utilization: 80000000, // 80%
+            multiplier: 10000000,       // 10x
+            reserve_factor: 10000000,   // 10%
+            rate_ceiling: 50000000,     // 50%
+            rate_floor: 100000,         // 0.1%
+            last_update: 0,
+        }
+    }
+}
+
+/// Current interest rate state
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct InterestRateState {
+    /// Current borrow rate (scaled by 1e8)
+    pub current_borrow_rate: i128,
+    /// Current supply rate (scaled by 1e8)
+    pub current_supply_rate: i128,
+    /// Current utilization rate (scaled by 1e8)
+    pub utilization_rate: i128,
+    /// Total borrowed amount
+    pub total_borrowed: i128,
+    /// Total supplied amount
+    pub total_supplied: i128,
+    /// Last time interest was accrued
+    pub last_accrual_time: u64,
+}
+
+impl InterestRateState {
+    /// Create initial interest rate state
+    pub fn initial() -> Self {
+        Self {
+            current_borrow_rate: 0,
+            current_supply_rate: 0,
+            utilization_rate: 0,
+            total_borrowed: 0,
+            total_supplied: 0,
+            last_accrual_time: 0,
+        }
+    }
+}
+
+/// Interest rate management helper
+pub struct InterestRateManager;
+
+impl InterestRateManager {
+    /// Calculate utilization rate (total_borrowed / total_supplied)
+    pub fn calculate_utilization(total_borrowed: i128, total_supplied: i128) -> i128 {
+        if total_supplied == 0 {
+            return 0;
+        }
+        // Utilization as percentage scaled by 1e8
+        (total_borrowed * 100_000_000) / total_supplied
+    }
+
+    /// Calculate borrow rate based on utilization and config
+    pub fn calculate_borrow_rate(utilization: i128, config: &InterestRateConfig) -> i128 {
+        let mut rate = config.base_rate;
+        
+        if utilization > config.kink_utilization {
+            // Above kink: apply multiplier to excess utilization
+            let excess_utilization = utilization - config.kink_utilization;
+            let excess_rate = (excess_utilization * config.multiplier) / 100_000_000;
+            rate += excess_rate;
+        }
+        
+        // Apply rate limits
+        rate = rate.max(config.rate_floor).min(config.rate_ceiling);
+        rate
+    }
+
+    /// Calculate supply rate based on borrow rate and utilization
+    pub fn calculate_supply_rate(borrow_rate: i128, utilization: i128, reserve_factor: i128) -> i128 {
+        // Supply rate = borrow_rate * utilization * (1 - reserve_factor)
+        let effective_rate = (borrow_rate * utilization) / 100_000_000;
+        let protocol_fee = (effective_rate * reserve_factor) / 100_000_000;
+        effective_rate - protocol_fee
+    }
+
+    /// Calculate interest accrued over a time period
+    pub fn calculate_interest(principal: i128, rate: i128, time_delta: u64) -> i128 {
+        if principal == 0 || rate == 0 || time_delta == 0 {
+            return 0;
+        }
+        
+        // Interest = principal * rate * time / (365 days * 1e8)
+        let seconds_per_year = 365 * 24 * 60 * 60;
+        (principal * rate * time_delta as i128) / (seconds_per_year * 100_000_000)
+    }
+
+    /// Update interest rates based on current state
+    pub fn update_rates(env: &Env, state: &mut InterestRateState, config: &InterestRateConfig) {
+        let utilization = Self::calculate_utilization(state.total_borrowed, state.total_supplied);
+        let borrow_rate = Self::calculate_borrow_rate(utilization, config);
+        let supply_rate = Self::calculate_supply_rate(borrow_rate, utilization, config.reserve_factor);
+        
+        state.utilization_rate = utilization;
+        state.current_borrow_rate = borrow_rate;
+        state.current_supply_rate = supply_rate;
+        state.last_accrual_time = env.ledger().timestamp();
+    }
+
+    /// Accrue interest for a position
+    pub fn accrue_interest_for_position(
+        env: &Env,
+        position: &mut Position,
+        borrow_rate: i128,
+        supply_rate: i128,
+    ) {
+        let current_time = env.ledger().timestamp();
+        let time_delta = if position.last_accrual_time == 0 {
+            0
+        } else {
+            current_time - position.last_accrual_time
+        };
+
+        if time_delta > 0 {
+            // Accrue borrow interest
+            if position.debt > 0 {
+                let borrow_interest = Self::calculate_interest(position.debt, borrow_rate, time_delta);
+                position.borrow_interest += borrow_interest;
+            }
+
+            // Accrue supply interest
+            if position.collateral > 0 {
+                let supply_interest = Self::calculate_interest(position.collateral, supply_rate, time_delta);
+                position.supply_interest += supply_interest;
+            }
+
+            position.last_accrual_time = current_time;
+        }
+    }
+}
+
+/// Storage helper for interest rate configuration
+pub struct InterestRateStorage;
+
+impl InterestRateStorage {
+    fn config_key() -> Symbol { Symbol::short("ir_config") }
+    fn state_key() -> Symbol { Symbol::short("ir_state") }
+    
+    pub fn save_config(env: &Env, config: &InterestRateConfig) {
+        env.storage().instance().set(&Self::config_key(), config);
+    }
+    
+    pub fn get_config(env: &Env) -> InterestRateConfig {
+        env.storage().instance().get(&Self::config_key()).unwrap_or_else(InterestRateConfig::default)
+    }
+    
+    pub fn save_state(env: &Env, state: &InterestRateState) {
+        env.storage().instance().set(&Self::state_key(), state);
+    }
+    
+    pub fn get_state(env: &Env) -> InterestRateState {
+        env.storage().instance().get(&Self::state_key()).unwrap_or_else(InterestRateState::initial)
+    }
+    
+    pub fn update_state(env: &Env) -> InterestRateState {
+        let mut state = Self::get_state(env);
+        let config = Self::get_config(env);
+        InterestRateManager::update_rates(env, &mut state, &config);
+        Self::save_state(env, &state);
+        state
     }
 }
 
@@ -86,6 +290,9 @@ pub enum ProtocolEvent {
     Repay { user: String, amount: i128 },
     Withdraw { user: String, amount: i128 },
     Liquidate { user: String, amount: i128 },
+    InterestAccrued { user: String, borrow_interest: i128, supply_interest: i128 },
+    RateUpdated { borrow_rate: i128, supply_rate: i128, utilization: i128 },
+    ConfigUpdated { parameter: String, old_value: i128, new_value: i128 },
 }
 
 impl ProtocolEvent {
@@ -106,6 +313,24 @@ impl ProtocolEvent {
             }
             ProtocolEvent::Liquidate { user, amount } => {
                 env.events().publish((Symbol::short("liquidate"), Symbol::short("user")), (Symbol::short("user"), *amount));
+            }
+            ProtocolEvent::InterestAccrued { user, borrow_interest, supply_interest } => {
+                env.events().publish(
+                    (Symbol::short("interest_accrued"), Symbol::short("user")), 
+                    (Symbol::short("borrow_interest"), *borrow_interest, Symbol::short("supply_interest"), *supply_interest)
+                );
+            }
+            ProtocolEvent::RateUpdated { borrow_rate, supply_rate, utilization } => {
+                env.events().publish(
+                    (Symbol::short("rate_updated"), Symbol::short("borrow_rate")), 
+                    (Symbol::short("supply_rate"), *supply_rate, Symbol::short("utilization"), *utilization)
+                );
+            }
+            ProtocolEvent::ConfigUpdated { parameter, old_value, new_value } => {
+                env.events().publish(
+                    (Symbol::short("config_updated"), Symbol::short("parameter")), 
+                    (Symbol::short("old_value"), *old_value, Symbol::short("new_value"), *new_value)
+                );
             }
         }
     }
@@ -383,6 +608,14 @@ impl Contract {
             return Err(ProtocolError::AlreadyInitialized);
         }
         ProtocolConfig::set_admin(&env, &admin_addr);
+        
+        // Initialize interest rate system with default configuration
+        let config = InterestRateConfig::default();
+        InterestRateStorage::save_config(&env, &config);
+        
+        let state = InterestRateState::initial();
+        InterestRateStorage::save_state(&env, &state);
+        
         Ok(())
     }
 
@@ -445,6 +678,152 @@ impl Contract {
         Ok(())
     }
 
+    // --- Interest Rate Management Functions ---
+
+    /// Set the base interest rate (admin only)
+    pub fn set_base_rate(env: Env, caller: String, rate: i128) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+        
+        let mut config = InterestRateStorage::get_config(&env);
+        config.base_rate = rate;
+        config.last_update = env.ledger().timestamp();
+        InterestRateStorage::save_config(&env, &config);
+        
+        // Update current rates
+        InterestRateStorage::update_state(&env);
+        
+        Ok(())
+    }
+
+    /// Set the kink utilization point (admin only)
+    pub fn set_kink_utilization(env: Env, caller: String, utilization: i128) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+        
+        let mut config = InterestRateStorage::get_config(&env);
+        config.kink_utilization = utilization;
+        config.last_update = env.ledger().timestamp();
+        InterestRateStorage::save_config(&env, &config);
+        
+        // Update current rates
+        InterestRateStorage::update_state(&env);
+        
+        Ok(())
+    }
+
+    /// Set the rate multiplier (admin only)
+    pub fn set_multiplier(env: Env, caller: String, multiplier: i128) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+        
+        let mut config = InterestRateStorage::get_config(&env);
+        config.multiplier = multiplier;
+        config.last_update = env.ledger().timestamp();
+        InterestRateStorage::save_config(&env, &config);
+        
+        // Update current rates
+        InterestRateStorage::update_state(&env);
+        
+        Ok(())
+    }
+
+    /// Set the reserve factor (admin only)
+    pub fn set_reserve_factor(env: Env, caller: String, factor: i128) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+        
+        let mut config = InterestRateStorage::get_config(&env);
+        config.reserve_factor = factor;
+        config.last_update = env.ledger().timestamp();
+        InterestRateStorage::save_config(&env, &config);
+        
+        // Update current rates
+        InterestRateStorage::update_state(&env);
+        
+        Ok(())
+    }
+
+    /// Set rate limits (admin only)
+    pub fn set_rate_limits(env: Env, caller: String, floor: i128, ceiling: i128) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+        
+        let mut config = InterestRateStorage::get_config(&env);
+        config.rate_floor = floor;
+        config.rate_ceiling = ceiling;
+        config.last_update = env.ledger().timestamp();
+        InterestRateStorage::save_config(&env, &config);
+        
+        // Update current rates
+        InterestRateStorage::update_state(&env);
+        
+        Ok(())
+    }
+
+    /// Emergency rate adjustment (admin only)
+    pub fn emergency_rate_adjustment(env: Env, caller: String, new_rate: i128) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+        
+        let mut state = InterestRateStorage::get_state(&env);
+        state.current_borrow_rate = new_rate;
+        state.last_accrual_time = env.ledger().timestamp();
+        InterestRateStorage::save_state(&env, &state);
+        
+        Ok(())
+    }
+
+    /// Get current interest rates
+    pub fn get_current_rates(env: Env) -> Result<(i128, i128), ProtocolError> {
+        let state = InterestRateStorage::update_state(&env);
+        Ok((state.current_borrow_rate, state.current_supply_rate))
+    }
+
+    /// Get utilization metrics
+    pub fn get_utilization_metrics(env: Env) -> Result<(i128, i128, i128), ProtocolError> {
+        let state = InterestRateStorage::update_state(&env);
+        Ok((state.utilization_rate, state.total_borrowed, state.total_supplied))
+    }
+
+    /// Get user's accrued interest
+    pub fn get_user_accrued_interest(env: Env, user: String) -> Result<(i128, i128), ProtocolError> {
+        let user_addr = Address::from_string(&user);
+        let mut position = StateHelper::get_position(&env, &user_addr)
+            .unwrap_or(Position::new(user_addr, 0, 0));
+        
+        // Accrue interest for the position
+        let state = InterestRateStorage::update_state(&env);
+        InterestRateManager::accrue_interest_for_position(
+            &env,
+            &mut position,
+            state.current_borrow_rate,
+            state.current_supply_rate,
+        );
+        
+        Ok((position.borrow_interest, position.supply_interest))
+    }
+
+    /// Manually accrue interest (anyone can call)
+    pub fn accrue_interest(env: Env) -> Result<(), ProtocolError> {
+        InterestRateStorage::update_state(&env);
+        Ok(())
+    }
+
+    /// Get interest rate configuration
+    pub fn get_interest_rate_config(env: Env) -> Result<(i128, i128, i128, i128, i128, i128, u64), ProtocolError> {
+        let config = InterestRateStorage::get_config(&env);
+        Ok((
+            config.base_rate,
+            config.kink_utilization,
+            config.multiplier,
+            config.reserve_factor,
+            config.rate_floor,
+            config.rate_ceiling,
+            config.last_update,
+        ))
+    }
+
     /// Minimum collateral ratio required (e.g., 150%)
     const MIN_COLLATERAL_RATIO: i128 = 150;
 
@@ -461,8 +840,24 @@ impl Contract {
         let depositor_addr = Address::from_string(&depositor);
         let mut position = StateHelper::get_position(&env, &depositor_addr)
             .unwrap_or(Position::new(depositor_addr.clone(), 0, 0));
+        
+        // Accrue interest before updating position
+        let state = InterestRateStorage::update_state(&env);
+        InterestRateManager::accrue_interest_for_position(
+            &env,
+            &mut position,
+            state.current_borrow_rate,
+            state.current_supply_rate,
+        );
+        
         position.collateral += amount;
         StateHelper::save_position(&env, &position);
+        
+        // Update total supplied amount
+        let mut ir_state = InterestRateStorage::get_state(&env);
+        ir_state.total_supplied += amount;
+        InterestRateStorage::save_state(&env, &ir_state);
+        
         ProtocolEvent::Deposit { user: depositor, amount }.emit(&env);
         Ok(())
     }
@@ -478,6 +873,16 @@ impl Contract {
         let borrower_addr = Address::from_string(&borrower);
         let mut position = StateHelper::get_position(&env, &borrower_addr)
             .unwrap_or(Position::new(borrower_addr.clone(), 0, 0));
+        
+        // Accrue interest before updating position
+        let state = InterestRateStorage::update_state(&env);
+        InterestRateManager::accrue_interest_for_position(
+            &env,
+            &mut position,
+            state.current_borrow_rate,
+            state.current_supply_rate,
+        );
+        
         let new_debt = position.debt + amount;
         let mut new_position = position.clone();
         new_position.debt = new_debt;
@@ -488,6 +893,12 @@ impl Contract {
         }
         position.debt = new_debt;
         StateHelper::save_position(&env, &position);
+        
+        // Update total borrowed amount
+        let mut ir_state = InterestRateStorage::get_state(&env);
+        ir_state.total_borrowed += amount;
+        InterestRateStorage::save_state(&env, &ir_state);
+        
         ProtocolEvent::Borrow { user: borrower, amount }.emit(&env);
         Ok(())
     }
@@ -503,8 +914,25 @@ impl Contract {
         let repayer_addr = Address::from_string(&repayer);
         let mut position = StateHelper::get_position(&env, &repayer_addr)
             .unwrap_or(Position::new(repayer_addr.clone(), 0, 0));
+        
+        // Accrue interest before updating position
+        let state = InterestRateStorage::update_state(&env);
+        InterestRateManager::accrue_interest_for_position(
+            &env,
+            &mut position,
+            state.current_borrow_rate,
+            state.current_supply_rate,
+        );
+        
+        let old_debt = position.debt;
         position.debt = (position.debt - amount).max(0);
         StateHelper::save_position(&env, &position);
+        
+        // Update total borrowed amount
+        let mut ir_state = InterestRateStorage::get_state(&env);
+        ir_state.total_borrowed -= (old_debt - position.debt);
+        InterestRateStorage::save_state(&env, &ir_state);
+        
         ProtocolEvent::Repay { user: repayer, amount }.emit(&env);
         Ok(())
     }
@@ -520,6 +948,16 @@ impl Contract {
         let withdrawer_addr = Address::from_string(&withdrawer);
         let mut position = StateHelper::get_position(&env, &withdrawer_addr)
             .unwrap_or(Position::new(withdrawer_addr.clone(), 0, 0));
+        
+        // Accrue interest before updating position
+        let state = InterestRateStorage::update_state(&env);
+        InterestRateManager::accrue_interest_for_position(
+            &env,
+            &mut position,
+            state.current_borrow_rate,
+            state.current_supply_rate,
+        );
+        
         if position.collateral < amount {
             return Err(ProtocolError::InsufficientCollateral);
         }
@@ -532,6 +970,12 @@ impl Contract {
         }
         position.collateral = new_position.collateral;
         StateHelper::save_position(&env, &position);
+        
+        // Update total supplied amount
+        let mut ir_state = InterestRateStorage::get_state(&env);
+        ir_state.total_supplied -= amount;
+        InterestRateStorage::save_state(&env, &ir_state);
+        
         ProtocolEvent::Withdraw { user: withdrawer, amount }.emit(&env);
         Ok(())
     }
