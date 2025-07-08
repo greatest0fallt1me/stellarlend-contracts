@@ -1655,11 +1655,11 @@ fn test_multi_asset_initialization() {
         // Test that asset registry is initialized
         let supported_assets = Contract::get_supported_assets(env.clone());
         assert_eq!(supported_assets.len(), 1);
-        assert_eq!(supported_assets.get(0), String::from_str(&env, "XLM"));
+        assert_eq!(supported_assets.get(0), Some(String::from_str(&env, "XLM")));
         
         // Test that default XLM asset is configured
         let xlm_info = Contract::get_asset_info(env.clone(), String::from_str(&env, "XLM")).unwrap();
-        assert_eq!(xlm_info.0, "XLM"); // symbol
+        assert_eq!(xlm_info.0, String::from_str(&env, "XLM")); // symbol
         assert_eq!(xlm_info.1, 7); // decimals
         assert_eq!(xlm_info.3, 150); // min_collateral_ratio
         assert_eq!(xlm_info.4, true); // deposit_enabled
@@ -1695,7 +1695,7 @@ fn test_add_asset() {
         
         // Verify asset info is stored
         let usdc_info = Contract::get_asset_info(env.clone(), String::from_str(&env, "USDC")).unwrap();
-        assert_eq!(usdc_info.0, "USDC");
+        assert_eq!(usdc_info.0, String::from_str(&env, "USDC"));
         assert_eq!(usdc_info.1, 6);
         assert_eq!(usdc_info.3, 120);
     });
