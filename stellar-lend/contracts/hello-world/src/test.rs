@@ -2062,3 +2062,343 @@ fn test_multi_asset_registry_management() {
         assert_eq!(btc_info.3, 200);
     });
 }
+
+// --- Activity Tracking Tests ---
+
+#[test]
+fn test_activity_tracking_initialization() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let _admin = TestUtils::initialize_contract(&env);
+    let user = TestUtils::create_user_address(&env, 1);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        // Test initial user activity (should be empty)
+        let activity = Contract::get_user_activity(env.clone(), user.to_string()).unwrap();
+        assert_eq!(activity.0, 0); // total_deposits
+        assert_eq!(activity.1, 0); // total_withdrawals
+        assert_eq!(activity.2, 0); // total_borrows
+        assert_eq!(activity.3, 0); // total_repayments
+        assert_eq!(activity.4, 0); // last_activity
+        assert_eq!(activity.5, 0); // activity_count
+        
+        // Test initial protocol activity
+        let protocol_activity = Contract::get_protocol_activity(env.clone());
+        assert_eq!(protocol_activity.0, 0); // total_users
+        assert_eq!(protocol_activity.1, 0); // active_users_24h
+        assert_eq!(protocol_activity.2, 0); // active_users_7d
+        assert_eq!(protocol_activity.3, 0); // total_transactions
+        assert_eq!(protocol_activity.4, 0); // last_update
+    });
+}
+
+#[test]
+fn test_track_user_activity_deposit() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let _admin = TestUtils::initialize_contract(&env);
+    let user = TestUtils::create_user_address(&env, 1);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        // Track deposit activity
+        let result = Contract::track_user_activity(
+            env.clone(), 
+            user.to_string(), 
+            String::from_str(&env, "deposit"), 
+            1000
+        );
+        assert!(result.is_ok());
+        
+        // Verify activity is recorded
+        let activity = Contract::get_user_activity(env.clone(), user.to_string()).unwrap();
+        assert_eq!(activity.0, 1000); // total_deposits
+        assert_eq!(activity.1, 0);    // total_withdrawals
+        assert_eq!(activity.2, 0);    // total_borrows
+        assert_eq!(activity.3, 0);    // total_repayments
+        assert_eq!(activity.5, 1);    // activity_count
+        assert!(activity.4 > 0);      // last_activity timestamp
+    });
+}
+
+#[test]
+fn test_track_user_activity_withdrawal() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let _admin = TestUtils::initialize_contract(&env);
+    let user = TestUtils::create_user_address(&env, 1);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        // Track withdrawal activity
+        let result = Contract::track_user_activity(
+            env.clone(), 
+            user.to_string(), 
+            String::from_str(&env, "withdrawal"), 
+            500
+        );
+        assert!(result.is_ok());
+        
+        // Verify activity is recorded
+        let activity = Contract::get_user_activity(env.clone(), user.to_string()).unwrap();
+        assert_eq!(activity.0, 0);    // total_deposits
+        assert_eq!(activity.1, 500);  // total_withdrawals
+        assert_eq!(activity.2, 0);    // total_borrows
+        assert_eq!(activity.3, 0);    // total_repayments
+        assert_eq!(activity.5, 1);    // activity_count
+    });
+}
+
+#[test]
+fn test_track_user_activity_borrow() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let _admin = TestUtils::initialize_contract(&env);
+    let user = TestUtils::create_user_address(&env, 1);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        // Track borrow activity
+        let result = Contract::track_user_activity(
+            env.clone(), 
+            user.to_string(), 
+            String::from_str(&env, "borrow"), 
+            750
+        );
+        assert!(result.is_ok());
+        
+        // Verify activity is recorded
+        let activity = Contract::get_user_activity(env.clone(), user.to_string()).unwrap();
+        assert_eq!(activity.0, 0);    // total_deposits
+        assert_eq!(activity.1, 0);    // total_withdrawals
+        assert_eq!(activity.2, 750);  // total_borrows
+        assert_eq!(activity.3, 0);    // total_repayments
+        assert_eq!(activity.5, 1);    // activity_count
+    });
+}
+
+#[test]
+fn test_track_user_activity_repayment() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let _admin = TestUtils::initialize_contract(&env);
+    let user = TestUtils::create_user_address(&env, 1);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        // Track repayment activity
+        let result = Contract::track_user_activity(
+            env.clone(), 
+            user.to_string(), 
+            String::from_str(&env, "repayment"), 
+            300
+        );
+        assert!(result.is_ok());
+        
+        // Verify activity is recorded
+        let activity = Contract::get_user_activity(env.clone(), user.to_string()).unwrap();
+        assert_eq!(activity.0, 0);    // total_deposits
+        assert_eq!(activity.1, 0);    // total_withdrawals
+        assert_eq!(activity.2, 0);    // total_borrows
+        assert_eq!(activity.3, 300);  // total_repayments
+        assert_eq!(activity.5, 1);    // activity_count
+    });
+}
+
+#[test]
+fn test_track_user_activity_invalid_action() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let _admin = TestUtils::initialize_contract(&env);
+    let user = TestUtils::create_user_address(&env, 1);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        // Track invalid activity
+        let result = Contract::track_user_activity(
+            env.clone(), 
+            user.to_string(), 
+            String::from_str(&env, "invalid_action"), 
+            1000
+        );
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ProtocolError::Unknown);
+    });
+}
+
+#[test]
+fn test_track_user_activity_accumulation() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let _admin = TestUtils::initialize_contract(&env);
+    let user = TestUtils::create_user_address(&env, 1);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        // Track multiple activities
+        Contract::track_user_activity(env.clone(), user.to_string(), String::from_str(&env, "deposit"), 1000).unwrap();
+        Contract::track_user_activity(env.clone(), user.to_string(), String::from_str(&env, "borrow"), 500).unwrap();
+        Contract::track_user_activity(env.clone(), user.to_string(), String::from_str(&env, "repayment"), 200).unwrap();
+        Contract::track_user_activity(env.clone(), user.to_string(), String::from_str(&env, "withdrawal"), 300).unwrap();
+        
+        // Verify accumulated activity
+        let activity = Contract::get_user_activity(env.clone(), user.to_string()).unwrap();
+        assert_eq!(activity.0, 1000); // total_deposits
+        assert_eq!(activity.1, 300);  // total_withdrawals
+        assert_eq!(activity.2, 500);  // total_borrows
+        assert_eq!(activity.3, 200);  // total_repayments
+        assert_eq!(activity.5, 4);    // activity_count
+    });
+}
+
+#[test]
+fn test_update_protocol_stats() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = TestUtils::initialize_contract(&env);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        // Update protocol stats
+        let result = Contract::update_protocol_stats(
+            env.clone(),
+            admin.to_string(),
+            100,  // total_users
+            25,   // active_users_24h
+            50,   // active_users_7d
+            1000, // total_transactions
+        );
+        assert!(result.is_ok());
+        
+        // Verify stats are updated
+        let stats = Contract::get_protocol_activity(env.clone());
+        assert_eq!(stats.0, 100);  // total_users
+        assert_eq!(stats.1, 25);   // active_users_24h
+        assert_eq!(stats.2, 50);   // active_users_7d
+        assert_eq!(stats.3, 1000); // total_transactions
+        assert!(stats.4 > 0);      // last_update timestamp
+    });
+}
+
+#[test]
+fn test_update_protocol_stats_unauthorized() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let _admin = TestUtils::initialize_contract(&env);
+    let user = TestUtils::create_user_address(&env, 1);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        // Try to update protocol stats as non-admin
+        let result = Contract::update_protocol_stats(
+            env.clone(),
+            user.to_string(),
+            100,
+            25,
+            50,
+            1000,
+        );
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ProtocolError::NotAdmin);
+    });
+}
+
+#[test]
+fn test_get_recent_activity() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let _admin = TestUtils::initialize_contract(&env);
+    let user = TestUtils::create_user_address(&env, 1);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        // Track some activity first
+        Contract::track_user_activity(env.clone(), user.to_string(), String::from_str(&env, "deposit"), 1000).unwrap();
+        Contract::track_user_activity(env.clone(), user.to_string(), String::from_str(&env, "borrow"), 500).unwrap();
+        
+        // Get recent activity
+        let recent = Contract::get_recent_activity(env.clone(), user.to_string()).unwrap();
+        assert_eq!(recent.0, String::from_str(&env, "borrow")); // Last action should be borrow
+        assert_eq!(recent.1, 500); // Last amount should be borrow amount
+        assert!(recent.2 > 0);     // Should have timestamp
+    });
+}
+
+#[test]
+fn test_get_recent_activity_no_activity() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let _admin = TestUtils::initialize_contract(&env);
+    let user = TestUtils::create_user_address(&env, 1);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        // Try to get recent activity for user with no activity
+        let result = Contract::get_recent_activity(env.clone(), user.to_string());
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ProtocolError::PositionNotFound);
+    });
+}
+
+#[test]
+fn test_activity_tracking_multiple_users() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let _admin = TestUtils::initialize_contract(&env);
+    let user1 = TestUtils::create_user_address(&env, 1);
+    let user2 = TestUtils::create_user_address(&env, 2);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        // Track activity for user1
+        Contract::track_user_activity(env.clone(), user1.to_string(), String::from_str(&env, "deposit"), 1000).unwrap();
+        Contract::track_user_activity(env.clone(), user1.to_string(), String::from_str(&env, "borrow"), 500).unwrap();
+        
+        // Track activity for user2
+        Contract::track_user_activity(env.clone(), user2.to_string(), String::from_str(&env, "deposit"), 2000).unwrap();
+        Contract::track_user_activity(env.clone(), user2.to_string(), String::from_str(&env, "withdrawal"), 300).unwrap();
+        
+        // Verify user1 activity
+        let activity1 = Contract::get_user_activity(env.clone(), user1.to_string()).unwrap();
+        assert_eq!(activity1.0, 1000); // total_deposits
+        assert_eq!(activity1.2, 500);  // total_borrows
+        assert_eq!(activity1.5, 2);    // activity_count
+        
+        // Verify user2 activity
+        let activity2 = Contract::get_user_activity(env.clone(), user2.to_string()).unwrap();
+        assert_eq!(activity2.0, 2000); // total_deposits
+        assert_eq!(activity2.1, 300);  // total_withdrawals
+        assert_eq!(activity2.5, 2);    // activity_count
+    });
+}
+
+#[test]
+fn test_activity_tracking_integration_with_lending() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let _admin = TestUtils::initialize_contract(&env);
+    let user = TestUtils::create_user_address(&env, 1);
+    
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        // Perform lending operations
+        Contract::deposit_collateral(env.clone(), user.to_string(), 2000).unwrap();
+        Contract::borrow(env.clone(), user.to_string(), 1000).unwrap();
+        
+        // Manually track activity (in real implementation, this would be automatic)
+        Contract::track_user_activity(env.clone(), user.to_string(), String::from_str(&env, "deposit"), 2000).unwrap();
+        Contract::track_user_activity(env.clone(), user.to_string(), String::from_str(&env, "borrow"), 1000).unwrap();
+        
+        // Verify activity tracking works alongside lending operations
+        let activity = Contract::get_user_activity(env.clone(), user.to_string()).unwrap();
+        assert_eq!(activity.0, 2000); // total_deposits
+        assert_eq!(activity.2, 1000); // total_borrows
+        assert_eq!(activity.5, 2);    // activity_count
+        
+        // Verify lending position is still correct
+        let (collateral, debt, _ratio) = Contract::get_position(env.clone(), user.to_string()).unwrap();
+        assert_eq!(collateral, 2000);
+        assert_eq!(debt, 1000);
+    });
+}

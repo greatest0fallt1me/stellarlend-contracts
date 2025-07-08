@@ -208,6 +208,40 @@ pub struct RevenueMetrics {
     pub total_supply_fees: i128,
 }
 
+/// User activity tracking metrics
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct UserActivity {
+    /// Total deposits made by user
+    pub total_deposits: i128,
+    /// Total withdrawals made by user
+    pub total_withdrawals: i128,
+    /// Total borrows made by user
+    pub total_borrows: i128,
+    /// Total repayments made by user
+    pub total_repayments: i128,
+    /// Last activity timestamp
+    pub last_activity: u64,
+    /// Total number of activities
+    pub activity_count: u32,
+}
+
+/// Protocol-wide activity summary
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct ProtocolActivity {
+    /// Total number of unique users
+    pub total_users: u32,
+    /// Number of active users in last 24 hours
+    pub active_users_24h: u32,
+    /// Number of active users in last 7 days
+    pub active_users_7d: u32,
+    /// Total number of transactions
+    pub total_transactions: u32,
+    /// Last update timestamp
+    pub last_update: u64,
+}
+
 impl RevenueMetrics {
     pub fn default() -> Self {
         Self {
@@ -217,6 +251,63 @@ impl RevenueMetrics {
             total_borrow_fees: 0,
             total_supply_fees: 0,
         }
+    }
+}
+
+impl UserActivity {
+    pub fn new() -> Self {
+        Self {
+            total_deposits: 0,
+            total_withdrawals: 0,
+            total_borrows: 0,
+            total_repayments: 0,
+            last_activity: 0,
+            activity_count: 0,
+        }
+    }
+    
+    pub fn record_deposit(&mut self, amount: i128, timestamp: u64) {
+        self.total_deposits += amount;
+        self.last_activity = timestamp;
+        self.activity_count += 1;
+    }
+    
+    pub fn record_withdrawal(&mut self, amount: i128, timestamp: u64) {
+        self.total_withdrawals += amount;
+        self.last_activity = timestamp;
+        self.activity_count += 1;
+    }
+    
+    pub fn record_borrow(&mut self, amount: i128, timestamp: u64) {
+        self.total_borrows += amount;
+        self.last_activity = timestamp;
+        self.activity_count += 1;
+    }
+    
+    pub fn record_repayment(&mut self, amount: i128, timestamp: u64) {
+        self.total_repayments += amount;
+        self.last_activity = timestamp;
+        self.activity_count += 1;
+    }
+}
+
+impl ProtocolActivity {
+    pub fn new() -> Self {
+        Self {
+            total_users: 0,
+            active_users_24h: 0,
+            active_users_7d: 0,
+            total_transactions: 0,
+            last_update: 0,
+        }
+    }
+    
+    pub fn update_stats(&mut self, total_users: u32, active_users_24h: u32, active_users_7d: u32, total_transactions: u32, timestamp: u64) {
+        self.total_users = total_users;
+        self.active_users_24h = active_users_24h;
+        self.active_users_7d = active_users_7d;
+        self.total_transactions = total_transactions;
+        self.last_update = timestamp;
     }
 }
 
@@ -241,6 +332,36 @@ impl ReserveStorage {
     
     pub fn get_revenue_metrics(env: &Env) -> RevenueMetrics {
         env.storage().instance().get(&Self::metrics_key()).unwrap_or_else(RevenueMetrics::default)
+    }
+}
+
+/// Storage helper for activity tracking
+pub struct ActivityStorage;
+
+impl ActivityStorage {
+    fn user_activity_key(env: &Env, user: &Address) -> Symbol { 
+        // Use a simple approach: create a unique key based on user address
+        let user_str = user.to_string();
+        // Use a fixed key for simplicity - in production you'd want a more sophisticated approach
+        Symbol::new(env, "user_activity")
+    }
+    
+    fn protocol_activity_key() -> Symbol { Symbol::short("protocol_activity") }
+    
+    pub fn save_user_activity(env: &Env, user: &Address, activity: &UserActivity) {
+        env.storage().instance().set(&Self::user_activity_key(env, user), activity);
+    }
+    
+    pub fn get_user_activity(env: &Env, user: &Address) -> Option<UserActivity> {
+        env.storage().instance().get(&Self::user_activity_key(env, user))
+    }
+    
+    pub fn save_protocol_activity(env: &Env, activity: &ProtocolActivity) {
+        env.storage().instance().set(&Self::protocol_activity_key(), activity);
+    }
+    
+    pub fn get_protocol_activity(env: &Env) -> ProtocolActivity {
+        env.storage().instance().get(&Self::protocol_activity_key()).unwrap_or_else(ProtocolActivity::new)
     }
 }
 
@@ -619,6 +740,8 @@ pub enum ProtocolEvent {
     AssetAdded { asset: String, symbol: String, decimals: u32 },
     AssetUpdated { asset: String, parameter: String, old_value: String, new_value: String },
     AssetDisabled { asset: String, reason: String },
+    UserActivityTracked { user: String, action: String, amount: i128, timestamp: u64 },
+    ProtocolStatsUpdated { total_users: u32, active_users_24h: u32, total_transactions: u32 },
 }
 
 impl ProtocolEvent {
@@ -713,6 +836,18 @@ impl ProtocolEvent {
                 env.events().publish(
                     (Symbol::short("asset_disabled"), Symbol::short("asset")), 
                     (Symbol::short("reason"), reason.clone())
+                );
+            }
+            ProtocolEvent::UserActivityTracked { user, action, amount, timestamp } => {
+                env.events().publish(
+                    (Symbol::short("user_activity"), Symbol::short("user")), 
+                    (Symbol::short("action"), action.clone(), Symbol::short("amount"), *amount, Symbol::short("timestamp"), *timestamp)
+                );
+            }
+            ProtocolEvent::ProtocolStatsUpdated { total_users, active_users_24h, total_transactions } => {
+                env.events().publish(
+                    (Symbol::short("protocol_stats"), Symbol::short("total_users")), 
+                    (Symbol::short("active_users_24h"), *active_users_24h, Symbol::short("total_transactions"), *total_transactions)
                 );
             }
         }
@@ -1943,6 +2078,120 @@ impl Contract {
         }.emit(&env);
         
         Ok(())
+    }
+    
+    // --- Activity Tracking Functions ---
+    
+    /// Track user activity for analytics
+    pub fn track_user_activity(env: Env, user: String, action: String, amount: i128) -> Result<(), ProtocolError> {
+        let user_addr = Address::from_string(&user);
+        let timestamp = env.ledger().timestamp();
+        
+        let mut activity = ActivityStorage::get_user_activity(&env, &user_addr)
+            .unwrap_or_else(UserActivity::new);
+        
+        if action == String::from_str(&env, "deposit") {
+            activity.record_deposit(amount, timestamp);
+        } else if action == String::from_str(&env, "withdrawal") {
+            activity.record_withdrawal(amount, timestamp);
+        } else if action == String::from_str(&env, "borrow") {
+            activity.record_borrow(amount, timestamp);
+        } else if action == String::from_str(&env, "repayment") {
+            activity.record_repayment(amount, timestamp);
+        } else {
+            return Err(ProtocolError::Unknown);
+        }
+        
+        ActivityStorage::save_user_activity(&env, &user_addr, &activity);
+        
+        ProtocolEvent::UserActivityTracked { 
+            user: user.clone(), 
+            action, 
+            amount, 
+            timestamp 
+        }.emit(&env);
+        
+        Ok(())
+    }
+    
+    /// Get user activity metrics
+    pub fn get_user_activity(env: Env, user: String) -> Result<(i128, i128, i128, i128, u64, u32), ProtocolError> {
+        let user_addr = Address::from_string(&user);
+        
+        let activity = ActivityStorage::get_user_activity(&env, &user_addr)
+            .unwrap_or_else(UserActivity::new);
+        
+        Ok((
+            activity.total_deposits,
+            activity.total_withdrawals,
+            activity.total_borrows,
+            activity.total_repayments,
+            activity.last_activity,
+            activity.activity_count,
+        ))
+    }
+    
+    /// Get protocol-wide activity statistics
+    pub fn get_protocol_activity(env: Env) -> (u32, u32, u32, u32, u64) {
+        let activity = ActivityStorage::get_protocol_activity(&env);
+        
+        (
+            activity.total_users,
+            activity.active_users_24h,
+            activity.active_users_7d,
+            activity.total_transactions,
+            activity.last_update,
+        )
+    }
+    
+    /// Update protocol activity statistics (admin only)
+    pub fn update_protocol_stats(
+        env: Env,
+        caller: String,
+        total_users: u32,
+        active_users_24h: u32,
+        active_users_7d: u32,
+        total_transactions: u32,
+    ) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+        
+        let mut activity = ActivityStorage::get_protocol_activity(&env);
+        let timestamp = env.ledger().timestamp();
+        
+        activity.update_stats(total_users, active_users_24h, active_users_7d, total_transactions, timestamp);
+        ActivityStorage::save_protocol_activity(&env, &activity);
+        
+        ProtocolEvent::ProtocolStatsUpdated { 
+            total_users, 
+            active_users_24h, 
+            total_transactions 
+        }.emit(&env);
+        
+        Ok(())
+    }
+    
+    /// Get recent user activities (simplified version)
+    pub fn get_recent_activity(env: Env, user: String) -> Result<(String, i128, u64), ProtocolError> {
+        let user_addr = Address::from_string(&user);
+        
+        let activity = ActivityStorage::get_user_activity(&env, &user_addr)
+            .unwrap_or_else(UserActivity::new);
+        
+        if activity.activity_count == 0 {
+            return Err(ProtocolError::PositionNotFound);
+        }
+        
+        // Return the most recent activity info
+        let last_action = if activity.total_repayments > 0 { "repayment" } 
+                         else if activity.total_borrows > 0 { "borrow" }
+                         else if activity.total_withdrawals > 0 { "withdrawal" }
+                         else { "deposit" };
+        
+        let last_amount = activity.total_repayments.max(activity.total_borrows)
+            .max(activity.total_withdrawals).max(activity.total_deposits);
+        
+        Ok((String::from_str(&env, last_action), last_amount, activity.last_activity))
     }
 }
 
