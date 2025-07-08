@@ -358,12 +358,16 @@ pub struct AssetStorage;
 impl AssetStorage {
     fn registry_key() -> Symbol { Symbol::short("asset_reg") }
     fn asset_info_key(asset: &String) -> Symbol { 
-        match asset.as_str() {
-            "XLM" => Symbol::short("asset_xlm"),
-            "USDC" => Symbol::short("asset_usdc"),
-            "BTC" => Symbol::short("asset_btc"),
-            "ETH" => Symbol::short("asset_eth"),
-            _ => Symbol::short("asset_def"),
+        if asset == &String::from_str(&Env::default(), "XLM") {
+            Symbol::short("asset_xlm")
+        } else if asset == &String::from_str(&Env::default(), "USDC") {
+            Symbol::short("asset_usdc")
+        } else if asset == &String::from_str(&Env::default(), "BTC") {
+            Symbol::short("asset_btc")
+        } else if asset == &String::from_str(&Env::default(), "ETH") {
+            Symbol::short("asset_eth")
+        } else {
+            Symbol::short("asset_def")
         }
     }
     fn position_key(user: &Address, asset: &str) -> Symbol { 
@@ -1027,7 +1031,7 @@ impl Contract {
             xlm_oracle,
             150, // 150% minimum collateral ratio
         );
-        AssetStorage::save_asset_info(&env, "XLM", &xlm_asset_info);
+        AssetStorage::save_asset_info(&env, &String::from_str(&env, "XLM"), &xlm_asset_info);
         
         Ok(())
     }
