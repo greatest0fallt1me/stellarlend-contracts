@@ -742,6 +742,8 @@ pub enum ProtocolEvent {
     AssetDisabled { asset: String, reason: String },
     UserActivityTracked { user: String, action: String, amount: i128, timestamp: u64 },
     ProtocolStatsUpdated { total_users: u32, active_users_24h: u32, total_transactions: u32 },
+    AccountFrozen { user: String },
+    AccountUnfrozen { user: String },
 }
 
 impl ProtocolEvent {
@@ -848,6 +850,18 @@ impl ProtocolEvent {
                 env.events().publish(
                     (Symbol::short("protocol_stats"), Symbol::short("total_users")), 
                     (Symbol::short("active_users_24h"), *active_users_24h, Symbol::short("total_transactions"), *total_transactions)
+                );
+            }
+            ProtocolEvent::AccountFrozen { user } => {
+                env.events().publish(
+                    (Symbol::short("account_frozen"), Symbol::short("user")), 
+                    (Symbol::short("user"), user.clone())
+                );
+            }
+            ProtocolEvent::AccountUnfrozen { user } => {
+                env.events().publish(
+                    (Symbol::short("account_unfrozen"), Symbol::short("user")), 
+                    (Symbol::short("user"), user.clone())
                 );
             }
         }
@@ -1396,6 +1410,9 @@ impl Contract {
             return Err(ProtocolError::ProtocolPaused);
         }
         let depositor_addr = Address::from_string(&depositor);
+        if FrozenAccounts::is_frozen(&env, &depositor_addr) {
+            return Err(ProtocolError::Unauthorized);
+        }
         let mut position = StateHelper::get_position(&env, &depositor_addr)
             .unwrap_or(Position::new(depositor_addr.clone(), 0, 0));
         
@@ -1459,6 +1476,9 @@ impl Contract {
             return Err(ProtocolError::ProtocolPaused);
         }
         let borrower_addr = Address::from_string(&borrower);
+        if FrozenAccounts::is_frozen(&env, &borrower_addr) {
+            return Err(ProtocolError::Unauthorized);
+        }
         let mut position = StateHelper::get_position(&env, &borrower_addr)
             .unwrap_or(Position::new(borrower_addr.clone(), 0, 0));
         
@@ -1527,6 +1547,9 @@ impl Contract {
         // Note: Repay is typically not paused as it's beneficial for the protocol
         // But we can add pause check here if needed in the future
         let repayer_addr = Address::from_string(&repayer);
+        if FrozenAccounts::is_frozen(&env, &repayer_addr) {
+            return Err(ProtocolError::Unauthorized);
+        }
         let mut position = StateHelper::get_position(&env, &repayer_addr)
             .unwrap_or(Position::new(repayer_addr.clone(), 0, 0));
         
@@ -1567,6 +1590,9 @@ impl Contract {
             return Err(ProtocolError::ProtocolPaused);
         }
         let withdrawer_addr = Address::from_string(&withdrawer);
+        if FrozenAccounts::is_frozen(&env, &withdrawer_addr) {
+            return Err(ProtocolError::Unauthorized);
+        }
         let mut position = StateHelper::get_position(&env, &withdrawer_addr)
             .unwrap_or(Position::new(withdrawer_addr.clone(), 0, 0));
         
@@ -1617,6 +1643,10 @@ impl Contract {
         }
         
         let target_addr = Address::from_string(&target);
+        if FrozenAccounts::is_frozen(&env, &target_addr) {
+            return Err(ProtocolError::Unauthorized);
+        }
+        
         let mut position = match StateHelper::get_position(&env, &target_addr) {
             Some(pos) => pos,
             None => return Err(ProtocolError::PositionNotFound),
@@ -2193,6 +2223,32 @@ impl Contract {
         
         Ok((String::from_str(&env, last_action), last_amount, activity.last_activity))
     }
+
+    /// Freeze a user account (admin only)
+    pub fn freeze_account(env: Env, caller: String, user: String) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+        let user_addr = Address::from_string(&user);
+        FrozenAccounts::freeze(&env, &user_addr);
+        ProtocolEvent::AccountFrozen { user }.emit(&env);
+        Ok(())
+    }
+
+    /// Unfreeze a user account (admin only)
+    pub fn unfreeze_account(env: Env, caller: String, user: String) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+        let user_addr = Address::from_string(&user);
+        FrozenAccounts::unfreeze(&env, &user_addr);
+        ProtocolEvent::AccountUnfrozen { user }.emit(&env);
+        Ok(())
+    }
+
+    /// Query if a user is frozen
+    pub fn is_account_frozen(env: Env, user: String) -> bool {
+        let user_addr = Address::from_string(&user);
+        FrozenAccounts::is_frozen(&env, &user_addr)
+    }
 }
 
 mod test;
@@ -2202,3 +2258,22 @@ mod test;
 // Add doc comments and placeholder for future event logic
 // pub enum ProtocolEvent { ... }
 // impl ProtocolEvent { ... }
+
+/// Storage helper for per-user freezing
+pub struct FrozenAccounts;
+
+impl FrozenAccounts {
+    fn key(user: &Address) -> Symbol {
+        // Use address string as symbol key
+        Symbol::new(&Env::default(), &user.to_string())
+    }
+    pub fn freeze(env: &Env, user: &Address) {
+        env.storage().instance().set(&Self::key(user), &true);
+    }
+    pub fn unfreeze(env: &Env, user: &Address) {
+        env.storage().instance().set(&Self::key(user), &false);
+    }
+    pub fn is_frozen(env: &Env, user: &Address) -> bool {
+        env.storage().instance().get::<Symbol, bool>(&Self::key(user)).unwrap_or(false)
+    }
+}
