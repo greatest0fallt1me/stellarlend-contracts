@@ -19,6 +19,46 @@ use soroban_sdk::{
 // mod withdraw;
 // mod liquidate;
 
+
+/// Reentrancy guard for security
+pub struct ReentrancyGuard;
+
+impl ReentrancyGuard {
+    fn key() -> Symbol { Symbol::short("reentrancy") }
+    pub fn enter(env: &Env) -> Result<(), ProtocolError> {
+        let entered = env.storage().instance().get::<Symbol, bool>(&Self::key()).unwrap_or(false);
+        if entered {
+            return Err(ProtocolError::Unknown); // Reentrancy detected
+        }
+        env.storage().instance().set(&Self::key(), &true);
+        Ok(())
+    }
+    pub fn exit(env: &Env) {
+        env.storage().instance().set(&Self::key(), &false);
+    }
+}
+
+/// Security monitor for suspicious activity
+pub struct SecurityMonitor;
+
+impl SecurityMonitor {
+    fn suspicious_key(user: &Address) -> Symbol {
+        Symbol::new(&Env::default(), &format!("suspicious_{}", user.to_string()))
+    }
+    pub fn record_suspicious(env: &Env, user: &Address, reason: &str) {
+        let key = Self::suspicious_key(user);
+        let count = env.storage().instance().get::<Symbol, u32>(&key).unwrap_or(0) + 1;
+        env.storage().instance().set(&key, &count);
+        env.events().publish(
+            (Symbol::short("security_alert"), Symbol::short("user")),
+            (Symbol::short("reason"), String::from_str(env, reason), Symbol::short("count"), count)
+        );
+    }
+    pub fn get_suspicious_count(env: &Env, user: &Address) -> u32 {
+        env.storage().instance().get::<Symbol, u32>(&Self::suspicious_key(user)).unwrap_or(0)
+    }
+}
+
 /// The main contract struct for StellarLend
 #[contract]
 pub struct Contract;
@@ -1777,13 +1817,10 @@ impl Contract {
     const MIN_COLLATERAL_RATIO: i128 = 150;
 
     // --- Core Protocol Function Placeholders ---
-
-    /// Deposit collateral into the protocol
-    pub fn deposit_collateral(
-        env: Env,
-        depositor: String,
-        amount: i128,
-    ) -> Result<(), ProtocolError> {
+/// Deposit collateral into the protocol
+pub fn deposit_collateral(env: Env, depositor: String, amount: i128) -> Result<(), ProtocolError> {
+    ReentrancyGuard::enter(&env)?;
+    let result = (|| {
         if depositor.is_empty() {
             return Err(ProtocolError::InvalidAddress);
         }
@@ -1796,10 +1833,13 @@ impl Contract {
         if risk_config.pause_deposit {
             return Err(ProtocolError::ProtocolPaused);
         }
+
         let depositor_addr = Address::from_string(&depositor);
         if FrozenAccounts::is_frozen(&env, &depositor_addr) {
+            SecurityMonitor::record_suspicious(&env, &depositor_addr, "deposit while frozen");
             return Err(ProtocolError::Unauthorized);
         }
+
         let mut position = StateHelper::get_position(&env, &depositor_addr)
             .unwrap_or(Position::new(depositor_addr.clone(), 0, 0));
 
@@ -1854,11 +1894,16 @@ impl Contract {
             asset: String::from_str(&env, "XLM"),
         }
         .emit(&env);
-        Ok(())
-    }
 
-    /// Borrow assets from the protocol with dynamic risk check
-    pub fn borrow(env: Env, borrower: String, amount: i128) -> Result<(), ProtocolError> {
+        Ok(())
+    })();
+    ReentrancyGuard::exit(&env);
+    result
+}
+/// Borrow assets from the protocol with dynamic risk check
+pub fn borrow(env: Env, borrower: String, amount: i128) -> Result<(), ProtocolError> {
+    ReentrancyGuard::enter(&env)?;
+    let result = (|| {
         if borrower.is_empty() {
             return Err(ProtocolError::InvalidAddress);
         }
@@ -1871,10 +1916,13 @@ impl Contract {
         if risk_config.pause_borrow {
             return Err(ProtocolError::ProtocolPaused);
         }
+
         let borrower_addr = Address::from_string(&borrower);
         if FrozenAccounts::is_frozen(&env, &borrower_addr) {
+            SecurityMonitor::record_suspicious(&env, &borrower_addr, "borrow while frozen");
             return Err(ProtocolError::Unauthorized);
         }
+
         let mut position = StateHelper::get_position(&env, &borrower_addr)
             .unwrap_or(Position::new(borrower_addr.clone(), 0, 0));
 
@@ -1890,11 +1938,14 @@ impl Contract {
         let new_debt = position.debt + amount;
         let mut new_position = position.clone();
         new_position.debt = new_debt;
+
         let min_ratio = ProtocolConfig::get_min_collateral_ratio(&env);
         let ratio = StateHelper::dynamic_collateral_ratio::<RealPriceOracle>(&env, &new_position);
         if ratio < min_ratio {
+            SecurityMonitor::record_suspicious(&env, &borrower_addr, "borrow below collateral ratio");
             return Err(ProtocolError::InsufficientCollateralRatio);
         }
+
         position.debt = new_debt;
         StateHelper::save_position(&env, &position);
 
@@ -1937,11 +1988,17 @@ impl Contract {
             asset: String::from_str(&env, "XLM"),
         }
         .emit(&env);
-        Ok(())
-    }
 
-    /// Repay borrowed assets
-    pub fn repay(env: Env, repayer: String, amount: i128) -> Result<(), ProtocolError> {
+        Ok(())
+    })();
+    ReentrancyGuard::exit(&env);
+    result
+}
+
+/// Repay borrowed assets
+pub fn repay(env: Env, repayer: String, amount: i128) -> Result<(), ProtocolError> {
+    ReentrancyGuard::enter(&env)?;
+    let result = (|| {
         if repayer.is_empty() {
             return Err(ProtocolError::InvalidAddress);
         }
@@ -1949,17 +2006,14 @@ impl Contract {
             return Err(ProtocolError::InvalidAmount);
         }
 
-        // Note: Repay is typically not paused as it's beneficial for the protocol
-        // But we can add pause check here if needed in the future
         let repayer_addr = Address::from_string(&repayer);
         if FrozenAccounts::is_frozen(&env, &repayer_addr) {
+            SecurityMonitor::record_suspicious(&env, &repayer_addr, "repay while frozen");
             return Err(ProtocolError::Unauthorized);
         }
-        let mut position = StateHelper::get_position(&env, &repayer_addr).unwrap_or(Position::new(
-            repayer_addr.clone(),
-            0,
-            0,
-        ));
+
+        let mut position = StateHelper::get_position(&env, &repayer_addr)
+            .unwrap_or(Position::new(repayer_addr.clone(), 0, 0));
 
         // Accrue interest before updating position
         let state = InterestRateStorage::update_state(&env);
@@ -1985,8 +2039,13 @@ impl Contract {
             asset: String::from_str(&env, "XLM"),
         }
         .emit(&env);
+
         Ok(())
-    }
+    })();
+    ReentrancyGuard::exit(&env);
+    result
+}
+
 
     /// Withdraw collateral with dynamic risk check
     pub fn withdraw(env: Env, withdrawer: String, amount: i128) -> Result<(), ProtocolError> {
@@ -2231,6 +2290,61 @@ impl Contract {
         let caller_addr = Address::from_string(&caller);
         ProtocolConfig::require_admin(&env, &caller_addr)?;
         let mut config = RiskConfigStorage::get(&env);
+
+    /// Withdraw collateral from the protocol
+    pub fn withdraw(env: Env, withdrawer: String, amount: i128) -> Result<(), ProtocolError> {
+        ReentrancyGuard::enter(&env)?;
+        let result = (|| {
+            if withdrawer.is_empty() {
+                return Err(ProtocolError::InvalidAddress);
+            }
+            if amount <= 0 {
+                return Err(ProtocolError::InvalidAmount);
+            }
+            // Check if withdraw is paused
+            let risk_config = RiskConfigStorage::get(&env);
+            if risk_config.pause_withdraw {
+                return Err(ProtocolError::ProtocolPaused);
+            }
+            let withdrawer_addr = Address::from_string(&withdrawer);
+            if FrozenAccounts::is_frozen(&env, &withdrawer_addr) {
+                return Err(ProtocolError::Unauthorized);
+            }
+            // Load user position
+            let mut position = StateHelper::get_position(&env, &withdrawer_addr)
+                .ok_or(ProtocolError::PositionNotFound)?;
+            // Check sufficient collateral
+            if position.collateral < amount {
+                SecurityMonitor::record_suspicious(&env, &withdrawer_addr, "Insufficient collateral for withdrawal");
+                return Err(ProtocolError::InsufficientCollateral);
+            }
+            // Simulate withdrawal and check collateral ratio
+            position.collateral -= amount;
+            let min_ratio = ProtocolConfig::get_min_collateral_ratio(&env);
+            let ratio = StateHelper::collateral_ratio(&position);
+            if ratio < min_ratio {
+                SecurityMonitor::record_suspicious(&env, &withdrawer_addr, "Collateral ratio too low after withdrawal");
+                return Err(ProtocolError::InsufficientCollateralRatio);
+            }
+            // Save updated position
+            StateHelper::save_position(&env, &position);
+            // Track user activity
+            let mut activity = ActivityStorage::get_user_activity(&env, &withdrawer_addr)
+                .unwrap_or(UserActivity::new());
+            activity.record_withdrawal(amount, env.ledger().timestamp());
+            ActivityStorage::save_user_activity(&env, &withdrawer_addr, &activity);
+            // Emit event
+            ProtocolEvent::Withdraw {
+                user: withdrawer.clone(),
+                amount,
+                asset: String::from_str(&env, "XLM"),
+            }
+            .emit(&env);
+            Ok(())
+        })();
+        ReentrancyGuard::exit(&env);
+        result
+    }
         config.pause_borrow = pause_borrow;
         config.pause_deposit = pause_deposit;
         config.pause_withdraw = pause_withdraw;
