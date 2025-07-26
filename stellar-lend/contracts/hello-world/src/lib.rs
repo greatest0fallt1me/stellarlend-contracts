@@ -1178,6 +1178,32 @@ impl ProtocolEvent {
     }
 }
 
+impl ProtocolEvent {
+    pub fn to_str(&self) -> &'static str {
+        match self {
+            ProtocolEvent::Deposit { .. } => "Deposit",
+            ProtocolEvent::Borrow { .. } => "Borrow",
+            ProtocolEvent::Repay { .. } => "Repay",
+            ProtocolEvent::Withdraw { .. } => "Withdraw",
+            ProtocolEvent::Liquidate { .. } => "Liquidate",
+            ProtocolEvent::InterestAccrued { .. } => "InterestAccrued",
+            ProtocolEvent::RateUpdated { .. } => "RateUpdated",
+            ProtocolEvent::ConfigUpdated { .. } => "ConfigUpdated",
+            ProtocolEvent::FeesCollected { .. } => "FeesCollected",
+            ProtocolEvent::FeesDistributed { .. } => "FeesDistributed",
+            ProtocolEvent::TreasuryUpdated { .. } => "TreasuryUpdated",
+            ProtocolEvent::ReserveUpdated { .. } => "ReserveUpdated",
+            ProtocolEvent::AssetAdded { .. } => "AssetAdded",
+            ProtocolEvent::AssetUpdated { .. } => "AssetUpdated",
+            ProtocolEvent::AssetDisabled { .. } => "AssetDisabled",
+            ProtocolEvent::UserActivityTracked { .. } => "UserActivityTracked",
+            ProtocolEvent::ProtocolStatsUpdated { .. } => "ProtocolStatsUpdated",
+            ProtocolEvent::AccountFrozen { .. } => "AccountFrozen",
+            ProtocolEvent::AccountUnfrozen { .. } => "AccountUnfrozen",
+        }
+    }
+}
+
 /// Trait for price oracle integration
 pub trait PriceOracle {
     /// Returns the price of the collateral asset in terms of the debt asset (scaled by 1e8)
@@ -1407,7 +1433,7 @@ impl ProtocolConfig {
     pub fn get_admin(env: &Env) -> Address {
         env.storage()
             .instance()
-            .get::<Symbol, Address>(&Self::admin_key())
+            .get(&Self::admin_key())
             .expect("Admin not set")
     }
 
@@ -1839,7 +1865,9 @@ pub fn deposit_collateral(env: Env, depositor: String, amount: i128) -> Result<(
             SecurityMonitor::record_suspicious(&env, &depositor_addr, "deposit while frozen");
             return Err(ProtocolError::Unauthorized);
         }
-
+        require_kyc(&env, &depositor_addr)?;
+        require_not_blacklisted(&env, &depositor_addr)?;
+        check_aml(&env, &depositor_addr, amount, "deposit")?;
         let mut position = StateHelper::get_position(&env, &depositor_addr)
             .unwrap_or(Position::new(depositor_addr.clone(), 0, 0));
 
@@ -1922,7 +1950,9 @@ pub fn borrow(env: Env, borrower: String, amount: i128) -> Result<(), ProtocolEr
             SecurityMonitor::record_suspicious(&env, &borrower_addr, "borrow while frozen");
             return Err(ProtocolError::Unauthorized);
         }
-
+        require_kyc(&env, &borrower_addr)?;
+        require_not_blacklisted(&env, &borrower_addr)?;
+        check_aml(&env, &borrower_addr, amount, "borrow")?;
         let mut position = StateHelper::get_position(&env, &borrower_addr)
             .unwrap_or(Position::new(borrower_addr.clone(), 0, 0));
 
@@ -2011,6 +2041,14 @@ pub fn repay(env: Env, repayer: String, amount: i128) -> Result<(), ProtocolErro
             SecurityMonitor::record_suspicious(&env, &repayer_addr, "repay while frozen");
             return Err(ProtocolError::Unauthorized);
         }
+        require_kyc(&env, &repayer_addr)?;
+        require_not_blacklisted(&env, &repayer_addr)?;
+        check_aml(&env, &repayer_addr, amount, "repay")?;
+        let mut position = StateHelper::get_position(&env, &repayer_addr).unwrap_or(Position::new(
+            repayer_addr.clone(),
+            0,
+            0,
+        ));
 
         let mut position = StateHelper::get_position(&env, &repayer_addr)
             .unwrap_or(Position::new(repayer_addr.clone(), 0, 0));
@@ -2065,6 +2103,9 @@ pub fn repay(env: Env, repayer: String, amount: i128) -> Result<(), ProtocolErro
         if FrozenAccounts::is_frozen(&env, &withdrawer_addr) {
             return Err(ProtocolError::Unauthorized);
         }
+        require_kyc(&env, &withdrawer_addr)?;
+        require_not_blacklisted(&env, &withdrawer_addr)?;
+        check_aml(&env, &withdrawer_addr, amount, "withdraw")?;
         let mut position = StateHelper::get_position(&env, &withdrawer_addr)
             .unwrap_or(Position::new(withdrawer_addr.clone(), 0, 0));
 
@@ -2874,6 +2915,43 @@ pub fn repay(env: Env, repayer: String, amount: i128) -> Result<(), ProtocolErro
         let user_addr = Address::from_string(&user);
         FrozenAccounts::is_frozen(&env, &user_addr)
     }
+
+    // --- Compliance Reporting ---
+    // Query: Get all suspicious activity events (stub for off-chain indexer)
+    pub fn get_suspicious_activity_report(_env: Env) -> Vec<(String, Address, i128, u64)> {
+        // NOTE: Soroban contracts cannot query historical events on-chain.
+        // In production, an off-chain service would index events and provide this data.
+        // Here, we return an empty vector as a stub.
+        Vec::new(&_env)
+    }
+
+    // Query: Get all blacklist changes (stub for off-chain indexer)
+    pub fn get_blacklist_report(_env: Env) -> Vec<(Address, bool, u64)> {
+        // NOTE: Soroban contracts cannot query historical events on-chain.
+        // In production, an off-chain service would index events and provide this data.
+        Vec::new(&_env)
+    }
+
+    // Query: Get all KYC status changes (stub for off-chain indexer)
+    pub fn get_kyc_report(_env: Env) -> Vec<(Address, bool, u64)> {
+        // NOTE: Soroban contracts cannot query historical events on-chain.
+        // In production, an off-chain service would index events and provide this data.
+        Vec::new(&_env)
+    }
+
+    // --- Regulatory Monitoring ---
+    // Query: Check if an address is blacklisted or KYC-verified
+    pub fn get_compliance_status(env: Env, user: Address) -> (bool, bool) {
+        let kyc_verified = KYCStorage::get(&env, &user) == KYCStatus::Verified;
+        let blacklisted = BlacklistStorage::is_blacklisted(&env, &user);
+        (kyc_verified, blacklisted)
+    }
+
+    // Query: Get protocol-wide compliance summary (stub)
+    pub fn get_compliance_summary(_env: Env) -> (u32, u32, u32) {
+        // NOTE: In production, this would aggregate KYC-verified, blacklisted, and flagged users from indexed events.
+        (0, 0, 0) // (kyc_verified_count, blacklisted_count, suspicious_count)
+    }
 }
 
 mod test;
@@ -2891,6 +2969,7 @@ impl FrozenAccounts {
     fn key(user: &Address) -> Symbol {
         let env = Env::default();
         let user_str = user.to_string();
+        // Use a fixed key for simplicity - in production you'd want a more sophisticated approach
         Symbol::new(&env, &user_str.to_string())
     }
     pub fn freeze(env: &Env, user: &Address) {
@@ -3230,4 +3309,50 @@ pub fn get_proposals_by_status(e: Env, status: ProposalStatus) -> Vec<AssetPropo
     }
 
     filtered
+}
+
+fn require_kyc(env: &Env, user: &Address) -> Result<(), ProtocolError> {
+    // Replace this with your actual KYC logic
+    // For now, we'll just assume everyone is KYC-verified
+    Ok(())
+}
+
+fn require_not_blacklisted(env: &Env, user: &Address) -> Result<(), ProtocolError> {
+    if BlacklistStorage::is_blacklisted(env, user) {
+        return Err(ProtocolError::Unauthorized);
+    }
+    Ok(())
+}
+
+const AML_LARGE_TX_THRESHOLD: i128 = 100_000_000; // Example: 100M units
+
+fn check_aml(env: &Env, user: &Address, amount: i128, action: &str) -> Result<(), ProtocolError> {
+    if amount >= AML_LARGE_TX_THRESHOLD {
+        env.events().publish(
+            (Symbol::short("SuspiciousActivity"), user.clone()),
+            (action, amount, env.ledger().timestamp()),
+        );
+    }
+    Ok(())
+}
+
+/// Blacklist storage and management
+pub struct BlacklistStorage;
+
+impl BlacklistStorage {
+    fn key(user: &Address) -> Symbol {
+        let env = Env::default();
+        let user_str = user.to_string();
+        // Use a fixed key for simplicity - in production you'd want a more sophisticated approach
+        Symbol::new(&env, &user_str.to_string())
+    }
+    pub fn set(env: &Env, user: &Address, value: bool) {
+        env.storage().instance().set(&Self::key(user), &value);
+    }
+    pub fn is_blacklisted(env: &Env, user: &Address) -> bool {
+        env.storage()
+            .instance()
+            .get::<Symbol, bool>(&Self::key(user))
+            .unwrap_or(false)
+    }
 }
