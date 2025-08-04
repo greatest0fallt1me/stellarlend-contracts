@@ -1,7 +1,7 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{Address, Env, String};
+use soroban_sdk::{Address, Env, String, testutils::Address as TestAddress, testutils::Address as _};
 
 /// Test utilities for creating test environments and addresses
 pub struct TestUtils;
@@ -2698,18 +2698,21 @@ fn test_account_freeze_unauthorized() {
 #[test]
 fn test_multi_admin_support() {
     let e = Env::default();
-    let admin1 = Address::generate(&e);
-    let admin2 = Address::generate(&e);
-    let user = Address::generate(&e);
+    let admin1 = <soroban_sdk::Address as TestAddress>::generate(&e);
+    let admin2 = <soroban_sdk::Address as TestAddress>::generate(&e);
+    let user = <soroban_sdk::Address as TestAddress>::generate(&e);
     // Initialize with admin1
-    initialize(&e, admin1.clone());
+    let contract_id = e.register(Contract, ());
+    e.as_contract(&contract_id, || {
+        Contract::initialize(e.clone(), admin1.to_string()).unwrap();
+    });
     // admin1 is admin
     assert!(is_address_admin(e.clone(), admin1.clone()));
     // Add admin2
     assert!(add_admin(e.clone(), admin1.clone(), admin2.clone()).is_ok());
     assert!(is_address_admin(e.clone(), admin2.clone()));
     // admin2 can add another admin
-    let admin3 = Address::generate(&e);
+    let admin3 = <soroban_sdk::Address as TestAddress>::generate(&e);
     assert!(add_admin(e.clone(), admin2.clone(), admin3.clone()).is_ok());
     assert!(is_address_admin(e.clone(), admin3.clone()));
     // Remove admin2
@@ -2722,7 +2725,7 @@ fn test_multi_admin_support() {
     assert!(!is_address_admin(e.clone(), admin1.clone()));
     assert!(is_address_admin(e.clone(), user.clone()));
     // Unauthorized add
-    let not_admin = Address::generate(&e);
+    let not_admin = <soroban_sdk::Address as TestAddress>::generate(&e);
     assert!(add_admin(e.clone(), not_admin.clone(), admin1.clone()).is_err());
     // Unauthorized remove
     assert!(remove_admin(e.clone(), not_admin.clone(), user.clone()).is_err());
@@ -2736,19 +2739,22 @@ fn test_multi_admin_support() {
 #[test]
 fn test_permissionless_market_listing() {
     let e = Env::default();
-    let admin = Address::generate(&e);
-    let proposer = Address::generate(&e);
-    let oracle = Address::generate(&e);
+    let admin = <soroban_sdk::Address as TestAddress>::generate(&e);
+    let proposer = <soroban_sdk::Address as TestAddress>::generate(&e);
+    let oracle = <soroban_sdk::Address as TestAddress>::generate(&e);
 
     // Initialize contract
-    initialize(&e, admin.clone());
+    let contract_id = e.register(Contract, ());
+    e.as_contract(&contract_id, || {
+        Contract::initialize(e.clone(), admin.to_string()).unwrap();
+    });
 
     // Propose new asset
     let proposal_id = propose_asset(
         e.clone(),
         proposer.clone(),
-        String::from_slice(&e, "BTC"),
-        String::from_slice(&e, "Bitcoin"),
+        String::from_str(&e, "BTC"),
+        String::from_str(&e, "Bitcoin"),
         oracle.clone(),
         8000, // 80% collateral factor
         7500, // 75% borrow factor
@@ -2760,7 +2766,7 @@ fn test_permissionless_market_listing() {
     // Check proposal exists
     let proposal = get_proposal_by_id(e.clone(), proposal_id).unwrap();
     assert_eq!(proposal.proposer, proposer);
-    assert_eq!(proposal.symbol, String::from_slice(&e, "BTC"));
+    assert_eq!(proposal.symbol, String::from_str(&e, "BTC"));
     assert_eq!(proposal.status, ProposalStatus::Pending);
 
     // Admin approves proposal
@@ -2771,16 +2777,16 @@ fn test_permissionless_market_listing() {
     assert_eq!(updated_proposal.status, ProposalStatus::Approved);
 
     // Check asset was created
-    let asset_info = get_asset_info(e.clone(), String::from_slice(&e, "BTC")).unwrap();
-    assert_eq!(asset_info.symbol, String::from_slice(&e, "BTC"));
-    assert_eq!(asset_info.name, String::from_slice(&e, "Bitcoin"));
+    let asset_info = Contract::get_asset_info(e.clone(), String::from_str(&e, "BTC")).unwrap();
+    assert_eq!(asset_info.0, String::from_str(&e, "BTC")); // symbol
+    assert_eq!(asset_info.2, String::from_str(&e, "Bitcoin")); // name (oracle address)
 
     // Propose another asset
     let proposal_id2 = propose_asset(
         e.clone(),
         proposer.clone(),
-        String::from_slice(&e, "ETH"),
-        String::from_slice(&e, "Ethereum"),
+        String::from_str(&e, "ETH"),
+        String::from_str(&e, "Ethereum"),
         oracle.clone(),
         7500,
         7000,
@@ -2797,8 +2803,8 @@ fn test_permissionless_market_listing() {
     let proposal_id3 = propose_asset(
         e.clone(),
         proposer.clone(),
-        String::from_slice(&e, "LTC"),
-        String::from_slice(&e, "Litecoin"),
+        String::from_str(&e, "LTC"),
+        String::from_str(&e, "Litecoin"),
         oracle.clone(),
         7000,
         6500,
@@ -2811,11 +2817,11 @@ fn test_permissionless_market_listing() {
     assert_eq!(cancelled_proposal.status, ProposalStatus::Cancelled);
 
     // Test unauthorized operations
-    let not_admin = Address::generate(&e);
+    let not_admin = <soroban_sdk::Address as TestAddress>::generate(&e);
     assert!(approve_proposal(e.clone(), not_admin.clone(), proposal_id).is_err());
     assert!(reject_proposal(e.clone(), not_admin.clone(), proposal_id2).is_err());
 
-    let not_proposer = Address::generate(&e);
+    let not_proposer = <soroban_sdk::Address as TestAddress>::generate(&e);
     assert!(cancel_proposal(e.clone(), not_proposer.clone(), proposal_id3).is_err());
 
     // Test query functions
@@ -2838,18 +2844,21 @@ fn test_permissionless_market_listing() {
 #[test]
 fn test_proposal_validation() {
     let e = Env::default();
-    let admin = Address::generate(&e);
-    let proposer = Address::generate(&e);
-    let oracle = Address::generate(&e);
+    let admin = <soroban_sdk::Address as TestAddress>::generate(&e);
+    let proposer = <soroban_sdk::Address as TestAddress>::generate(&e);
+    let oracle = <soroban_sdk::Address as TestAddress>::generate(&e);
 
-    initialize(&e, admin.clone());
+    let contract_id = e.register(Contract, ());
+    e.as_contract(&contract_id, || {
+        Contract::initialize(e.clone(), admin.to_string()).unwrap();
+    });
 
     // Test invalid symbol length
     let result = propose_asset(
         e.clone(),
         proposer.clone(),
-        String::from_slice(&e, "VERYLONGSYMBOL"), // > 10 chars
-        String::from_slice(&e, "Test Asset"),
+        String::from_str(&e, "VERYLONGSYMBOL"), // > 10 chars
+        String::from_str(&e, "Test Asset"),
         oracle.clone(),
         8000,
         7500,
@@ -2860,8 +2869,8 @@ fn test_proposal_validation() {
     let result = propose_asset(
         e.clone(),
         proposer.clone(),
-        String::from_slice(&e, "TEST"),
-        String::from_slice(&e, "This is a very long asset name that exceeds the maximum allowed length of 50 characters"), // > 50 chars
+        String::from_str(&e, "TEST"),
+        String::from_str(&e, "This is a very long asset name that exceeds the maximum allowed length of 50 characters"), // > 50 chars
         oracle.clone(),
         8000,
         7500,
@@ -2872,8 +2881,8 @@ fn test_proposal_validation() {
     let result = propose_asset(
         e.clone(),
         proposer.clone(),
-        String::from_slice(&e, "TEST"),
-        String::from_slice(&e, "Test Asset"),
+        String::from_str(&e, "TEST"),
+        String::from_str(&e, "Test Asset"),
         oracle.clone(),
         15000, // > 10000
         7500,
@@ -2883,8 +2892,8 @@ fn test_proposal_validation() {
     let result = propose_asset(
         e.clone(),
         proposer.clone(),
-        String::from_slice(&e, "TEST"),
-        String::from_slice(&e, "Test Asset"),
+        String::from_str(&e, "TEST"),
+        String::from_str(&e, "Test Asset"),
         oracle.clone(),
         8000,
         15000, // > 10000
@@ -2895,18 +2904,21 @@ fn test_proposal_validation() {
 #[test]
 fn test_proposal_lifecycle_errors() {
     let e = Env::default();
-    let admin = Address::generate(&e);
-    let proposer = Address::generate(&e);
-    let oracle = Address::generate(&e);
+    let admin = <soroban_sdk::Address as TestAddress>::generate(&e);
+    let proposer = <soroban_sdk::Address as TestAddress>::generate(&e);
+    let oracle = <soroban_sdk::Address as TestAddress>::generate(&e);
 
-    initialize(&e, admin.clone());
+    let contract_id = e.register(Contract, ());
+    e.as_contract(&contract_id, || {
+        Contract::initialize(e.clone(), admin.to_string()).unwrap();
+    });
 
     // Create a proposal
     let proposal_id = propose_asset(
         e.clone(),
         proposer.clone(),
-        String::from_slice(&e, "TEST"),
-        String::from_slice(&e, "Test Asset"),
+        String::from_str(&e, "TEST"),
+        String::from_str(&e, "Test Asset"),
         oracle.clone(),
         8000,
         7500,
