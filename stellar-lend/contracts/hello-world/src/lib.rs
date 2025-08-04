@@ -46,8 +46,7 @@ pub struct SecurityMonitor;
 impl SecurityMonitor {
     fn suspicious_key(user: &Address) -> Symbol {
         let env = Env::default();
-        let user_str = user.to_string();
-        Symbol::new(&env, &user_str.to_string())
+        Symbol::new(&env, "suspicious_user")
     }
     pub fn record_suspicious(env: &Env, user: &Address, reason: &str) {
         let key = Self::suspicious_key(user);
