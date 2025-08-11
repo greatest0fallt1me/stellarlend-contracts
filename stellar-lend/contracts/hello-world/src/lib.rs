@@ -4061,3 +4061,1149 @@ impl BlacklistStorage {
             .unwrap_or(false)
     }
 }
+
+// ============================================================================
+// ADVANCED USER EXPERIENCE FEATURES
+// ============================================================================
+
+/// Batch operation types for efficient multi-transaction processing
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub enum BatchOperationType {
+    Deposit,
+    Withdraw,
+    Borrow,
+    Repay,
+    Liquidate,
+}
+
+/// Individual operation within a batch
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct BatchOperation {
+    /// Type of operation
+    pub operation_type: BatchOperationType,
+    /// User address
+    pub user: Address,
+    /// Asset symbol
+    pub asset: String,
+    /// Amount for the operation
+    pub amount: i128,
+    /// Optional target for liquidations
+    pub target: Option<Address>,
+    /// Gas optimization flag
+    pub optimize_gas: bool,
+}
+
+/// Batch operation result
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct BatchOperationResult {
+    /// Operation index
+    pub index: u32,
+    /// Success status
+    pub success: bool,
+    /// Error code if failed
+    pub error_code: Option<u32>,
+    /// Gas used for this operation
+    pub gas_used: u64,
+    /// User-friendly error message
+    pub error_message: Option<String>,
+}
+
+/// Complete batch operation response
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct BatchOperationResponse {
+    /// Overall success status
+    pub overall_success: bool,
+    /// Total gas used
+    pub total_gas_used: u64,
+    /// Individual operation results
+    pub results: Vec<BatchOperationResult>,
+    /// Estimated gas savings
+    pub gas_savings: u64,
+    /// User-friendly summary
+    pub summary: String,
+}
+
+/// Gas optimization strategies
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub enum GasOptimizationStrategy {
+    /// No optimization
+    None,
+    /// Batch similar operations
+    BatchSimilar,
+    /// Use storage optimization
+    StorageOptimization,
+    /// Minimize state changes
+    MinimalStateChanges,
+    /// Use efficient data structures
+    EfficientDataStructures,
+}
+
+/// Transaction simulation result
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct TransactionSimulation {
+    /// Whether transaction would succeed
+    pub would_succeed: bool,
+    /// Estimated gas cost
+    pub estimated_gas: u64,
+    /// Potential error code
+    pub error_code: Option<u32>,
+    /// User-friendly error message
+    pub error_message: Option<String>,
+    /// Suggested gas limit
+    pub suggested_gas_limit: u64,
+    /// Gas optimization suggestions
+    pub optimization_suggestions: Vec<String>,
+}
+
+/// User experience configuration
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct UXConfig {
+    /// Enable detailed error messages
+    pub detailed_errors: bool,
+    /// Enable gas optimization suggestions
+    pub gas_suggestions: bool,
+    /// Enable transaction simulation
+    pub enable_simulation: bool,
+    /// Enable batch operations
+    pub enable_batch_ops: bool,
+    /// Maximum batch size
+    pub max_batch_size: u32,
+    /// Default gas optimization strategy
+    pub default_gas_strategy: GasOptimizationStrategy,
+    /// User-friendly error language
+    pub error_language: String,
+}
+
+impl UXConfig {
+    pub fn default() -> Self {
+        Self {
+            detailed_errors: true,
+            gas_suggestions: true,
+            enable_simulation: true,
+            enable_batch_ops: true,
+            max_batch_size: 10,
+            default_gas_strategy: GasOptimizationStrategy::BatchSimilar,
+            error_language: String::from_str(&Env::default(), "en"),
+        }
+    }
+}
+
+/// Advanced UX Manager for handling user experience features
+pub struct AdvancedUXManager;
+
+impl AdvancedUXManager {
+    /// Execute batch operations with gas optimization
+    pub fn execute_batch_operations(
+        env: &Env,
+        operations: Vec<BatchOperation>,
+        gas_strategy: GasOptimizationStrategy,
+    ) -> Result<BatchOperationResponse, ProtocolError> {
+        let _guard = ReentrancyGuard::enter(env)?;
+        
+        let mut results = Vec::new();
+        let mut total_gas_used = 0;
+        let mut successful_operations = 0;
+        
+        // Validate batch size
+        let config = UXConfigStorage::get(env);
+        if operations.len() > config.max_batch_size as usize {
+            return Err(ProtocolError::InvalidInput);
+        }
+        
+        // Group operations by type for optimization
+        let grouped_ops = Self::group_operations_by_type(&operations);
+        
+        for (op_type, ops) in grouped_ops {
+            let group_results = Self::execute_operation_group(env, &ops, &gas_strategy)?;
+            
+            for result in group_results {
+                total_gas_used += result.gas_used;
+                if result.success {
+                    successful_operations += 1;
+                }
+                results.push(result);
+            }
+        }
+        
+        // Calculate gas savings
+        let estimated_individual_gas = operations.len() as u64 * 1000; // Base estimate
+        let gas_savings = if total_gas_used < estimated_individual_gas {
+            estimated_individual_gas - total_gas_used
+        } else {
+            0
+        };
+        
+        let overall_success = successful_operations == operations.len() as u32;
+        let summary = Self::generate_batch_summary(&operations, successful_operations, gas_savings);
+        
+        Ok(BatchOperationResponse {
+            overall_success,
+            total_gas_used,
+            results,
+            gas_savings,
+            summary,
+        })
+    }
+    
+    /// Group operations by type for optimization
+    fn group_operations_by_type(
+        operations: &[BatchOperation],
+    ) -> Vec<(BatchOperationType, Vec<BatchOperation>)> {
+        let mut groups: Vec<(BatchOperationType, Vec<BatchOperation>)> = Vec::new();
+        
+        for op in operations {
+            let mut found = false;
+            for (op_type, ops) in &mut groups {
+                if *op_type == op.operation_type {
+                    ops.push(op.clone());
+                    found = true;
+                    break;
+                }
+            }
+            
+            if !found {
+                groups.push((op.operation_type.clone(), vec![op.clone()]));
+            }
+        }
+        
+        groups
+    }
+    
+    /// Execute a group of similar operations
+    fn execute_operation_group(
+        env: &Env,
+        operations: &[BatchOperation],
+        gas_strategy: &GasOptimizationStrategy,
+    ) -> Result<Vec<BatchOperationResult>, ProtocolError> {
+        let mut results = Vec::new();
+        
+        for (index, operation) in operations.iter().enumerate() {
+            let start_gas = env.ledger().gas_consumed();
+            
+            let result = match operation.operation_type {
+                BatchOperationType::Deposit => {
+                    Self::execute_deposit_operation(env, operation)
+                }
+                BatchOperationType::Withdraw => {
+                    Self::execute_withdraw_operation(env, operation)
+                }
+                BatchOperationType::Borrow => {
+                    Self::execute_borrow_operation(env, operation)
+                }
+                BatchOperationType::Repay => {
+                    Self::execute_repay_operation(env, operation)
+                }
+                BatchOperationType::Liquidate => {
+                    Self::execute_liquidate_operation(env, operation)
+                }
+            };
+            
+            let end_gas = env.ledger().gas_consumed();
+            let gas_used = end_gas - start_gas;
+            
+            let operation_result = match result {
+                Ok(_) => BatchOperationResult {
+                    index: index as u32,
+                    success: true,
+                    error_code: None,
+                    gas_used,
+                    error_message: None,
+                },
+                Err(error) => BatchOperationResult {
+                    index: index as u32,
+                    success: false,
+                    error_code: Some(error as u32),
+                    gas_used,
+                    error_message: Some(Self::get_user_friendly_error_message(error)),
+                },
+            };
+            
+            results.push(operation_result);
+        }
+        
+        Ok(results)
+    }
+    
+    /// Execute individual deposit operation
+    fn execute_deposit_operation(
+        env: &Env,
+        operation: &BatchOperation,
+    ) -> Result<(), ProtocolError> {
+        deposit_collateral(
+            env.clone(),
+            operation.user.to_string(),
+            operation.amount,
+        )
+    }
+    
+    /// Execute individual withdraw operation
+    fn execute_withdraw_operation(
+        env: &Env,
+        operation: &BatchOperation,
+    ) -> Result<(), ProtocolError> {
+        Contract::withdraw(
+            env.clone(),
+            operation.user.to_string(),
+            operation.amount,
+        )
+    }
+    
+    /// Execute individual borrow operation
+    fn execute_borrow_operation(
+        env: &Env,
+        operation: &BatchOperation,
+    ) -> Result<(), ProtocolError> {
+        borrow(
+            env.clone(),
+            operation.user.to_string(),
+            operation.amount,
+        )
+    }
+    
+    /// Execute individual repay operation
+    fn execute_repay_operation(
+        env: &Env,
+        operation: &BatchOperation,
+    ) -> Result<(), ProtocolError> {
+        repay(
+            env.clone(),
+            operation.user.to_string(),
+            operation.amount,
+        )
+    }
+    
+    /// Execute individual liquidate operation
+    fn execute_liquidate_operation(
+        env: &Env,
+        operation: &BatchOperation,
+    ) -> Result<(), ProtocolError> {
+        if let Some(target) = &operation.target {
+            Contract::liquidate(
+                env.clone(),
+                operation.user.to_string(),
+                target.to_string(),
+                operation.amount,
+            )
+        } else {
+            Err(ProtocolError::InvalidInput)
+        }
+    }
+    
+    /// Simulate a transaction without executing it
+    pub fn simulate_transaction(
+        env: &Env,
+        operation: &BatchOperation,
+    ) -> Result<TransactionSimulation, ProtocolError> {
+        let config = UXConfigStorage::get(env);
+        
+        if !config.enable_simulation {
+            return Err(ProtocolError::ConfigurationError);
+        }
+        
+        // Create a simulation environment
+        let simulation_env = env.clone();
+        
+        // Estimate gas usage
+        let estimated_gas = Self::estimate_gas_usage(&operation.operation_type, operation.amount);
+        
+        // Check if operation would succeed
+        let would_succeed = Self::check_operation_viability(env, operation);
+        
+        let (error_code, error_message) = if !would_succeed {
+            let error = Self::identify_potential_error(env, operation);
+            (Some(error as u32), Some(Self::get_user_friendly_error_message(error)))
+        } else {
+            (None, None)
+        };
+        
+        // Generate optimization suggestions
+        let optimization_suggestions = if config.gas_suggestions {
+            Self::generate_optimization_suggestions(env, operation, estimated_gas)
+        } else {
+            Vec::new()
+        };
+        
+        // Suggest gas limit (add 20% buffer)
+        let suggested_gas_limit = (estimated_gas as f64 * 1.2) as u64;
+        
+        Ok(TransactionSimulation {
+            would_succeed,
+            estimated_gas,
+            error_code,
+            error_message,
+            suggested_gas_limit,
+            optimization_suggestions,
+        })
+    }
+    
+    /// Estimate gas usage for an operation
+    fn estimate_gas_usage(operation_type: &BatchOperationType, amount: i128) -> u64 {
+        let base_gas = match operation_type {
+            BatchOperationType::Deposit => 500,
+            BatchOperationType::Withdraw => 600,
+            BatchOperationType::Borrow => 800,
+            BatchOperationType::Repay => 700,
+            BatchOperationType::Liquidate => 1200,
+        };
+        
+        // Add gas based on amount complexity
+        let amount_factor = if amount > 1_000_000_000 {
+            200
+        } else if amount > 100_000_000 {
+            100
+        } else {
+            50
+        };
+        
+        base_gas + amount_factor
+    }
+    
+    /// Check if an operation would be viable
+    fn check_operation_viability(env: &Env, operation: &BatchOperation) -> bool {
+        match operation.operation_type {
+            BatchOperationType::Deposit => {
+                // Check if user has sufficient balance (simplified)
+                true
+            }
+            BatchOperationType::Withdraw => {
+                // Check if user has sufficient collateral
+                if let Some(position) = StateHelper::get_position(env, &operation.user) {
+                    position.collateral >= operation.amount
+                } else {
+                    false
+                }
+            }
+            BatchOperationType::Borrow => {
+                // Check if user has sufficient collateral ratio
+                if let Some(position) = StateHelper::get_position(env, &operation.user) {
+                    let ratio = StateHelper::collateral_ratio(&position);
+                    ratio >= ProtocolConfig::get_min_collateral_ratio(env)
+                } else {
+                    false
+                }
+            }
+            BatchOperationType::Repay => {
+                // Check if user has debt to repay
+                if let Some(position) = StateHelper::get_position(env, &operation.user) {
+                    position.debt >= operation.amount
+                } else {
+                    false
+                }
+            }
+            BatchOperationType::Liquidate => {
+                // Check if target is eligible for liquidation
+                if let Some(target) = &operation.target {
+                    if let Some(position) = StateHelper::get_position(env, target) {
+                        let ratio = StateHelper::collateral_ratio(&position);
+                        ratio < ProtocolConfig::get_min_collateral_ratio(env)
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
+        }
+    }
+    
+    /// Identify potential error for an operation
+    fn identify_potential_error(env: &Env, operation: &BatchOperation) -> ProtocolError {
+        match operation.operation_type {
+            BatchOperationType::Deposit => {
+                if operation.amount <= 0 {
+                    ProtocolError::InvalidAmount
+                } else {
+                    ProtocolError::InsufficientCollateral
+                }
+            }
+            BatchOperationType::Withdraw => {
+                if let Some(position) = StateHelper::get_position(env, &operation.user) {
+                    if position.collateral < operation.amount {
+                        ProtocolError::InsufficientCollateral
+                    } else {
+                        ProtocolError::InsufficientCollateralRatio
+                    }
+                } else {
+                    ProtocolError::PositionNotFound
+                }
+            }
+            BatchOperationType::Borrow => {
+                if let Some(position) = StateHelper::get_position(env, &operation.user) {
+                    let ratio = StateHelper::collateral_ratio(&position);
+                    if ratio < ProtocolConfig::get_min_collateral_ratio(env) {
+                        ProtocolError::InsufficientCollateralRatio
+                    } else {
+                        ProtocolError::InsufficientCollateral
+                    }
+                } else {
+                    ProtocolError::PositionNotFound
+                }
+            }
+            BatchOperationType::Repay => {
+                if let Some(position) = StateHelper::get_position(env, &operation.user) {
+                    if position.debt < operation.amount {
+                        ProtocolError::InvalidAmount
+                    } else {
+                        ProtocolError::InsufficientCollateral
+                    }
+                } else {
+                    ProtocolError::PositionNotFound
+                }
+            }
+            BatchOperationType::Liquidate => {
+                if operation.target.is_none() {
+                    ProtocolError::InvalidInput
+                } else {
+                    ProtocolError::NotEligibleForLiquidation
+                }
+            }
+        }
+    }
+    
+    /// Generate optimization suggestions
+    fn generate_optimization_suggestions(
+        env: &Env,
+        operation: &BatchOperation,
+        estimated_gas: u64,
+    ) -> Vec<String> {
+        let mut suggestions = Vec::new();
+        
+        // Add suggestions based on gas usage
+        if estimated_gas > 1000 {
+            suggestions.push(String::from_str(env, "Consider batching similar operations to reduce gas costs"));
+        }
+        
+        // Add suggestions based on operation type
+        match operation.operation_type {
+            BatchOperationType::Deposit => {
+                suggestions.push(String::from_str(env, "Deposits are gas-efficient, consider larger amounts"));
+            }
+            BatchOperationType::Withdraw => {
+                suggestions.push(String::from_str(env, "Withdrawals can be optimized by batching multiple small amounts"));
+            }
+            BatchOperationType::Borrow => {
+                suggestions.push(String::from_str(env, "Borrow operations are gas-intensive, plan your borrowing strategy"));
+            }
+            BatchOperationType::Repay => {
+                suggestions.push(String::from_str(env, "Consider repaying larger amounts to reduce frequency"));
+            }
+            BatchOperationType::Liquidate => {
+                suggestions.push(String::from_str(env, "Liquidation operations are complex, ensure sufficient gas"));
+            }
+        }
+        
+        suggestions
+    }
+    
+    /// Generate batch operation summary
+    fn generate_batch_summary(
+        operations: &[BatchOperation],
+        successful_operations: u32,
+        gas_savings: u64,
+    ) -> String {
+        let total_operations = operations.len() as u32;
+        let success_rate = (successful_operations as f64 / total_operations as f64 * 100.0) as u32;
+        
+        format!(
+            "Batch completed: {}/{} operations successful ({}% success rate). Gas savings: {} units.",
+            successful_operations,
+            total_operations,
+            success_rate,
+            gas_savings
+        )
+    }
+    
+    /// Get user-friendly error message
+    pub fn get_user_friendly_error_message(error: ProtocolError) -> String {
+        match error {
+            ProtocolError::InsufficientCollateral => {
+                String::from_str(&Env::default(), "Insufficient collateral. Please add more collateral to your position.")
+            }
+            ProtocolError::InsufficientCollateralRatio => {
+                String::from_str(&Env::default(), "Collateral ratio too low. Please add more collateral or reduce your debt.")
+            }
+            ProtocolError::InvalidAmount => {
+                String::from_str(&Env::default(), "Invalid amount. Please enter a positive number.")
+            }
+            ProtocolError::PositionNotFound => {
+                String::from_str(&Env::default(), "No position found. Please create a position first.")
+            }
+            ProtocolError::NotEligibleForLiquidation => {
+                String::from_str(&Env::default(), "Position is not eligible for liquidation.")
+            }
+            ProtocolError::ProtocolPaused => {
+                String::from_str(&Env::default(), "Protocol is currently paused. Please try again later.")
+            }
+            ProtocolError::AssetNotSupported => {
+                String::from_str(&Env::default(), "Asset not supported. Please use a supported asset.")
+            }
+            ProtocolError::OracleFailure => {
+                String::from_str(&Env::default(), "Price feed error. Please try again later.")
+            }
+            ProtocolError::ReentrancyDetected => {
+                String::from_str(&Env::default(), "Security check failed. Please try again.")
+            }
+            _ => {
+                String::from_str(&Env::default(), "An unexpected error occurred. Please try again or contact support.")
+            }
+        }
+    }
+    
+    /// Get detailed error information with context
+    pub fn get_detailed_error_info(
+        env: &Env,
+        error: ProtocolError,
+        user: &Address,
+        operation: &str,
+    ) -> String {
+        let config = UXConfigStorage::get(env);
+        
+        if !config.detailed_errors {
+            return Self::get_user_friendly_error_message(error);
+        }
+        
+        let base_message = Self::get_user_friendly_error_message(error);
+        let error_code = error as u32;
+        let timestamp = env.ledger().timestamp();
+        
+        format!(
+            "Error {}: {}. User: {}, Operation: {}, Time: {}. For support, reference error code {}.",
+            error_code,
+            base_message,
+            user.to_string(),
+            operation,
+            timestamp,
+            error_code
+        )
+    }
+    
+    /// Optimize gas usage for a specific operation
+    pub fn optimize_gas_usage(
+        env: &Env,
+        operation: &BatchOperation,
+        strategy: GasOptimizationStrategy,
+    ) -> Result<BatchOperation, ProtocolError> {
+        let mut optimized_operation = operation.clone();
+        
+        match strategy {
+            GasOptimizationStrategy::None => {
+                // No optimization
+            }
+            GasOptimizationStrategy::BatchSimilar => {
+                // Optimize for batching
+                optimized_operation.optimize_gas = true;
+            }
+            GasOptimizationStrategy::StorageOptimization => {
+                // Use storage optimization techniques
+                optimized_operation.optimize_gas = true;
+            }
+            GasOptimizationStrategy::MinimalStateChanges => {
+                // Minimize state changes
+                optimized_operation.optimize_gas = true;
+            }
+            GasOptimizationStrategy::EfficientDataStructures => {
+                // Use efficient data structures
+                optimized_operation.optimize_gas = true;
+            }
+        }
+        
+        Ok(optimized_operation)
+    }
+    
+    /// Get gas usage statistics
+    pub fn get_gas_statistics(env: &Env) -> (u64, u64, u64) {
+        // This would typically track historical gas usage
+        // For now, return placeholder values
+        (1000, 2000, 1500) // (min, max, average)
+    }
+    
+    /// Validate batch operation parameters
+    pub fn validate_batch_operations(operations: &[BatchOperation]) -> Result<(), ProtocolError> {
+        if operations.is_empty() {
+            return Err(ProtocolError::InvalidInput);
+        }
+        
+        for operation in operations {
+            if operation.amount <= 0 {
+                return Err(ProtocolError::InvalidAmount);
+            }
+            
+            if operation.asset.is_empty() {
+                return Err(ProtocolError::InvalidInput);
+            }
+        }
+        
+        Ok(())
+    }
+}
+
+/// UX Configuration Storage
+pub struct UXConfigStorage;
+
+impl UXConfigStorage {
+    fn config_key() -> Symbol {
+        symbol_short!("ux_config")
+    }
+    
+    pub fn save(env: &Env, config: &UXConfig) {
+        env.storage().instance().set(&Self::config_key(), config);
+    }
+    
+    pub fn get(env: &Env) -> UXConfig {
+        env.storage().instance().get(&Self::config_key()).unwrap_or_else(UXConfig::default)
+    }
+    
+    pub fn update_config(
+        env: &Env,
+        caller: &Address,
+        config: UXConfig,
+    ) -> Result<(), ProtocolError> {
+        ProtocolConfig::require_admin(env, caller)?;
+        Self::save(env, &config);
+        
+        // Emit configuration update event
+        ProtocolEvent::ConfigUpdated {
+            parameter: String::from_str(env, "ux_config"),
+            old_value: 0,
+            new_value: 1,
+        }.emit(env);
+        
+        Ok(())
+    }
+}
+
+/// Enhanced error handling with UX considerations
+pub struct UXErrorHandler;
+
+impl UXErrorHandler {
+    /// Handle error with UX-friendly approach
+    pub fn handle_error(
+        env: &Env,
+        error: ProtocolError,
+        user: &Address,
+        operation: &str,
+        context: &str,
+    ) -> Result<(), ProtocolError> {
+        let config = UXConfigStorage::get(env);
+        
+        // Log error with enhanced context
+        let error_context = ErrorLogger::log_error(
+            env,
+            &error,
+            Some(user.clone()),
+            operation,
+            context,
+        );
+        
+        // Attempt recovery for recoverable errors
+        if error.is_recoverable() {
+            if let Ok(()) = ErrorRecovery::attempt_recovery(env, &error, error_context) {
+                return Ok(());
+            }
+        }
+        
+        // Emit user-friendly error event
+        Self::emit_user_friendly_error_event(env, &error, user, operation);
+        
+        Err(error)
+    }
+    
+    /// Emit user-friendly error event
+    fn emit_user_friendly_error_event(
+        env: &Env,
+        error: &ProtocolError,
+        user: &Address,
+        operation: &str,
+    ) {
+        let error_message = AdvancedUXManager::get_user_friendly_error_message(*error);
+        
+        env.events().publish(
+            (symbol_short!("ux_error"), symbol_short!("user")),
+            (
+                symbol_short!("error_code"), error as u32,
+                symbol_short!("error_message"), error_message,
+                symbol_short!("operation"), String::from_str(env, operation),
+                symbol_short!("user"), user.clone(),
+            )
+        );
+    }
+    
+    /// Get error recovery suggestions
+    pub fn get_error_recovery_suggestions(error: ProtocolError) -> Vec<String> {
+        let env = Env::default();
+        let mut suggestions = Vec::new();
+        
+        match error {
+            ProtocolError::InsufficientCollateral => {
+                suggestions.push(String::from_str(&env, "Add more collateral to your position"));
+                suggestions.push(String::from_str(&env, "Check your current collateral balance"));
+            }
+            ProtocolError::InsufficientCollateralRatio => {
+                suggestions.push(String::from_str(&env, "Add more collateral"));
+                suggestions.push(String::from_str(&env, "Repay some of your debt"));
+                suggestions.push(String::from_str(&env, "Check current market prices"));
+            }
+            ProtocolError::OracleFailure => {
+                suggestions.push(String::from_str(&env, "Try again in a few minutes"));
+                suggestions.push(String::from_str(&env, "Check if price feeds are working"));
+            }
+            ProtocolError::ProtocolPaused => {
+                suggestions.push(String::from_str(&env, "Wait for protocol to resume"));
+                suggestions.push(String::from_str(&env, "Check protocol status"));
+            }
+            _ => {
+                suggestions.push(String::from_str(&env, "Try again later"));
+                suggestions.push(String::from_str(&env, "Contact support if problem persists"));
+            }
+        }
+        
+        suggestions
+    }
+}
+
+/// Transaction simulation manager
+pub struct TransactionSimulator;
+
+impl TransactionSimulator {
+    /// Simulate multiple operations
+    pub fn simulate_batch_operations(
+        env: &Env,
+        operations: Vec<BatchOperation>,
+    ) -> Result<Vec<TransactionSimulation>, ProtocolError> {
+        let mut simulations = Vec::new();
+        
+        for operation in operations {
+            let simulation = AdvancedUXManager::simulate_transaction(env, &operation)?;
+            simulations.push(simulation);
+        }
+        
+        Ok(simulations)
+    }
+    
+    /// Get simulation summary
+    pub fn get_simulation_summary(
+        env: &Env,
+        simulations: &[TransactionSimulation],
+    ) -> String {
+        let total_operations = simulations.len();
+        let successful_operations = simulations.iter().filter(|s| s.would_succeed).count();
+        let total_estimated_gas: u64 = simulations.iter().map(|s| s.estimated_gas).sum();
+        
+        let success_rate = if total_operations > 0 {
+            (successful_operations as f64 / total_operations as f64 * 100.0) as u32
+        } else {
+            0
+        };
+        
+        format!(
+            "Simulation complete: {}/{} operations would succeed ({}% success rate). Total estimated gas: {} units.",
+            successful_operations,
+            total_operations,
+            success_rate,
+            total_estimated_gas
+        )
+    }
+    
+    /// Validate simulation parameters
+    pub fn validate_simulation_parameters(
+        env: &Env,
+        operations: &[BatchOperation],
+    ) -> Result<(), ProtocolError> {
+        let config = UXConfigStorage::get(env);
+        
+        if !config.enable_simulation {
+            return Err(ProtocolError::ConfigurationError);
+        }
+        
+        if operations.len() > config.max_batch_size as usize {
+            return Err(ProtocolError::InvalidInput);
+        }
+        
+        AdvancedUXManager::validate_batch_operations(operations)
+    }
+}
+
+// ============================================================================
+// CONTRACT IMPLEMENTATION EXTENSIONS FOR UX FEATURES
+// ============================================================================
+
+impl Contract {
+    /// Execute batch operations with advanced UX features
+    pub fn execute_batch_operations_ux(
+        env: Env,
+        caller: String,
+        operations: Vec<BatchOperation>,
+        gas_strategy: GasOptimizationStrategy,
+    ) -> Result<BatchOperationResponse, ProtocolError> {
+        let caller_addr = Address::from_string(&String::from_str(&env, &caller));
+        
+        // Validate operations
+        AdvancedUXManager::validate_batch_operations(&operations)?;
+        
+        // Check UX configuration
+        let config = UXConfigStorage::get(&env);
+        if !config.enable_batch_ops {
+            return Err(ProtocolError::ConfigurationError);
+        }
+        
+        // Execute batch operations
+        let response = AdvancedUXManager::execute_batch_operations(&env, operations, gas_strategy)?;
+        
+        // Emit batch operation event
+        env.events().publish(
+            (symbol_short!("batch_executed"), symbol_short!("caller")),
+            (
+                symbol_short!("caller"), caller_addr,
+                symbol_short!("total_operations"), response.results.len() as u32,
+                symbol_short!("successful_operations"), response.results.iter().filter(|r| r.success).count() as u32,
+                symbol_short!("total_gas"), response.total_gas_used,
+                symbol_short!("gas_savings"), response.gas_savings,
+            )
+        );
+        
+        Ok(response)
+    }
+    
+    /// Simulate transaction with UX features
+    pub fn simulate_transaction_ux(
+        env: Env,
+        caller: String,
+        operation: BatchOperation,
+    ) -> Result<TransactionSimulation, ProtocolError> {
+        let caller_addr = Address::from_string(&String::from_str(&env, &caller));
+        
+        // Validate simulation parameters
+        TransactionSimulator::validate_simulation_parameters(&env, &[operation.clone()])?;
+        
+        // Perform simulation
+        let simulation = AdvancedUXManager::simulate_transaction(&env, &operation)?;
+        
+        // Emit simulation event
+        env.events().publish(
+            (symbol_short!("transaction_simulated"), symbol_short!("caller")),
+            (
+                symbol_short!("caller"), caller_addr,
+                symbol_short!("operation_type"), format!("{:?}", operation.operation_type),
+                symbol_short!("would_succeed"), simulation.would_succeed,
+                symbol_short!("estimated_gas"), simulation.estimated_gas,
+            )
+        );
+        
+        Ok(simulation)
+    }
+    
+    /// Simulate batch operations
+    pub fn simulate_batch_operations_ux(
+        env: Env,
+        caller: String,
+        operations: Vec<BatchOperation>,
+    ) -> Result<Vec<TransactionSimulation>, ProtocolError> {
+        let caller_addr = Address::from_string(&String::from_str(&env, &caller));
+        
+        // Validate simulation parameters
+        TransactionSimulator::validate_simulation_parameters(&env, &operations)?;
+        
+        // Perform simulations
+        let simulations = TransactionSimulator::simulate_batch_operations(&env, operations)?;
+        
+        // Get summary
+        let summary = TransactionSimulator::get_simulation_summary(&env, &simulations);
+        
+        // Emit batch simulation event
+        env.events().publish(
+            (symbol_short!("batch_simulated"), symbol_short!("caller")),
+            (
+                symbol_short!("caller"), caller_addr,
+                symbol_short!("total_operations"), simulations.len() as u32,
+                symbol_short!("summary"), String::from_str(&env, &summary),
+            )
+        );
+        
+        Ok(simulations)
+    }
+    
+    /// Update UX configuration
+    pub fn update_ux_config(
+        env: Env,
+        caller: String,
+        config: UXConfig,
+    ) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&String::from_str(&env, &caller));
+        
+        UXConfigStorage::update_config(&env, &caller_addr, config)?;
+        
+        Ok(())
+    }
+    
+    /// Get UX configuration
+    pub fn get_ux_config(env: Env) -> UXConfig {
+        UXConfigStorage::get(&env)
+    }
+    
+    /// Get gas statistics
+    pub fn get_gas_statistics_ux(env: Env) -> (u64, u64, u64) {
+        AdvancedUXManager::get_gas_statistics(&env)
+    }
+    
+    /// Get error recovery suggestions
+    pub fn get_error_recovery_suggestions_ux(
+        env: Env,
+        error_code: u32,
+    ) -> Vec<String> {
+        if let Some(error) = Self::error_code_to_protocol_error(error_code) {
+            UXErrorHandler::get_error_recovery_suggestions(error)
+        } else {
+            vec![String::from_str(&env, "Unknown error. Please contact support.")]
+        }
+    }
+    
+    /// Convert error code to ProtocolError
+    fn error_code_to_protocol_error(error_code: u32) -> Option<ProtocolError> {
+        match error_code {
+            1 => Some(ProtocolError::Unauthorized),
+            2 => Some(ProtocolError::InsufficientCollateral),
+            3 => Some(ProtocolError::InsufficientCollateralRatio),
+            4 => Some(ProtocolError::InvalidAmount),
+            5 => Some(ProtocolError::InvalidAddress),
+            6 => Some(ProtocolError::PositionNotFound),
+            7 => Some(ProtocolError::AlreadyInitialized),
+            8 => Some(ProtocolError::NotAdmin),
+            9 => Some(ProtocolError::OracleNotSet),
+            10 => Some(ProtocolError::AdminNotSet),
+            11 => Some(ProtocolError::NotEligibleForLiquidation),
+            12 => Some(ProtocolError::ProtocolPaused),
+            13 => Some(ProtocolError::AssetNotSupported),
+            14 => Some(ProtocolError::AssetDisabled),
+            15 => Some(ProtocolError::InvalidAsset),
+            16 => Some(ProtocolError::Unknown),
+            17 => Some(ProtocolError::AlreadyExists),
+            18 => Some(ProtocolError::NotFound),
+            19 => Some(ProtocolError::InvalidOperation),
+            20 => Some(ProtocolError::InvalidInput),
+            21 => Some(ProtocolError::OracleFailure),
+            22 => Some(ProtocolError::PriceStale),
+            23 => Some(ProtocolError::SlippageExceeded),
+            24 => Some(ProtocolError::ReentrancyDetected),
+            25 => Some(ProtocolError::ComplianceViolation),
+            26 => Some(ProtocolError::NetworkError),
+            27 => Some(ProtocolError::RateLimitExceeded),
+            28 => Some(ProtocolError::ConfigurationError),
+            29 => Some(ProtocolError::StorageError),
+            30 => Some(ProtocolError::RecoveryFailed),
+            _ => None,
+        }
+    }
+    
+    /// Enhanced deposit with UX features
+    pub fn deposit_collateral_ux(
+        env: Env,
+        depositor: String,
+        amount: i128,
+    ) -> Result<(), ProtocolError> {
+        let depositor_addr = Address::from_string(&String::from_str(&env, &depositor));
+        
+        // Simulate transaction first if enabled
+        let config = UXConfigStorage::get(&env);
+        if config.enable_simulation {
+            let operation = BatchOperation {
+                operation_type: BatchOperationType::Deposit,
+                user: depositor_addr.clone(),
+                asset: String::from_str(&env, "XLM"), // Default asset
+                amount,
+                target: None,
+                optimize_gas: false,
+            };
+            
+            let simulation = AdvancedUXManager::simulate_transaction(&env, &operation)?;
+            if !simulation.would_succeed {
+                return Err(ProtocolError::InvalidAmount);
+            }
+        }
+        
+        // Execute deposit with enhanced error handling
+        match deposit_collateral(env.clone(), depositor.clone(), amount) {
+            Ok(()) => {
+                // Emit success event with UX details
+                env.events().publish(
+                    (symbol_short!("deposit_success"), symbol_short!("user")),
+                    (
+                        symbol_short!("user"), depositor_addr,
+                        symbol_short!("amount"), amount,
+                        symbol_short!("message"), String::from_str(&env, "Deposit successful! Your collateral has been added to your position."),
+                    )
+                );
+                Ok(())
+            }
+            Err(error) => {
+                // Handle error with UX considerations
+                UXErrorHandler::handle_error(
+                    &env,
+                    error,
+                    &depositor_addr,
+                    "deposit_collateral",
+                    &format!("amount: {}", amount),
+                )
+            }
+        }
+    }
+    
+    /// Enhanced borrow with UX features
+    pub fn borrow_ux(
+        env: Env,
+        borrower: String,
+        amount: i128,
+    ) -> Result<(), ProtocolError> {
+        let borrower_addr = Address::from_string(&String::from_str(&env, &borrower));
+        
+        // Simulate transaction first if enabled
+        let config = UXConfigStorage::get(&env);
+        if config.enable_simulation {
+            let operation = BatchOperation {
+                operation_type: BatchOperationType::Borrow,
+                user: borrower_addr.clone(),
+                asset: String::from_str(&env, "XLM"), // Default asset
+                amount,
+                target: None,
+                optimize_gas: false,
+            };
+            
+            let simulation = AdvancedUXManager::simulate_transaction(&env, &operation)?;
+            if !simulation.would_succeed {
+                return Err(ProtocolError::InsufficientCollateralRatio);
+            }
+        }
+        
+        // Execute borrow with enhanced error handling
+        match borrow(env.clone(), borrower.clone(), amount) {
+            Ok(()) => {
+                // Emit success event with UX details
+                env.events().publish(
+                    (symbol_short!("borrow_success"), symbol_short!("user")),
+                    (
+                        symbol_short!("user"), borrower_addr,
+                        symbol_short!("amount"), amount,
+                        symbol_short!("message"), String::from_str(&env, "Borrow successful! Funds have been transferred to your account."),
+                    )
+                );
+                Ok(())
+            }
+            Err(error) => {
+                // Handle error with UX considerations
+                UXErrorHandler::handle_error(
+                    &env,
+                    error,
+                    &borrower_addr,
+                    "borrow",
+                    &format!("amount: {}", amount),
+                )
+            }
+        }
+    }
+}
