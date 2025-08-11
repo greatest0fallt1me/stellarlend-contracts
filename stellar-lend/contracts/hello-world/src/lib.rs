@@ -922,6 +922,68 @@ pub enum ProtocolEvent {
     AccountUnfrozen {
         user: String,
     },
+    // Social Recovery and Multi-Signature events
+    GuardianAdded {
+        user: String,
+        guardian: String,
+        name: String,
+        weight: u32,
+    },
+    GuardianRemoved {
+        user: String,
+        guardian: String,
+    },
+    RecoveryRequestCreated {
+        request_id: u32,
+        user: String,
+        new_address: String,
+        required_approvals: u32,
+        time_delay: u64,
+    },
+    RecoveryRequestApproved {
+        request_id: u32,
+        guardian: String,
+        current_approvals: u32,
+    },
+    RecoveryRequestExecuted {
+        request_id: u32,
+        user: String,
+        new_address: String,
+    },
+    RecoveryRequestCancelled {
+        request_id: u32,
+        user: String,
+    },
+    MultiSigProposalCreated {
+        proposal_id: u32,
+        creator: String,
+        description: String,
+        target_function: String,
+        required_approvals: u32,
+        time_delay: u64,
+    },
+    MultiSigProposalApproved {
+        proposal_id: u32,
+        signer: String,
+        current_approvals: u32,
+    },
+    MultiSigProposalExecuted {
+        proposal_id: u32,
+        creator: String,
+        target_function: String,
+    },
+    MultiSigProposalCancelled {
+        proposal_id: u32,
+        creator: String,
+    },
+    MultiSigSignerAdded {
+        signer: String,
+        added_by: String,
+    },
+    MultiSigSignerRemoved {
+        signer: String,
+        removed_by: String,
+    },
 }
 
 impl ProtocolEvent {
@@ -1177,6 +1239,79 @@ impl ProtocolEvent {
                     (Symbol::short("user"), user.clone()),
                 );
             }
+            // Social Recovery and Multi-Signature events
+            ProtocolEvent::GuardianAdded { user, guardian, name, weight } => {
+                env.events().publish(
+                    (Symbol::short("guardian_added"), Symbol::short("user")),
+                    (Symbol::short("guardian"), guardian.clone(), Symbol::short("name"), name.clone(), Symbol::short("weight"), *weight),
+                );
+            }
+            ProtocolEvent::GuardianRemoved { user, guardian } => {
+                env.events().publish(
+                    (Symbol::short("guardian_removed"), Symbol::short("user")),
+                    (Symbol::short("guardian"), guardian.clone()),
+                );
+            }
+            ProtocolEvent::RecoveryRequestCreated { request_id, user, new_address, required_approvals, time_delay } => {
+                env.events().publish(
+                    (Symbol::short("recovery_request_created"), Symbol::short("request_id")),
+                    (Symbol::short("user"), user.clone(), Symbol::short("new_address"), new_address.clone(), Symbol::short("required_approvals"), *required_approvals, Symbol::short("time_delay"), *time_delay),
+                );
+            }
+            ProtocolEvent::RecoveryRequestApproved { request_id, guardian, current_approvals } => {
+                env.events().publish(
+                    (Symbol::short("recovery_request_approved"), Symbol::short("request_id")),
+                    (Symbol::short("guardian"), guardian.clone(), Symbol::short("current_approvals"), *current_approvals),
+                );
+            }
+            ProtocolEvent::RecoveryRequestExecuted { request_id, user, new_address } => {
+                env.events().publish(
+                    (Symbol::short("recovery_request_executed"), Symbol::short("request_id")),
+                    (Symbol::short("user"), user.clone(), Symbol::short("new_address"), new_address.clone()),
+                );
+            }
+            ProtocolEvent::RecoveryRequestCancelled { request_id, user } => {
+                env.events().publish(
+                    (Symbol::short("recovery_request_cancelled"), Symbol::short("request_id")),
+                    (Symbol::short("user"), user.clone()),
+                );
+            }
+            ProtocolEvent::MultiSigProposalCreated { proposal_id, creator, description, target_function, required_approvals, time_delay } => {
+                env.events().publish(
+                    (Symbol::short("multisig_proposal_created"), Symbol::short("proposal_id")),
+                    (Symbol::short("creator"), creator.clone(), Symbol::short("description"), description.clone(), Symbol::short("target_function"), target_function.clone(), Symbol::short("required_approvals"), *required_approvals, Symbol::short("time_delay"), *time_delay),
+                );
+            }
+            ProtocolEvent::MultiSigProposalApproved { proposal_id, signer, current_approvals } => {
+                env.events().publish(
+                    (Symbol::short("multisig_proposal_approved"), Symbol::short("proposal_id")),
+                    (Symbol::short("signer"), signer.clone(), Symbol::short("current_approvals"), *current_approvals),
+                );
+            }
+            ProtocolEvent::MultiSigProposalExecuted { proposal_id, creator, target_function } => {
+                env.events().publish(
+                    (Symbol::short("multisig_proposal_executed"), Symbol::short("proposal_id")),
+                    (Symbol::short("creator"), creator.clone(), Symbol::short("target_function"), target_function.clone()),
+                );
+            }
+            ProtocolEvent::MultiSigProposalCancelled { proposal_id, creator } => {
+                env.events().publish(
+                    (Symbol::short("multisig_proposal_cancelled"), Symbol::short("proposal_id")),
+                    (Symbol::short("creator"), creator.clone()),
+                );
+            }
+            ProtocolEvent::MultiSigSignerAdded { signer, added_by } => {
+                env.events().publish(
+                    (Symbol::short("multisig_signer_added"), Symbol::short("signer")),
+                    (Symbol::short("added_by"), added_by.clone()),
+                );
+            }
+            ProtocolEvent::MultiSigSignerRemoved { signer, removed_by } => {
+                env.events().publish(
+                    (Symbol::short("multisig_signer_removed"), Symbol::short("signer")),
+                    (Symbol::short("removed_by"), removed_by.clone()),
+                );
+            }
         }
     }
 }
@@ -1203,6 +1338,19 @@ impl ProtocolEvent {
             ProtocolEvent::ProtocolStatsUpdated { .. } => "ProtocolStatsUpdated",
             ProtocolEvent::AccountFrozen { .. } => "AccountFrozen",
             ProtocolEvent::AccountUnfrozen { .. } => "AccountUnfrozen",
+            // Social Recovery and Multi-Signature events
+            ProtocolEvent::GuardianAdded { .. } => "GuardianAdded",
+            ProtocolEvent::GuardianRemoved { .. } => "GuardianRemoved",
+            ProtocolEvent::RecoveryRequestCreated { .. } => "RecoveryRequestCreated",
+            ProtocolEvent::RecoveryRequestApproved { .. } => "RecoveryRequestApproved",
+            ProtocolEvent::RecoveryRequestExecuted { .. } => "RecoveryRequestExecuted",
+            ProtocolEvent::RecoveryRequestCancelled { .. } => "RecoveryRequestCancelled",
+            ProtocolEvent::MultiSigProposalCreated { .. } => "MultiSigProposalCreated",
+            ProtocolEvent::MultiSigProposalApproved { .. } => "MultiSigProposalApproved",
+            ProtocolEvent::MultiSigProposalExecuted { .. } => "MultiSigProposalExecuted",
+            ProtocolEvent::MultiSigProposalCancelled { .. } => "MultiSigProposalCancelled",
+            ProtocolEvent::MultiSigSignerAdded { .. } => "MultiSigSignerAdded",
+            ProtocolEvent::MultiSigSignerRemoved { .. } => "MultiSigSignerRemoved",
         }
     }
 }
@@ -1521,6 +1669,21 @@ pub enum ProtocolError {
     ConfigurationError = 28,
     StorageError = 29,
     RecoveryFailed = 30,
+    // Social Recovery and Multi-Signature errors
+    GuardianNotFound = 31,
+    GuardianAlreadyExists = 32,
+    RecoveryRequestNotFound = 33,
+    RecoveryRequestAlreadyExists = 34,
+    RecoveryNotReady = 35,
+    InsufficientGuardianApprovals = 36,
+    MultiSigProposalNotFound = 37,
+    MultiSigProposalAlreadyExists = 38,
+    MultiSigNotReady = 39,
+    InsufficientSignatures = 40,
+    InvalidGuardianAddress = 41,
+    InvalidRecoveryAddress = 42,
+    RecoveryTimeDelayNotMet = 43,
+    MultiSigTimeDelayNotMet = 44,
 }
 
 impl ProtocolError {
@@ -1557,6 +1720,21 @@ impl ProtocolError {
             ProtocolError::ConfigurationError => "System configuration error detected",
             ProtocolError::StorageError => "Storage operation failed",
             ProtocolError::RecoveryFailed => "Error recovery operation failed",
+            // Social Recovery and Multi-Signature errors
+            ProtocolError::GuardianNotFound => "Guardian not found",
+            ProtocolError::GuardianAlreadyExists => "Guardian already exists",
+            ProtocolError::RecoveryRequestNotFound => "Recovery request not found",
+            ProtocolError::RecoveryRequestAlreadyExists => "Recovery request already exists",
+            ProtocolError::RecoveryNotReady => "Recovery not ready for execution",
+            ProtocolError::InsufficientGuardianApprovals => "Insufficient guardian approvals",
+            ProtocolError::MultiSigProposalNotFound => "Multi-signature proposal not found",
+            ProtocolError::MultiSigProposalAlreadyExists => "Multi-signature proposal already exists",
+            ProtocolError::MultiSigNotReady => "Multi-signature proposal not ready for execution",
+            ProtocolError::InsufficientSignatures => "Insufficient signatures for multi-signature operation",
+            ProtocolError::InvalidGuardianAddress => "Invalid guardian address",
+            ProtocolError::InvalidRecoveryAddress => "Invalid recovery address",
+            ProtocolError::RecoveryTimeDelayNotMet => "Recovery time delay not met",
+            ProtocolError::MultiSigTimeDelayNotMet => "Multi-signature time delay not met",
         }
     }
 
@@ -5206,4 +5384,925 @@ impl Contract {
             }
         }
     }
+}
+
+// ============================================================================
+// SOCIAL RECOVERY AND MULTI-SIGNATURE SUPPORT
+// ============================================================================
+
+/// Represents a guardian in the social recovery system
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct Guardian {
+    /// Guardian's address
+    pub address: Address,
+    /// Guardian's name/identifier
+    pub name: String,
+    /// Whether guardian is active
+    pub is_active: bool,
+    /// When guardian was added
+    pub added_at: u64,
+    /// Guardian's weight for multi-signature operations
+    pub weight: u32,
+}
+
+impl Guardian {
+    pub fn new(address: Address, name: String, weight: u32) -> Self {
+        Self {
+            address,
+            name,
+            is_active: true,
+            added_at: 0,
+            weight,
+        }
+    }
+}
+
+/// Represents a recovery request
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct RecoveryRequest {
+    /// Request ID
+    pub id: u32,
+    /// User requesting recovery
+    pub user: Address,
+    /// New address to recover to
+    pub new_address: Address,
+    /// Number of guardian approvals required
+    pub required_approvals: u32,
+    /// Current number of approvals
+    pub current_approvals: u32,
+    /// Request creation timestamp
+    pub created_at: u64,
+    /// Time delay before recovery can be executed (in seconds)
+    pub time_delay: u64,
+    /// Whether recovery has been executed
+    pub executed: bool,
+    /// Guardian approvals (address -> timestamp)
+    pub approvals: Vec<(Address, u64)>,
+}
+
+impl RecoveryRequest {
+    pub fn new(
+        id: u32,
+        user: Address,
+        new_address: Address,
+        required_approvals: u32,
+        time_delay: u64,
+    ) -> Self {
+        Self {
+            id,
+            user,
+            new_address,
+            required_approvals,
+            current_approvals: 0,
+            created_at: 0,
+            time_delay,
+            executed: false,
+            approvals: vec![],
+        }
+    }
+
+    pub fn can_execute(&self, current_time: u64) -> bool {
+        self.current_approvals >= self.required_approvals
+            && current_time >= self.created_at + self.time_delay
+            && !self.executed
+    }
+
+    pub fn add_approval(&mut self, guardian: Address, timestamp: u64) {
+        if !self.approvals.iter().any(|(addr, _)| *addr == guardian) {
+            self.approvals.push((guardian, timestamp));
+            self.current_approvals += 1;
+        }
+    }
+}
+
+/// Represents a multi-signature proposal
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct MultiSigProposal {
+    /// Proposal ID
+    pub id: u32,
+    /// Proposal creator
+    pub creator: Address,
+    /// Proposal description
+    pub description: String,
+    /// Target function to call
+    pub target_function: String,
+    /// Function parameters (serialized)
+    pub parameters: Vec<String>,
+    /// Required approvals
+    pub required_approvals: u32,
+    /// Current approvals
+    pub current_approvals: u32,
+    /// Proposal creation time
+    pub created_at: u64,
+    /// Time delay before execution
+    pub time_delay: u64,
+    /// Whether proposal is executed
+    pub executed: bool,
+    /// Guardian approvals (address -> timestamp)
+    pub approvals: Vec<(Address, u64)>,
+    /// Proposal status
+    pub status: ProposalStatus,
+}
+
+impl MultiSigProposal {
+    pub fn new(
+        id: u32,
+        creator: Address,
+        description: String,
+        target_function: String,
+        parameters: Vec<String>,
+        required_approvals: u32,
+        time_delay: u64,
+    ) -> Self {
+        Self {
+            id,
+            creator,
+            description,
+            target_function,
+            parameters,
+            required_approvals,
+            current_approvals: 0,
+            created_at: 0,
+            time_delay,
+            executed: false,
+            approvals: vec![],
+            status: ProposalStatus::Pending,
+        }
+    }
+
+    pub fn can_execute(&self, current_time: u64) -> bool {
+        self.current_approvals >= self.required_approvals
+            && current_time >= self.created_at + self.time_delay
+            && !self.executed
+            && self.status == ProposalStatus::Approved
+    }
+
+    pub fn add_approval(&mut self, guardian: Address, timestamp: u64) {
+        if !self.approvals.iter().any(|(addr, _)| *addr == guardian) {
+            self.approvals.push((guardian, timestamp));
+            self.current_approvals += 1;
+            
+            if self.current_approvals >= self.required_approvals {
+                self.status = ProposalStatus::Approved;
+            }
+        }
+    }
+}
+
+/// Social recovery configuration for a user
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct SocialRecoveryConfig {
+    /// User address
+    pub user: Address,
+    /// List of guardians
+    pub guardians: Vec<Guardian>,
+    /// Minimum number of guardians required for recovery
+    pub min_guardians: u32,
+    /// Time delay for recovery (in seconds)
+    pub recovery_time_delay: u64,
+    /// Whether social recovery is enabled
+    pub enabled: bool,
+    /// Last configuration update
+    pub last_updated: u64,
+}
+
+impl SocialRecoveryConfig {
+    pub fn new(user: Address, min_guardians: u32, recovery_time_delay: u64) -> Self {
+        Self {
+            user,
+            guardians: vec![],
+            min_guardians,
+            recovery_time_delay,
+            enabled: false,
+            last_updated: 0,
+        }
+    }
+
+    pub fn add_guardian(&mut self, guardian: Guardian) {
+        if !self.guardians.iter().any(|g| g.address == guardian.address) {
+            self.guardians.push(guardian);
+        }
+    }
+
+    pub fn remove_guardian(&mut self, guardian_address: &Address) {
+        self.guardians.retain(|g| g.address != *guardian_address);
+    }
+
+    pub fn get_active_guardians(&self) -> Vec<&Guardian> {
+        self.guardians.iter().filter(|g| g.is_active).collect()
+    }
+
+    pub fn is_valid_recovery_setup(&self) -> bool {
+        self.enabled && self.guardians.len() >= self.min_guardians as usize
+    }
+}
+
+/// Multi-signature configuration for admin operations
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct MultiSigConfig {
+    /// List of authorized signers
+    pub signers: Vec<Address>,
+    /// Minimum signatures required
+    pub min_signatures: u32,
+    /// Time delay for execution (in seconds)
+    pub execution_delay: u64,
+    /// Whether multi-signature is enabled
+    pub enabled: bool,
+    /// Last configuration update
+    pub last_updated: u64,
+}
+
+impl MultiSigConfig {
+    pub fn new(min_signatures: u32, execution_delay: u64) -> Self {
+        Self {
+            signers: vec![],
+            min_signatures,
+            execution_delay,
+            enabled: false,
+            last_updated: 0,
+        }
+    }
+
+    pub fn add_signer(&mut self, signer: Address) {
+        if !self.signers.contains(&signer) {
+            self.signers.push(signer);
+        }
+    }
+
+    pub fn remove_signer(&mut self, signer: &Address) {
+        self.signers.retain(|s| s != signer);
+    }
+
+    pub fn is_valid_setup(&self) -> bool {
+        self.enabled && self.signers.len() >= self.min_signatures as usize
+    }
+}
+
+/// Storage for social recovery and multi-signature data
+pub struct RecoveryStorage;
+
+impl RecoveryStorage {
+    fn recovery_config_key(user: &Address) -> Symbol {
+        let env = Env::default();
+        Symbol::new(&env, &format!("recovery_cfg_{}", user.to_string()))
+    }
+
+    fn recovery_request_key(request_id: u32) -> Symbol {
+        let env = Env::default();
+        Symbol::new(&env, &format!("recovery_req_{}", request_id))
+    }
+
+    fn multisig_config_key() -> Symbol {
+        let env = Env::default();
+        Symbol::new(&env, "multisig_cfg")
+    }
+
+    fn multisig_proposal_key(proposal_id: u32) -> Symbol {
+        let env = Env::default();
+        Symbol::new(&env, &format!("multisig_prop_{}", proposal_id))
+    }
+
+    fn next_recovery_id_key() -> Symbol {
+        let env = Env::default();
+        Symbol::new(&env, "next_recovery_id")
+    }
+
+    fn next_proposal_id_key() -> Symbol {
+        let env = Env::default();
+        Symbol::new(&env, "next_proposal_id")
+    }
+
+    pub fn save_recovery_config(env: &Env, config: &SocialRecoveryConfig) {
+        let key = Self::recovery_config_key(&config.user);
+        env.storage().instance().set(&key, config);
+    }
+
+    pub fn get_recovery_config(env: &Env, user: &Address) -> Option<SocialRecoveryConfig> {
+        let key = Self::recovery_config_key(user);
+        env.storage().instance().get::<Symbol, SocialRecoveryConfig>(&key)
+    }
+
+    pub fn save_recovery_request(env: &Env, request: &RecoveryRequest) {
+        let key = Self::recovery_request_key(request.id);
+        env.storage().instance().set(&key, request);
+    }
+
+    pub fn get_recovery_request(env: &Env, request_id: u32) -> Option<RecoveryRequest> {
+        let key = Self::recovery_request_key(request_id);
+        env.storage().instance().get::<Symbol, RecoveryRequest>(&key)
+    }
+
+    pub fn save_multisig_config(env: &Env, config: &MultiSigConfig) {
+        let key = Self::multisig_config_key();
+        env.storage().instance().set(&key, config);
+    }
+
+    pub fn get_multisig_config(env: &Env) -> Option<MultiSigConfig> {
+        let key = Self::multisig_config_key();
+        env.storage().instance().get::<Symbol, MultiSigConfig>(&key)
+    }
+
+    pub fn save_multisig_proposal(env: &Env, proposal: &MultiSigProposal) {
+        let key = Self::multisig_proposal_key(proposal.id);
+        env.storage().instance().set(&key, proposal);
+    }
+
+    pub fn get_multisig_proposal(env: &Env, proposal_id: u32) -> Option<MultiSigProposal> {
+        let key = Self::multisig_proposal_key(proposal_id);
+        env.storage().instance().get::<Symbol, MultiSigProposal>(&key)
+    }
+
+    pub fn get_next_recovery_id(env: &Env) -> u32 {
+        let key = Self::next_recovery_id_key();
+        env.storage().instance().get::<Symbol, u32>(&key).unwrap_or(0)
+    }
+
+    pub fn increment_recovery_id(env: &Env) -> u32 {
+        let key = Self::next_recovery_id_key();
+        let next_id = Self::get_next_recovery_id(env) + 1;
+        env.storage().instance().set(&key, &next_id);
+        next_id
+    }
+
+    pub fn get_next_proposal_id(env: &Env) -> u32 {
+        let key = Self::next_proposal_id_key();
+        env.storage().instance().get::<Symbol, u32>(&key).unwrap_or(0)
+    }
+
+    pub fn increment_proposal_id(env: &Env) -> u32 {
+        let key = Self::next_proposal_id_key();
+        let next_id = Self::get_next_proposal_id(env) + 1;
+        env.storage().instance().set(&key, &next_id);
+        next_id
+    }
+}
+
+// Social Recovery and Multi-Signature Functions
+
+/// Set up social recovery for a user
+pub fn setup_social_recovery(
+    env: Env,
+    user: String,
+    min_guardians: u32,
+    recovery_time_delay: u64,
+) -> Result<(), ProtocolError> {
+    let user_addr = Address::from_string(&String::from_str(&env, &user));
+    
+    // Check if recovery is already set up
+    if RecoveryStorage::get_recovery_config(&env, &user_addr).is_some() {
+        return Err(ProtocolError::AlreadyExists);
+    }
+
+    // Validate parameters
+    if min_guardians == 0 || recovery_time_delay == 0 {
+        return Err(ProtocolError::InvalidInput);
+    }
+
+    let mut config = SocialRecoveryConfig::new(user_addr, min_guardians, recovery_time_delay);
+    config.enabled = true;
+    config.last_updated = env.ledger().timestamp();
+
+    RecoveryStorage::save_recovery_config(&env, &config);
+
+    Ok(())
+}
+
+/// Add a guardian to a user's social recovery setup
+pub fn add_guardian(
+    env: Env,
+    user: String,
+    guardian: String,
+    name: String,
+    weight: u32,
+) -> Result<(), ProtocolError> {
+    let user_addr = Address::from_string(&String::from_str(&env, &user));
+    let guardian_addr = Address::from_string(&String::from_str(&env, &guardian));
+
+    // Validate guardian address
+    if guardian_addr == user_addr {
+        return Err(ProtocolError::InvalidGuardianAddress);
+    }
+
+    let mut config = RecoveryStorage::get_recovery_config(&env, &user_addr)
+        .ok_or(ProtocolError::NotFound)?;
+
+    // Check if guardian already exists
+    if config.guardians.iter().any(|g| g.address == guardian_addr) {
+        return Err(ProtocolError::GuardianAlreadyExists);
+    }
+
+    let mut new_guardian = Guardian::new(guardian_addr, name, weight);
+    new_guardian.added_at = env.ledger().timestamp();
+    config.add_guardian(new_guardian);
+    config.last_updated = env.ledger().timestamp();
+
+    RecoveryStorage::save_recovery_config(&env, &config);
+
+    // Emit event
+    ProtocolEvent::GuardianAdded {
+        user: user.clone(),
+        guardian: guardian.clone(),
+        name: name.clone(),
+        weight,
+    }.emit(&env);
+
+    Ok(())
+}
+
+/// Remove a guardian from a user's social recovery setup
+pub fn remove_guardian(
+    env: Env,
+    user: String,
+    guardian: String,
+) -> Result<(), ProtocolError> {
+    let user_addr = Address::from_string(&String::from_str(&env, &user));
+    let guardian_addr = Address::from_string(&String::from_str(&env, &guardian));
+
+    let mut config = RecoveryStorage::get_recovery_config(&env, &user_addr)
+        .ok_or(ProtocolError::NotFound)?;
+
+    // Check if guardian exists
+    if !config.guardians.iter().any(|g| g.address == guardian_addr) {
+        return Err(ProtocolError::GuardianNotFound);
+    }
+
+    config.remove_guardian(&guardian_addr);
+    config.last_updated = env.ledger().timestamp();
+
+    RecoveryStorage::save_recovery_config(&env, &config);
+
+    // Emit event
+    ProtocolEvent::GuardianRemoved {
+        user: user.clone(),
+        guardian: guardian.clone(),
+    }.emit(&env);
+
+    Ok(())
+}
+
+/// Create a recovery request
+pub fn create_recovery_request(
+    env: Env,
+    user: String,
+    new_address: String,
+) -> Result<u32, ProtocolError> {
+    let user_addr = Address::from_string(&String::from_str(&env, &user));
+    let new_addr = Address::from_string(&String::from_str(&env, &new_address));
+
+    // Validate new address
+    if new_addr == user_addr {
+        return Err(ProtocolError::InvalidRecoveryAddress);
+    }
+
+    let config = RecoveryStorage::get_recovery_config(&env, &user_addr)
+        .ok_or(ProtocolError::NotFound)?;
+
+    if !config.is_valid_recovery_setup() {
+        return Err(ProtocolError::ConfigurationError);
+    }
+
+    let request_id = RecoveryStorage::increment_recovery_id(&env);
+    let mut request = RecoveryRequest::new(
+        request_id,
+        user_addr,
+        new_addr,
+        config.min_guardians,
+        config.recovery_time_delay,
+    );
+    request.created_at = env.ledger().timestamp();
+
+    RecoveryStorage::save_recovery_request(&env, &request);
+
+    // Emit event
+    ProtocolEvent::RecoveryRequestCreated {
+        request_id,
+        user: user.clone(),
+        new_address: new_address.clone(),
+        required_approvals: config.min_guardians,
+        time_delay: config.recovery_time_delay,
+    }.emit(&env);
+
+    Ok(request_id)
+}
+
+/// Approve a recovery request
+pub fn approve_recovery_request(
+    env: Env,
+    guardian: String,
+    request_id: u32,
+) -> Result<(), ProtocolError> {
+    let guardian_addr = Address::from_string(&String::from_str(&env, &guardian));
+
+    let mut request = RecoveryStorage::get_recovery_request(&env, request_id)
+        .ok_or(ProtocolError::RecoveryRequestNotFound)?;
+
+    if request.executed {
+        return Err(ProtocolError::InvalidOperation);
+    }
+
+    let config = RecoveryStorage::get_recovery_config(&env, &request.user)
+        .ok_or(ProtocolError::NotFound)?;
+
+    // Check if guardian is valid
+    if !config.guardians.iter().any(|g| g.address == guardian_addr && g.is_active) {
+        return Err(ProtocolError::GuardianNotFound);
+    }
+
+    // Check if guardian already approved
+    if request.approvals.iter().any(|(addr, _)| *addr == guardian_addr) {
+        return Err(ProtocolError::InvalidOperation);
+    }
+
+    request.add_approval(guardian_addr, env.ledger().timestamp());
+    RecoveryStorage::save_recovery_request(&env, &request);
+
+    // Emit event
+    ProtocolEvent::RecoveryRequestApproved {
+        request_id,
+        guardian: guardian.clone(),
+        current_approvals: request.current_approvals,
+    }.emit(&env);
+
+    Ok(())
+}
+
+/// Execute a recovery request
+pub fn execute_recovery_request(
+    env: Env,
+    request_id: u32,
+) -> Result<(), ProtocolError> {
+    let mut request = RecoveryStorage::get_recovery_request(&env, request_id)
+        .ok_or(ProtocolError::RecoveryRequestNotFound)?;
+
+    if request.executed {
+        return Err(ProtocolError::InvalidOperation);
+    }
+
+    if !request.can_execute(env.ledger().timestamp()) {
+        return Err(ProtocolError::RecoveryNotReady);
+    }
+
+    // Execute the recovery by transferring positions
+    // This is a simplified implementation - in practice, you'd transfer all user data
+    if let Some(position) = StateHelper::get_position(&env, &request.user) {
+        StateHelper::save_position(&env, &Position {
+            user: request.new_address.clone(),
+            ..position
+        });
+        StateHelper::remove_position(&env, &request.user);
+    }
+
+    request.executed = true;
+    RecoveryStorage::save_recovery_request(&env, &request);
+
+    // Emit event
+    ProtocolEvent::RecoveryRequestExecuted {
+        request_id,
+        user: request.user.to_string(),
+        new_address: request.new_address.to_string(),
+    }.emit(&env);
+
+    Ok(())
+}
+
+/// Cancel a recovery request
+pub fn cancel_recovery_request(
+    env: Env,
+    user: String,
+    request_id: u32,
+) -> Result<(), ProtocolError> {
+    let user_addr = Address::from_string(&String::from_str(&env, &user));
+
+    let mut request = RecoveryStorage::get_recovery_request(&env, request_id)
+        .ok_or(ProtocolError::RecoveryRequestNotFound)?;
+
+    if request.user != user_addr {
+        return Err(ProtocolError::Unauthorized);
+    }
+
+    if request.executed {
+        return Err(ProtocolError::InvalidOperation);
+    }
+
+    request.executed = true; // Mark as cancelled
+    RecoveryStorage::save_recovery_request(&env, &request);
+
+    // Emit event
+    ProtocolEvent::RecoveryRequestCancelled {
+        request_id,
+        user: user.clone(),
+    }.emit(&env);
+
+    Ok(())
+}
+
+/// Get recovery configuration for a user
+pub fn get_recovery_config(env: Env, user: String) -> Result<(u32, u32, bool), ProtocolError> {
+    let user_addr = Address::from_string(&String::from_str(&env, &user));
+
+    let config = RecoveryStorage::get_recovery_config(&env, &user_addr)
+        .ok_or(ProtocolError::NotFound)?;
+
+    Ok((
+        config.guardians.len() as u32,
+        config.min_guardians,
+        config.enabled,
+    ))
+}
+
+/// Get recovery request details
+pub fn get_recovery_request(env: Env, request_id: u32) -> Result<(String, String, u32, u32, bool), ProtocolError> {
+    let request = RecoveryStorage::get_recovery_request(&env, request_id)
+        .ok_or(ProtocolError::RecoveryRequestNotFound)?;
+
+    Ok((
+        request.user.to_string(),
+        request.new_address.to_string(),
+        request.current_approvals,
+        request.required_approvals,
+        request.executed,
+    ))
+}
+
+// Multi-Signature Functions
+
+/// Set up multi-signature for admin operations
+pub fn setup_multisig(
+    env: Env,
+    caller: String,
+    min_signatures: u32,
+    execution_delay: u64,
+) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&String::from_str(&env, &caller));
+    
+    // Only admin can set up multi-signature
+    ProtocolConfig::require_admin(&env, &caller_addr)?;
+
+    // Check if multi-signature is already set up
+    if RecoveryStorage::get_multisig_config(&env).is_some() {
+        return Err(ProtocolError::AlreadyExists);
+    }
+
+    // Validate parameters
+    if min_signatures == 0 || execution_delay == 0 {
+        return Err(ProtocolError::InvalidInput);
+    }
+
+    let mut config = MultiSigConfig::new(min_signatures, execution_delay);
+    config.enabled = true;
+    config.last_updated = env.ledger().timestamp();
+
+    RecoveryStorage::save_multisig_config(&env, &config);
+
+    Ok(())
+}
+
+/// Add a signer to multi-signature setup
+pub fn add_multisig_signer(
+    env: Env,
+    caller: String,
+    signer: String,
+) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&String::from_str(&env, &caller));
+    let signer_addr = Address::from_string(&String::from_str(&env, &signer));
+
+    // Only admin can add signers
+    ProtocolConfig::require_admin(&env, &caller_addr)?;
+
+    let mut config = RecoveryStorage::get_multisig_config(&env)
+        .ok_or(ProtocolError::NotFound)?;
+
+    // Check if signer already exists
+    if config.signers.contains(&signer_addr) {
+        return Err(ProtocolError::AlreadyExists);
+    }
+
+    config.add_signer(signer_addr);
+    config.last_updated = env.ledger().timestamp();
+
+    RecoveryStorage::save_multisig_config(&env, &config);
+
+    // Emit event
+    ProtocolEvent::MultiSigSignerAdded {
+        signer: signer.clone(),
+        added_by: caller.clone(),
+    }.emit(&env);
+
+    Ok(())
+}
+
+/// Remove a signer from multi-signature setup
+pub fn remove_multisig_signer(
+    env: Env,
+    caller: String,
+    signer: String,
+) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&String::from_str(&env, &caller));
+    let signer_addr = Address::from_string(&String::from_str(&env, &signer));
+
+    // Only admin can remove signers
+    ProtocolConfig::require_admin(&env, &caller_addr)?;
+
+    let mut config = RecoveryStorage::get_multisig_config(&env)
+        .ok_or(ProtocolError::NotFound)?;
+
+    // Check if signer exists
+    if !config.signers.contains(&signer_addr) {
+        return Err(ProtocolError::NotFound);
+    }
+
+    config.remove_signer(&signer_addr);
+    config.last_updated = env.ledger().timestamp();
+
+    RecoveryStorage::save_multisig_config(&env, &config);
+
+    // Emit event
+    ProtocolEvent::MultiSigSignerRemoved {
+        signer: signer.clone(),
+        removed_by: caller.clone(),
+    }.emit(&env);
+
+    Ok(())
+}
+
+/// Create a multi-signature proposal
+pub fn create_multisig_proposal(
+    env: Env,
+    creator: String,
+    description: String,
+    target_function: String,
+    parameters: Vec<String>,
+) -> Result<u32, ProtocolError> {
+    let creator_addr = Address::from_string(&String::from_str(&env, &creator));
+
+    let config = RecoveryStorage::get_multisig_config(&env)
+        .ok_or(ProtocolError::NotFound)?;
+
+    if !config.is_valid_setup() {
+        return Err(ProtocolError::ConfigurationError);
+    }
+
+    // Check if creator is a signer
+    if !config.signers.contains(&creator_addr) {
+        return Err(ProtocolError::Unauthorized);
+    }
+
+    let proposal_id = RecoveryStorage::increment_proposal_id(&env);
+    let mut proposal = MultiSigProposal::new(
+        proposal_id,
+        creator_addr,
+        description,
+        target_function,
+        parameters,
+        config.min_signatures,
+        config.execution_delay,
+    );
+    proposal.created_at = env.ledger().timestamp();
+
+    RecoveryStorage::save_multisig_proposal(&env, &proposal);
+
+    // Emit event
+    ProtocolEvent::MultiSigProposalCreated {
+        proposal_id,
+        creator: creator.clone(),
+        description: description.clone(),
+        target_function: target_function.clone(),
+        required_approvals: config.min_signatures,
+        time_delay: config.execution_delay,
+    }.emit(&env);
+
+    Ok(proposal_id)
+}
+
+/// Approve a multi-signature proposal
+pub fn approve_multisig_proposal(
+    env: Env,
+    signer: String,
+    proposal_id: u32,
+) -> Result<(), ProtocolError> {
+    let signer_addr = Address::from_string(&String::from_str(&env, &signer));
+
+    let mut proposal = RecoveryStorage::get_multisig_proposal(&env, proposal_id)
+        .ok_or(ProtocolError::MultiSigProposalNotFound)?;
+
+    if proposal.executed {
+        return Err(ProtocolError::InvalidOperation);
+    }
+
+    let config = RecoveryStorage::get_multisig_config(&env)
+        .ok_or(ProtocolError::NotFound)?;
+
+    // Check if signer is valid
+    if !config.signers.contains(&signer_addr) {
+        return Err(ProtocolError::Unauthorized);
+    }
+
+    // Check if signer already approved
+    if proposal.approvals.iter().any(|(addr, _)| *addr == signer_addr) {
+        return Err(ProtocolError::InvalidOperation);
+    }
+
+    proposal.add_approval(signer_addr, env.ledger().timestamp());
+    RecoveryStorage::save_multisig_proposal(&env, &proposal);
+
+    // Emit event
+    ProtocolEvent::MultiSigProposalApproved {
+        proposal_id,
+        signer: signer.clone(),
+        current_approvals: proposal.current_approvals,
+    }.emit(&env);
+
+    Ok(())
+}
+
+/// Execute a multi-signature proposal
+pub fn execute_multisig_proposal(
+    env: Env,
+    proposal_id: u32,
+) -> Result<(), ProtocolError> {
+    let mut proposal = RecoveryStorage::get_multisig_proposal(&env, proposal_id)
+        .ok_or(ProtocolError::MultiSigProposalNotFound)?;
+
+    if proposal.executed {
+        return Err(ProtocolError::InvalidOperation);
+    }
+
+    if !proposal.can_execute(env.ledger().timestamp()) {
+        return Err(ProtocolError::MultiSigNotReady);
+    }
+
+    // Execute the proposal (simplified - in practice, you'd call the target function)
+    proposal.executed = true;
+    RecoveryStorage::save_multisig_proposal(&env, &proposal);
+
+    // Emit event
+    ProtocolEvent::MultiSigProposalExecuted {
+        proposal_id,
+        creator: proposal.creator.to_string(),
+        target_function: proposal.target_function.clone(),
+    }.emit(&env);
+
+    Ok(())
+}
+
+/// Cancel a multi-signature proposal
+pub fn cancel_multisig_proposal(
+    env: Env,
+    creator: String,
+    proposal_id: u32,
+) -> Result<(), ProtocolError> {
+    let creator_addr = Address::from_string(&String::from_str(&env, &creator));
+
+    let mut proposal = RecoveryStorage::get_multisig_proposal(&env, proposal_id)
+        .ok_or(ProtocolError::MultiSigProposalNotFound)?;
+
+    if proposal.creator != creator_addr {
+        return Err(ProtocolError::Unauthorized);
+    }
+
+    if proposal.executed {
+        return Err(ProtocolError::InvalidOperation);
+    }
+
+    proposal.status = ProposalStatus::Cancelled;
+    RecoveryStorage::save_multisig_proposal(&env, &proposal);
+
+    // Emit event
+    ProtocolEvent::MultiSigProposalCancelled {
+        proposal_id,
+        creator: creator.clone(),
+    }.emit(&env);
+
+    Ok(())
+}
+
+/// Get multi-signature configuration
+pub fn get_multisig_config(env: Env) -> Result<(u32, u32, bool), ProtocolError> {
+    let config = RecoveryStorage::get_multisig_config(&env)
+        .ok_or(ProtocolError::NotFound)?;
+
+    Ok((
+        config.signers.len() as u32,
+        config.min_signatures,
+        config.enabled,
+    ))
+}
+
+/// Get multi-signature proposal details
+pub fn get_multisig_proposal(env: Env, proposal_id: u32) -> Result<(String, String, u32, u32, bool), ProtocolError> {
+    let proposal = RecoveryStorage::get_multisig_proposal(&env, proposal_id)
+        .ok_or(ProtocolError::MultiSigProposalNotFound)?;
+
+    Ok((
+        proposal.creator.to_string(),
+        proposal.description.clone(),
+        proposal.current_approvals,
+        proposal.required_approvals,
+        proposal.executed,
+    ))
 }
