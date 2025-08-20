@@ -144,7 +144,7 @@
                               "val": {
                                 "i128": {
                                   "hi": 0,
-                                  "lo": 2000000
+                                  "lo": 0
                                 }
                               }
                             },
@@ -155,7 +155,7 @@
                               "val": {
                                 "i128": {
                                   "hi": 0,
-                                  "lo": 1800000
+                                  "lo": 0
                                 }
                               }
                             },
@@ -205,83 +205,6 @@
                       },
                       {
                         "key": {
-                          "symbol": "position_user"
-                        },
-                        "val": {
-                          "map": [
-                            {
-                              "key": {
-                                "symbol": "borrow_interest"
-                              },
-                              "val": {
-                                "i128": {
-                                  "hi": 0,
-                                  "lo": 0
-                                }
-                              }
-                            },
-                            {
-                              "key": {
-                                "symbol": "collateral"
-                              },
-                              "val": {
-                                "i128": {
-                                  "hi": 0,
-                                  "lo": 100
-                                }
-                              }
-                            },
-                            {
-                              "key": {
-                                "symbol": "debt"
-                              },
-                              "val": {
-                                "i128": {
-                                  "hi": 0,
-                                  "lo": 0
-                                }
-                              }
-                            },
-                            {
-                              "key": {
-                                "symbol": "last_accrual_time"
-                              },
-                              "val": {
-                                "u64": 0
-                              }
-                            },
-                            {
-                              "key": {
-                                "symbol": "supply_interest"
-                              },
-                              "val": {
-                                "i128": {
-                                  "hi": 0,
-                                  "lo": 0
-                                }
-                              }
-                            },
-                            {
-                              "key": {
-                                "symbol": "user"
-                              },
-                              "val": {
-                                "address": "GCXOTMMXRS24MYZI5FJPUCOEOFNWSR4XX7UXIK3NDGGE6A5QMJ5FF2FS"
-                              }
-                            }
-                          ]
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "reentrancy"
-                        },
-                        "val": {
-                          "bool": false
-                        }
-                      },
-                      {
-                        "key": {
                           "symbol": "risk_config"
                         },
                         "val": {
@@ -321,7 +244,7 @@
                                 "symbol": "pause_borrow"
                               },
                               "val": {
-                                "bool": false
+                                "bool": true
                               }
                             },
                             {
@@ -345,7 +268,7 @@
                                 "symbol": "pause_withdraw"
                               },
                               "val": {
-                                "bool": false
+                                "bool": true
                               }
                             }
                           ]
@@ -394,46 +317,37 @@
           "v0": {
             "topics": [
               {
-                "symbol": "position_updated"
+                "symbol": "pause_switches_updated"
               },
               {
-                "symbol": "user"
+                "symbol": "pause_borrow"
               }
             ],
             "data": {
               "vec": [
                 {
-                  "symbol": "user"
+                  "symbol": "pause_borrow"
                 },
                 {
-                  "address": "GCXOTMMXRS24MYZI5FJPUCOEOFNWSR4XX7UXIK3NDGGE6A5QMJ5FF2FS"
+                  "bool": true
                 },
                 {
-                  "symbol": "collateral"
+                  "symbol": "pause_deposit"
                 },
                 {
-                  "i128": {
-                    "hi": 0,
-                    "lo": 100
-                  }
+                  "bool": false
                 },
                 {
-                  "symbol": "debt"
+                  "symbol": "pause_withdraw"
                 },
                 {
-                  "i128": {
-                    "hi": 0,
-                    "lo": 0
-                  }
+                  "bool": true
                 },
                 {
-                  "symbol": "collateral_ratio"
+                  "symbol": "pause_liquidate"
                 },
                 {
-                  "i128": {
-                    "hi": 0,
-                    "lo": 0
-                  }
+                  "bool": false
                 }
               ]
             }
