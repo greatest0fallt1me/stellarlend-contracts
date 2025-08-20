@@ -5,12 +5,16 @@
 
 #![no_std]
 extern crate alloc;
+
 use alloc::format;
-use alloc::string::ToString;
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, storage, vec, Address, Env,
-    String, Symbol, Vec,
+    contract, contracterror, contractimpl, contracttype, Address, Env,
+    String, Symbol,
 };
+
+// Global allocator for Soroban contracts
+#[global_allocator]
+static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
 #[cfg(test)]
 mod test;
@@ -302,7 +306,7 @@ impl InterestRateManager {
 pub struct StateHelper;
 
 impl StateHelper {
-    fn position_key(env: &Env, user: &Address) -> Symbol {
+    fn position_key(env: &Env, _user: &Address) -> Symbol {
         Symbol::new(env, &format!("position_{}", "user"))
     }
 
