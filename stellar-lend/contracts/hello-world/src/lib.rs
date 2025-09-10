@@ -9,7 +9,7 @@ extern crate alloc;
 use alloc::format;
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, Address, Env,
-    String, Symbol,
+    Map, String, Symbol, Vec,
 };
 
 // Global allocator for Soroban contracts
@@ -76,6 +76,55 @@ impl Position {
             debt,
             borrow_interest: 0,
             supply_interest: 0,
+            last_accrual_time: 0,
+        }
+    }
+}
+
+/// Parameters for a specific asset supported by cross-asset functionality
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct AssetParams {
+    /// Collateral factor (scaled by 1e8). 75% => 75000000
+    pub collateral_factor: i128,
+    /// Borrowing enabled for this asset
+    pub borrow_enabled: bool,
+    /// Deposits enabled for this asset
+    pub deposit_enabled: bool,
+    /// Cross-asset features enabled for this asset
+    pub cross_enabled: bool,
+}
+
+impl AssetParams {
+    pub fn default() -> Self {
+        Self {
+            collateral_factor: 75000000, // 75%
+            borrow_enabled: true,
+            deposit_enabled: true,
+            cross_enabled: true,
+        }
+    }
+}
+
+/// Cross-asset position with per-asset collateral and debt
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct CrossPosition {
+    pub user: Address,
+    /// Collateral balances by asset
+    pub collateral: Map<Address, i128>,
+    /// Debt balances by asset
+    pub debt: Map<Address, i128>,
+    /// Last accrual time for interest-like accounting (placeholder)
+    pub last_accrual_time: u64,
+}
+
+impl CrossPosition {
+    pub fn new(env: &Env, user: Address) -> Self {
+        Self {
+            user,
+            collateral: Map::new(env),
+            debt: Map::new(env),
             last_accrual_time: 0,
         }
     }
@@ -265,6 +314,39 @@ impl InterestRateStorage {
     }
 }
 
+/// Storage for asset registry and oracle prices (cross-asset)
+pub struct AssetRegistryStorage;
+
+impl AssetRegistryStorage {
+    fn params_key(env: &Env) -> Symbol { Symbol::new(env, "asset_params_map") }
+    fn prices_key(env: &Env) -> Symbol { Symbol::new(env, "asset_prices_map") }
+    fn cross_positions_key(env: &Env) -> Symbol { Symbol::new(env, "cross_positions_map") }
+
+    pub fn get_params_map(env: &Env) -> Map<Address, AssetParams> {
+        env.storage().instance().get(&Self::params_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+
+    pub fn put_params_map(env: &Env, map: &Map<Address, AssetParams>) {
+        env.storage().instance().set(&Self::params_key(env), map);
+    }
+
+    pub fn get_prices_map(env: &Env) -> Map<Address, i128> {
+        env.storage().instance().get(&Self::prices_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+
+    pub fn put_prices_map(env: &Env, map: &Map<Address, i128>) {
+        env.storage().instance().set(&Self::prices_key(env), map);
+    }
+
+    pub fn get_cross_positions(env: &Env) -> Map<Address, CrossPosition> {
+        env.storage().instance().get(&Self::cross_positions_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+
+    pub fn put_cross_positions(env: &Env, map: &Map<Address, CrossPosition>) {
+        env.storage().instance().set(&Self::cross_positions_key(env), map);
+    }
+}
+
 /// Interest rate manager
 pub struct InterestRateManager;
 
@@ -318,6 +400,26 @@ impl StateHelper {
     pub fn get_position(env: &Env, user: &Address) -> Option<Position> {
         let key = Self::position_key(env, user);
         env.storage().instance().get::<Symbol, Position>(&key)
+    }
+}
+
+/// Helper for cross-asset positions
+pub struct CrossStateHelper;
+
+impl CrossStateHelper {
+    pub fn get_or_init_position(env: &Env, user: &Address) -> CrossPosition {
+        let mut positions = AssetRegistryStorage::get_cross_positions(env);
+        if let Some(pos) = positions.get(user.clone()) { return pos; }
+        let pos = CrossPosition::new(env, user.clone());
+        positions.set(user.clone(), pos.clone());
+        AssetRegistryStorage::put_cross_positions(env, &positions);
+        pos
+    }
+
+    pub fn save_position(env: &Env, position: &CrossPosition) {
+        let mut positions = AssetRegistryStorage::get_cross_positions(env);
+        positions.set(position.user.clone(), position.clone());
+        AssetRegistryStorage::put_cross_positions(env, &positions);
     }
 }
 
@@ -407,6 +509,10 @@ pub enum ProtocolError {
     InvalidRecoveryAddress = 37,
     MultiSigProposalNotFound = 38,
     MultiSigNotReady = 39,
+    // Cross-asset specific
+    CrossAssetDisabled = 40,
+    PriceNotAvailable = 41,
+    CollateralFactorInvalid = 42,
 }
 
 /// Protocol events
@@ -418,6 +524,11 @@ pub enum ProtocolEvent {
     LiquidationExecuted(Address, Address, i128, i128), // liquidator, user, collateral_seized, debt_repaid
     RiskParamsUpdated(i128, i128), // close_factor, liquidation_incentive
     PauseSwitchesUpdated(bool, bool, bool, bool), // pause_borrow, pause_deposit, pause_withdraw, pause_liquidate
+    // Cross-asset
+    CrossDeposit(Address, Address, i128), // user, asset, amount
+    CrossBorrow(Address, Address, i128), // user, asset, amount
+    CrossRepay(Address, Address, i128), // user, asset, amount
+    CrossWithdraw(Address, Address, i128), // user, asset, amount
 }
 
 impl ProtocolEvent {
@@ -472,6 +583,46 @@ impl ProtocolEvent {
                         Symbol::new(env, "pause_deposit"), *pause_deposit,
                         Symbol::new(env, "pause_withdraw"), *pause_withdraw,
                         Symbol::new(env, "pause_liquidate"), *pause_liquidate,
+                    )
+                );
+            }
+            ProtocolEvent::CrossDeposit(user, asset, amount) => {
+                env.events().publish(
+                    (Symbol::new(env, "cross_deposit"), Symbol::new(env, "user")),
+                    (
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "asset"), asset.clone(),
+                        Symbol::new(env, "amount"), *amount,
+                    )
+                );
+            }
+            ProtocolEvent::CrossBorrow(user, asset, amount) => {
+                env.events().publish(
+                    (Symbol::new(env, "cross_borrow"), Symbol::new(env, "user")),
+                    (
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "asset"), asset.clone(),
+                        Symbol::new(env, "amount"), *amount,
+                    )
+                );
+            }
+            ProtocolEvent::CrossRepay(user, asset, amount) => {
+                env.events().publish(
+                    (Symbol::new(env, "cross_repay"), Symbol::new(env, "user")),
+                    (
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "asset"), asset.clone(),
+                        Symbol::new(env, "amount"), *amount,
+                    )
+                );
+            }
+            ProtocolEvent::CrossWithdraw(user, asset, amount) => {
+                env.events().publish(
+                    (Symbol::new(env, "cross_withdraw"), Symbol::new(env, "user")),
+                    (
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "asset"), asset.clone(),
+                        Symbol::new(env, "amount"), *amount,
                     )
                 );
             }
@@ -926,6 +1077,199 @@ pub fn get_system_stats(env: Env) -> Result<(i128, i128, i128, i128), ProtocolEr
     ))
 }
 
+// --------------- Cross-Asset Core ---------------
+
+fn get_asset_price(env: &Env, asset: &Address) -> Result<i128, ProtocolError> {
+    let prices = AssetRegistryStorage::get_prices_map(env);
+    let price = prices.get(asset.clone()).ok_or(ProtocolError::PriceNotAvailable)?;
+    if price <= 0 { return Err(ProtocolError::PriceNotAvailable); }
+    Ok(price)
+}
+
+fn get_asset_params(env: &Env, asset: &Address) -> Result<AssetParams, ProtocolError> {
+    let params_map = AssetRegistryStorage::get_params_map(env);
+    let params = params_map.get(asset.clone()).ok_or(ProtocolError::AssetNotSupported)?;
+    if params.collateral_factor < 0 || params.collateral_factor > 100000000 {
+        return Err(ProtocolError::CollateralFactorInvalid);
+    }
+    Ok(params)
+}
+
+fn calc_cross_totals(env: &Env, pos: &CrossPosition) -> Result<(i128, i128), ProtocolError> {
+    // Returns (weighted_collateral_value, total_debt_value) both scaled by 1e8
+    let mut total_collateral_value: i128 = 0;
+    let mut total_debt_value: i128 = 0;
+
+    let mut keys: Vec<Address> = Vec::new(env);
+    for (asset, _bal) in pos.collateral.iter() { keys.push_back(asset); }
+    for (asset, _bal) in pos.debt.iter() { keys.push_back(asset); }
+
+    // Deduplicate keys (simple O(n^2))
+    let mut uniq: Vec<Address> = Vec::new(env);
+    'outer: for a in keys.iter() {
+        for b in uniq.iter() { if a == b { continue 'outer; } }
+        uniq.push_back(a);
+    }
+
+    for asset in uniq.iter() {
+        let price = get_asset_price(env, &asset)?; // 1e8 scaled
+        let params = get_asset_params(env, &asset)?;
+        let c = pos.collateral.get(asset.clone()).unwrap_or(0);
+        let d = pos.debt.get(asset.clone()).unwrap_or(0);
+        // Weighted collateral value: c * price * cf / 1e16
+        total_collateral_value += (c * price * params.collateral_factor) / 100000000 / 100000000;
+        // Debt value: d * price / 1e8
+        total_debt_value += (d * price) / 100000000;
+    }
+
+    Ok((total_collateral_value, total_debt_value))
+}
+
+/// Deposit collateral for a specific asset (cross-asset)
+pub fn deposit_collateral_asset(env: Env, user: String, asset: Address, amount: i128) -> Result<(), ProtocolError> {
+    ReentrancyGuard::enter(&env)?;
+    let result = (|| {
+        if user.is_empty() { return Err(ProtocolError::InvalidAddress); }
+        if amount <= 0 { return Err(ProtocolError::InvalidAmount); }
+        let params = get_asset_params(&env, &asset)?;
+        if !params.cross_enabled || !params.deposit_enabled { return Err(ProtocolError::CrossAssetDisabled); }
+
+        let user_addr = Address::from_string(&user);
+        let mut x = CrossStateHelper::get_or_init_position(&env, &user_addr);
+        let bal = x.collateral.get(asset.clone()).unwrap_or(0) + amount;
+        x.collateral.set(asset.clone(), bal);
+        CrossStateHelper::save_position(&env, &x);
+        ProtocolEvent::CrossDeposit(user_addr, asset, amount).emit(&env);
+        Ok(())
+    })();
+    ReentrancyGuard::exit(&env);
+    result
+}
+
+/// Borrow a specific asset against total cross-asset collateral
+pub fn borrow_asset(env: Env, user: String, asset: Address, amount: i128) -> Result<(), ProtocolError> {
+    ReentrancyGuard::enter(&env)?;
+    let result = (|| {
+        if user.is_empty() { return Err(ProtocolError::InvalidAddress); }
+        if amount <= 0 { return Err(ProtocolError::InvalidAmount); }
+        let params = get_asset_params(&env, &asset)?;
+        if !params.cross_enabled || !params.borrow_enabled { return Err(ProtocolError::CrossAssetDisabled); }
+
+        let user_addr = Address::from_string(&user);
+        let mut x = CrossStateHelper::get_or_init_position(&env, &user_addr);
+
+        if x.last_accrual_time == 0 { x.last_accrual_time = env.ledger().timestamp(); }
+
+        let prev = x.debt.get(asset.clone()).unwrap_or(0);
+        x.debt.set(asset.clone(), prev + amount);
+        let (total_collateral, total_debt) = calc_cross_totals(&env, &x)?;
+        let min_ratio = ProtocolConfig::get_min_collateral_ratio(&env); // percent
+        let ratio = if total_debt > 0 { (total_collateral * 100) / total_debt } else { 0 };
+        if ratio < min_ratio { return Err(ProtocolError::InsufficientCollateralRatio); }
+
+        CrossStateHelper::save_position(&env, &x);
+        ProtocolEvent::CrossBorrow(user_addr, asset, amount).emit(&env);
+        Ok(())
+    })();
+    ReentrancyGuard::exit(&env);
+    result
+}
+
+/// Repay debt for a specific asset
+pub fn repay_asset(env: Env, user: String, asset: Address, amount: i128) -> Result<(), ProtocolError> {
+    ReentrancyGuard::enter(&env)?;
+    let result = (|| {
+        if user.is_empty() { return Err(ProtocolError::InvalidAddress); }
+        if amount <= 0 { return Err(ProtocolError::InvalidAmount); }
+        let _ = get_asset_params(&env, &asset)?; // ensure asset exists
+        let user_addr = Address::from_string(&user);
+        let mut x = CrossStateHelper::get_or_init_position(&env, &user_addr);
+        let prev = x.debt.get(asset.clone()).unwrap_or(0);
+        if prev == 0 { return Err(ProtocolError::InvalidOperation); }
+        let new_debt = if amount > prev { 0 } else { prev - amount };
+        x.debt.set(asset.clone(), new_debt);
+        CrossStateHelper::save_position(&env, &x);
+        ProtocolEvent::CrossRepay(user_addr, asset, amount).emit(&env);
+        Ok(())
+    })();
+    ReentrancyGuard::exit(&env);
+    result
+}
+
+/// Withdraw collateral for a specific asset (checks cross-asset ratio)
+pub fn withdraw_asset(env: Env, user: String, asset: Address, amount: i128) -> Result<(), ProtocolError> {
+    ReentrancyGuard::enter(&env)?;
+    let result = (|| {
+        if user.is_empty() { return Err(ProtocolError::InvalidAddress); }
+        if amount <= 0 { return Err(ProtocolError::InvalidAmount); }
+        let params = get_asset_params(&env, &asset)?;
+        if !params.cross_enabled || !params.deposit_enabled { return Err(ProtocolError::CrossAssetDisabled); }
+        let user_addr = Address::from_string(&user);
+        let mut x = CrossStateHelper::get_or_init_position(&env, &user_addr);
+        let prev = x.collateral.get(asset.clone()).unwrap_or(0);
+        if amount > prev { return Err(ProtocolError::InsufficientCollateral); }
+        x.collateral.set(asset.clone(), prev - amount);
+
+        // Check ratio after withdrawal
+        let (tc, td) = calc_cross_totals(&env, &x)?;
+        let min_ratio = ProtocolConfig::get_min_collateral_ratio(&env);
+        let ratio = if td > 0 { (tc * 100) / td } else { 0 };
+        if td > 0 && ratio < min_ratio { return Err(ProtocolError::InsufficientCollateralRatio); }
+
+        CrossStateHelper::save_position(&env, &x);
+        ProtocolEvent::CrossWithdraw(user_addr, asset, amount).emit(&env);
+        Ok(())
+    })();
+    ReentrancyGuard::exit(&env);
+    result
+}
+
+/// Get cross-asset position summary (total weighted collateral, total debt, ratio)
+pub fn get_cross_position_summary(env: Env, user: String) -> Result<(i128, i128, i128), ProtocolError> {
+    if user.is_empty() { return Err(ProtocolError::InvalidAddress); }
+    let user_addr = Address::from_string(&user);
+    let x = CrossStateHelper::get_or_init_position(&env, &user_addr);
+    let (tc, td) = calc_cross_totals(&env, &x)?;
+    let ratio = if td > 0 { (tc * 100) / td } else { 0 };
+    Ok((tc, td, ratio))
+}
+
+// ---- Admin helpers for cross-asset ----
+
+/// Add or update supported asset params
+pub fn set_asset_params(
+    env: Env,
+    caller: String,
+    asset: Address,
+    collateral_factor: i128,
+    borrow_enabled: bool,
+    deposit_enabled: bool,
+    cross_enabled: bool,
+) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    ProtocolConfig::require_admin(&env, &caller_addr)?;
+    if collateral_factor < 0 || collateral_factor > 100000000 {
+        return Err(ProtocolError::CollateralFactorInvalid);
+    }
+    let mut map = AssetRegistryStorage::get_params_map(&env);
+    let params = AssetParams { collateral_factor, borrow_enabled, deposit_enabled, cross_enabled };
+    map.set(asset, params);
+    AssetRegistryStorage::put_params_map(&env, &map);
+    Ok(())
+}
+
+/// Set price for an asset in 1e8 scale (oracle/admin)
+pub fn set_asset_price(env: Env, caller: String, asset: Address, price: i128) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    // For now, admin-only setter. Later can gate by oracle address.
+    ProtocolConfig::require_admin(&env, &caller_addr)?;
+    if price <= 0 { return Err(ProtocolError::InvalidInput); }
+    let mut map = AssetRegistryStorage::get_prices_map(&env);
+    map.set(asset, price);
+    AssetRegistryStorage::put_prices_map(&env, &map);
+    Ok(())
+}
+
 #[contractimpl]
 impl Contract {
     /// Initializes the contract and sets the admin address
@@ -1014,5 +1358,42 @@ impl Contract {
     /// Get system stats
     pub fn get_system_stats(env: Env) -> Result<(i128, i128, i128, i128), ProtocolError> {
         get_system_stats(env)
+    }
+
+    // Cross-asset entrypoints
+    pub fn set_asset_params(
+        env: Env,
+        caller: String,
+        asset: Address,
+        collateral_factor: i128,
+        borrow_enabled: bool,
+        deposit_enabled: bool,
+        cross_enabled: bool,
+    ) -> Result<(), ProtocolError> {
+        set_asset_params(env, caller, asset, collateral_factor, borrow_enabled, deposit_enabled, cross_enabled)
+    }
+
+    pub fn set_asset_price(env: Env, caller: String, asset: Address, price: i128) -> Result<(), ProtocolError> {
+        set_asset_price(env, caller, asset, price)
+    }
+
+    pub fn deposit_collateral_asset(env: Env, user: String, asset: Address, amount: i128) -> Result<(), ProtocolError> {
+        deposit_collateral_asset(env, user, asset, amount)
+    }
+
+    pub fn borrow_asset(env: Env, user: String, asset: Address, amount: i128) -> Result<(), ProtocolError> {
+        borrow_asset(env, user, asset, amount)
+    }
+
+    pub fn repay_asset(env: Env, user: String, asset: Address, amount: i128) -> Result<(), ProtocolError> {
+        repay_asset(env, user, asset, amount)
+    }
+
+    pub fn withdraw_asset(env: Env, user: String, asset: Address, amount: i128) -> Result<(), ProtocolError> {
+        withdraw_asset(env, user, asset, amount)
+    }
+
+    pub fn get_cross_position_summary(env: Env, user: String) -> Result<(i128, i128, i128), ProtocolError> {
+        get_cross_position_summary(env, user)
     }
 }
