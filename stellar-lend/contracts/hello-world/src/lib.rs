@@ -158,6 +158,21 @@ impl CrossPosition {
     }
 }
 
+/// Pair key for AMM registry
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct PairKey {
+    pub a: Address,
+    pub b: Address,
+}
+
+impl PairKey {
+    pub fn ordered(a: Address, b: Address) -> Self {
+        // Simple ordering by address to ensure deterministic mapping
+        if a.to_string() <= b.to_string() { Self { a, b } } else { Self { a: b, b: a } }
+    }
+}
+
 /// Interest rate configuration parameters
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
@@ -351,6 +366,7 @@ impl AssetRegistryStorage {
     fn cross_positions_key(env: &Env) -> Symbol { Symbol::new(env, "cross_positions_map") }
     fn dyn_params_key(env: &Env) -> Symbol { Symbol::new(env, "dyn_cf_params_map") }
     fn market_state_key(env: &Env) -> Symbol { Symbol::new(env, "market_state_map") }
+    fn amm_registry_key(env: &Env) -> Symbol { Symbol::new(env, "amm_registry_map") }
 
     pub fn get_params_map(env: &Env) -> Map<Address, AssetParams> {
         env.storage().instance().get(&Self::params_key(env)).unwrap_or_else(|| Map::new(env))
@@ -390,6 +406,14 @@ impl AssetRegistryStorage {
 
     pub fn put_market_state(env: &Env, map: &Map<Address, MarketState>) {
         env.storage().instance().set(&Self::market_state_key(env), map);
+    }
+
+    pub fn get_amm_registry(env: &Env) -> Map<PairKey, Address> {
+        env.storage().instance().get(&Self::amm_registry_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+
+    pub fn put_amm_registry(env: &Env, map: &Map<PairKey, Address>) {
+        env.storage().instance().set(&Self::amm_registry_key(env), map);
     }
 }
 
@@ -595,6 +619,10 @@ pub enum ProtocolEvent {
     FlashLoanCompleted(Address, Address, i128, i128), // initiator, asset, amount, fee
     // Dynamic collateral factor
     DynamicCFUpdated(Address, i128), // asset, new_collateral_factor
+    // AMM
+    AMMSwap(Address, Address, Address, i128, i128), // user, asset_in, asset_out, amount_in, amount_out
+    AMMLiquidityAdded(Address, Address, Address, i128, i128), // user, asset_a, asset_b, amt_a, amt_b
+    AMMLiquidityRemoved(Address, Address, i128), // user, pool, lp_amount
 }
 
 impl ProtocolEvent {
@@ -720,6 +748,40 @@ impl ProtocolEvent {
                     (
                         Symbol::new(env, "asset"), asset.clone(),
                         Symbol::new(env, "new_cf"), *new_cf,
+                    )
+                );
+            }
+            ProtocolEvent::AMMSwap(user, asset_in, asset_out, amount_in, amount_out) => {
+                env.events().publish(
+                    (Symbol::new(env, "amm_swap"), Symbol::new(env, "user")),
+                    (
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "asset_in"), asset_in.clone(),
+                        Symbol::new(env, "asset_out"), asset_out.clone(),
+                        Symbol::new(env, "amount_in"), *amount_in,
+                        Symbol::new(env, "amount_out"), *amount_out,
+                    )
+                );
+            }
+            ProtocolEvent::AMMLiquidityAdded(user, asset_a, asset_b, amt_a, amt_b) => {
+                env.events().publish(
+                    (Symbol::new(env, "amm_liquidity_added"), Symbol::new(env, "user")),
+                    (
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "asset_a"), asset_a.clone(),
+                        Symbol::new(env, "asset_b"), asset_b.clone(),
+                        Symbol::new(env, "amount_a"), *amt_a,
+                        Symbol::new(env, "amount_b"), *amt_b,
+                    )
+                );
+            }
+            ProtocolEvent::AMMLiquidityRemoved(user, pool, lp_amount) => {
+                env.events().publish(
+                    (Symbol::new(env, "amm_liquidity_removed"), Symbol::new(env, "user")),
+                    (
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "pool"), pool.clone(),
+                        Symbol::new(env, "lp_amount"), *lp_amount,
                     )
                 );
             }
@@ -1440,6 +1502,99 @@ pub fn push_price_and_update_cf(env: Env, caller: String, asset: Address, price:
     Ok(new_cf_1e8)
 }
 
+// ---- AMM Integration ----
+
+/// Admin: register AMM pool for asset pair
+pub fn set_amm_pool(env: Env, caller: String, asset_a: Address, asset_b: Address, pool: Address) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    ProtocolConfig::require_admin(&env, &caller_addr)?;
+    let key = PairKey::ordered(asset_a, asset_b);
+    let mut reg = AssetRegistryStorage::get_amm_registry(&env);
+    reg.set(key, pool);
+    AssetRegistryStorage::put_amm_registry(&env, &reg);
+    Ok(())
+}
+
+fn get_pool_for(env: &Env, a: &Address, b: &Address) -> Option<Address> {
+    let key = PairKey::ordered(a.clone(), b.clone());
+    let reg = AssetRegistryStorage::get_amm_registry(env);
+    reg.get(key)
+}
+
+/// Swap via registered AMM pool
+pub fn amm_swap(
+    env: Env,
+    user: String,
+    asset_in: Address,
+    amount_in: i128,
+    asset_out: Address,
+    min_out: i128,
+) -> Result<i128, ProtocolError> {
+    ReentrancyGuard::enter(&env)?;
+    let result = (|| {
+        if user.is_empty() { return Err(ProtocolError::InvalidAddress); }
+        if amount_in <= 0 || min_out < 0 { return Err(ProtocolError::InvalidAmount); }
+        let pool = get_pool_for(&env, &asset_in, &asset_out).ok_or(ProtocolError::NotFound)?;
+        let user_addr = Address::from_string(&user);
+
+        // Call pool.swap(asset_in, amount_in, asset_out, min_out, user)
+        let args = vec![
+            &env,
+            asset_in.clone().into_val(&env),
+            amount_in.into_val(&env),
+            asset_out.clone().into_val(&env),
+            min_out.into_val(&env),
+            user_addr.clone().into_val(&env),
+        ];
+        let amount_out: i128 = env.invoke_contract(&pool, &Symbol::new(&env, "swap"), args);
+        if amount_out < min_out { return Err(ProtocolError::InvalidOperation); }
+        ProtocolEvent::AMMSwap(user_addr, asset_in, asset_out, amount_in, amount_out).emit(&env);
+        Ok(amount_out)
+    })();
+    ReentrancyGuard::exit(&env);
+    result
+}
+
+/// Provide liquidity to a pool
+pub fn amm_add_liquidity(env: Env, user: String, asset_a: Address, amt_a: i128, asset_b: Address, amt_b: i128) -> Result<(), ProtocolError> {
+    ReentrancyGuard::enter(&env)?;
+    let result = (|| {
+        if user.is_empty() { return Err(ProtocolError::InvalidAddress); }
+        if amt_a <= 0 || amt_b <= 0 { return Err(ProtocolError::InvalidAmount); }
+        let pool = get_pool_for(&env, &asset_a, &asset_b).ok_or(ProtocolError::NotFound)?;
+        let user_addr = Address::from_string(&user);
+        let args = vec![
+            &env,
+            asset_a.clone().into_val(&env),
+            amt_a.into_val(&env),
+            asset_b.clone().into_val(&env),
+            amt_b.into_val(&env),
+            user_addr.clone().into_val(&env),
+        ];
+        let _: () = env.invoke_contract(&pool, &Symbol::new(&env, "add_liquidity"), args);
+        ProtocolEvent::AMMLiquidityAdded(user_addr, asset_a, asset_b, amt_a, amt_b).emit(&env);
+        Ok(())
+    })();
+    ReentrancyGuard::exit(&env);
+    result
+}
+
+/// Remove liquidity from a pool
+pub fn amm_remove_liquidity(env: Env, user: String, pool: Address, lp_amount: i128) -> Result<(), ProtocolError> {
+    ReentrancyGuard::enter(&env)?;
+    let result = (|| {
+        if user.is_empty() { return Err(ProtocolError::InvalidAddress); }
+        if lp_amount <= 0 { return Err(ProtocolError::InvalidAmount); }
+        let user_addr = Address::from_string(&user);
+        let args = vec![&env, lp_amount.into_val(&env), user_addr.clone().into_val(&env)];
+        let _: () = env.invoke_contract(&pool, &Symbol::new(&env, "remove_liquidity"), args);
+        ProtocolEvent::AMMLiquidityRemoved(user_addr, pool, lp_amount).emit(&env);
+        Ok(())
+    })();
+    ReentrancyGuard::exit(&env);
+    result
+}
+
 // --------------- Flash Loan ---------------
 
 /// Execute a flash loan by calling `on_flash_loan(asset, amount, fee, initiator)` on receiver.
@@ -1648,5 +1803,22 @@ impl Contract {
 
     pub fn push_price_and_update_cf(env: Env, caller: String, asset: Address, price: i128) -> Result<i128, ProtocolError> {
         push_price_and_update_cf(env, caller, asset, price)
+    }
+
+    // AMM integration
+    pub fn set_amm_pool(env: Env, caller: String, asset_a: Address, asset_b: Address, pool: Address) -> Result<(), ProtocolError> {
+        set_amm_pool(env, caller, asset_a, asset_b, pool)
+    }
+
+    pub fn amm_swap(env: Env, user: String, asset_in: Address, amount_in: i128, asset_out: Address, min_out: i128) -> Result<i128, ProtocolError> {
+        amm_swap(env, user, asset_in, amount_in, asset_out, min_out)
+    }
+
+    pub fn amm_add_liquidity(env: Env, user: String, asset_a: Address, amt_a: i128, asset_b: Address, amt_b: i128) -> Result<(), ProtocolError> {
+        amm_add_liquidity(env, user, asset_a, amt_a, asset_b, amt_b)
+    }
+
+    pub fn amm_remove_liquidity(env: Env, user: String, pool: Address, lp_amount: i128) -> Result<(), ProtocolError> {
+        amm_remove_liquidity(env, user, pool, lp_amount)
     }
 }
