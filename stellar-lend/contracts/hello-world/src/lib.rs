@@ -106,6 +106,34 @@ impl AssetParams {
     }
 }
 
+/// Dynamic CF parameters per asset
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct DynamicCFParams {
+    pub min_cf: i128,         // 0..=1e8
+    pub max_cf: i128,         // 0..=1e8
+    pub sensitivity_bps: i128, // how much to reduce per 1% vol (bps)
+    pub max_step_bps: i128,    // max change per update (bps)
+}
+
+impl DynamicCFParams {
+    pub fn default() -> Self {
+        Self { min_cf: 50000000, max_cf: 90000000, sensitivity_bps: 100, max_step_bps: 200 } // defaults
+    }
+}
+
+/// Market state tracking for dynamic CF
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct MarketState {
+    pub last_price: i128,    // 1e8
+    pub vol_index_bps: i128, // simple volatility index in bps
+}
+
+impl MarketState {
+    pub fn initial() -> Self { Self { last_price: 0, vol_index_bps: 0 } }
+}
+
 /// Cross-asset position with per-asset collateral and debt
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
@@ -321,6 +349,8 @@ impl AssetRegistryStorage {
     fn params_key(env: &Env) -> Symbol { Symbol::new(env, "asset_params_map") }
     fn prices_key(env: &Env) -> Symbol { Symbol::new(env, "asset_prices_map") }
     fn cross_positions_key(env: &Env) -> Symbol { Symbol::new(env, "cross_positions_map") }
+    fn dyn_params_key(env: &Env) -> Symbol { Symbol::new(env, "dyn_cf_params_map") }
+    fn market_state_key(env: &Env) -> Symbol { Symbol::new(env, "market_state_map") }
 
     pub fn get_params_map(env: &Env) -> Map<Address, AssetParams> {
         env.storage().instance().get(&Self::params_key(env)).unwrap_or_else(|| Map::new(env))
@@ -344,6 +374,22 @@ impl AssetRegistryStorage {
 
     pub fn put_cross_positions(env: &Env, map: &Map<Address, CrossPosition>) {
         env.storage().instance().set(&Self::cross_positions_key(env), map);
+    }
+
+    pub fn get_dyn_params(env: &Env) -> Map<Address, DynamicCFParams> {
+        env.storage().instance().get(&Self::dyn_params_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+
+    pub fn put_dyn_params(env: &Env, map: &Map<Address, DynamicCFParams>) {
+        env.storage().instance().set(&Self::dyn_params_key(env), map);
+    }
+
+    pub fn get_market_state(env: &Env) -> Map<Address, MarketState> {
+        env.storage().instance().get(&Self::market_state_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+
+    pub fn put_market_state(env: &Env, map: &Map<Address, MarketState>) {
+        env.storage().instance().set(&Self::market_state_key(env), map);
     }
 }
 
@@ -547,6 +593,8 @@ pub enum ProtocolEvent {
     // Flash loan
     FlashLoanInitiated(Address, Address, i128, i128), // initiator, asset, amount, fee
     FlashLoanCompleted(Address, Address, i128, i128), // initiator, asset, amount, fee
+    // Dynamic collateral factor
+    DynamicCFUpdated(Address, i128), // asset, new_collateral_factor
 }
 
 impl ProtocolEvent {
@@ -663,6 +711,15 @@ impl ProtocolEvent {
                         Symbol::new(env, "asset"), asset.clone(),
                         Symbol::new(env, "amount"), *amount,
                         Symbol::new(env, "fee"), *fee,
+                    )
+                );
+            }
+            ProtocolEvent::DynamicCFUpdated(asset, new_cf) => {
+                env.events().publish(
+                    (Symbol::new(env, "dynamic_cf_updated"), Symbol::new(env, "asset")),
+                    (
+                        Symbol::new(env, "asset"), asset.clone(),
+                        Symbol::new(env, "new_cf"), *new_cf,
                     )
                 );
             }
@@ -1310,6 +1367,79 @@ pub fn set_asset_price(env: Env, caller: String, asset: Address, price: i128) ->
     Ok(())
 }
 
+/// Admin: set dynamic CF parameters for an asset
+pub fn set_dynamic_cf_params(
+    env: Env,
+    caller: String,
+    asset: Address,
+    min_cf: i128,
+    max_cf: i128,
+    sensitivity_bps: i128,
+    max_step_bps: i128,
+) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    ProtocolConfig::require_admin(&env, &caller_addr)?;
+    if !(0 <= min_cf && min_cf <= 100000000 && 0 <= max_cf && max_cf <= 100000000 && min_cf <= max_cf) {
+        return Err(ProtocolError::InvalidInput);
+    }
+    let mut dyn_map = AssetRegistryStorage::get_dyn_params(&env);
+    dyn_map.set(
+        asset.clone(),
+        DynamicCFParams { min_cf, max_cf, sensitivity_bps, max_step_bps },
+    );
+    AssetRegistryStorage::put_dyn_params(&env, &dyn_map);
+    Ok(())
+}
+
+/// Admin/Oracle: push a new price and update collateral factor dynamically
+pub fn push_price_and_update_cf(env: Env, caller: String, asset: Address, price: i128) -> Result<i128, ProtocolError> {
+    // Set the price first (admin rights required)
+    set_asset_price(env.clone(), caller, asset.clone(), price)?;
+
+    // Update market state
+    let mut ms_map = AssetRegistryStorage::get_market_state(&env);
+    let mut ms = ms_map.get(asset.clone()).unwrap_or_else(MarketState::initial);
+    if ms.last_price > 0 {
+        // simple absolute return in bps = |p/p0 - 1| * 10000
+        let num = (price - ms.last_price).abs() * 10000;
+        let den = if ms.last_price == 0 { 1 } else { ms.last_price };
+        let ret_bps = num / den;
+        // EWMA-like update: vol = (vol*4 + ret)/5
+        ms.vol_index_bps = (ms.vol_index_bps * 4 + ret_bps) / 5;
+    }
+    ms.last_price = price;
+    ms_map.set(asset.clone(), ms.clone());
+    AssetRegistryStorage::put_market_state(&env, &ms_map);
+
+    // Apply dynamic CF change
+    let mut params_map = AssetRegistryStorage::get_params_map(&env);
+    let mut asset_params = params_map.get(asset.clone()).unwrap_or_else(AssetParams::default);
+    let dyn_map = AssetRegistryStorage::get_dyn_params(&env);
+    let dcf = dyn_map.get(asset.clone()).unwrap_or_else(DynamicCFParams::default);
+
+    // Reduce CF proportional to vol: delta_cf_bps = sensitivity_bps * (vol_index_bps / 100)
+    let delta_cf_bps = dcf.sensitivity_bps * (ms.vol_index_bps / 100);
+    let base_cf_bps = asset_params.collateral_factor / 1000; // convert 1e8 -> bps approx
+    let mut target_cf_bps = base_cf_bps - delta_cf_bps;
+    // clamp to bounds
+    let min_cf_bps = dcf.min_cf / 1000;
+    let max_cf_bps = dcf.max_cf / 1000;
+    if target_cf_bps < min_cf_bps { target_cf_bps = min_cf_bps; }
+    if target_cf_bps > max_cf_bps { target_cf_bps = max_cf_bps; }
+    // apply max step
+    let current_bps = asset_params.collateral_factor / 1000;
+    let diff = target_cf_bps - current_bps;
+    let step = if diff.abs() > dcf.max_step_bps { dcf.max_step_bps * diff.signum() } else { diff };
+    let new_cf_bps = current_bps + step;
+    let new_cf_1e8 = new_cf_bps * 1000;
+    asset_params.collateral_factor = new_cf_1e8;
+    params_map.set(asset.clone(), asset_params.clone());
+    AssetRegistryStorage::put_params_map(&env, &params_map);
+
+    ProtocolEvent::DynamicCFUpdated(asset, new_cf_1e8).emit(&env);
+    Ok(new_cf_1e8)
+}
+
 // --------------- Flash Loan ---------------
 
 /// Execute a flash loan by calling `on_flash_loan(asset, amount, fee, initiator)` on receiver.
@@ -1501,5 +1631,22 @@ impl Contract {
     pub fn set_flash_loan_fee_bps(env: Env, caller: String, bps: i128) -> Result<(), ProtocolError> {
         let caller_addr = Address::from_string(&caller);
         ProtocolConfig::set_flash_loan_fee_bps(&env, &caller_addr, bps)
+    }
+
+    // Dynamic CF admin entrypoints
+    pub fn set_dynamic_cf_params(
+        env: Env,
+        caller: String,
+        asset: Address,
+        min_cf: i128,
+        max_cf: i128,
+        sensitivity_bps: i128,
+        max_step_bps: i128,
+    ) -> Result<(), ProtocolError> {
+        set_dynamic_cf_params(env, caller, asset, min_cf, max_cf, sensitivity_bps, max_step_bps)
+    }
+
+    pub fn push_price_and_update_cf(env: Env, caller: String, asset: Address, price: i128) -> Result<i128, ProtocolError> {
+        push_price_and_update_cf(env, caller, asset, price)
     }
 }
