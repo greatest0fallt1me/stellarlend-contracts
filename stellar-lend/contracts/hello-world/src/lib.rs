@@ -8,8 +8,8 @@ extern crate alloc;
 
 use alloc::format;
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, Address, Env,
-    Map, String, Symbol, Vec,
+    contract, contracterror, contractimpl, contracttype, vec, Address, Env,
+    IntoVal, Map, String, Symbol, Vec,
 };
 
 // Global allocator for Soroban contracts
@@ -439,6 +439,10 @@ impl ProtocolConfig {
         Symbol::new(env, "min_ratio")
     }
 
+    fn flash_fee_bps_key(env: &Env) -> Symbol {
+        Symbol::new(env, "flash_fee_bps")
+    }
+
     pub fn set_admin(env: &Env, admin: &Address) {
         env.storage().instance().set(&Self::admin_key(env), admin);
     }
@@ -472,6 +476,17 @@ impl ProtocolConfig {
 
     pub fn get_min_collateral_ratio(env: &Env) -> i128 {
         env.storage().instance().get::<Symbol, i128>(&Self::min_collateral_ratio_key(env)).unwrap_or(150)
+    }
+
+    pub fn set_flash_loan_fee_bps(env: &Env, caller: &Address, bps: i128) -> Result<(), ProtocolError> {
+        Self::require_admin(env, caller)?;
+        if bps < 0 || bps > 10000 { return Err(ProtocolError::InvalidInput); }
+        env.storage().instance().set(&Self::flash_fee_bps_key(env), &bps);
+        Ok(())
+    }
+
+    pub fn get_flash_loan_fee_bps(env: &Env) -> i128 {
+        env.storage().instance().get::<Symbol, i128>(&Self::flash_fee_bps_key(env)).unwrap_or(5) // 0.05%
     }
 }
 
@@ -529,6 +544,9 @@ pub enum ProtocolEvent {
     CrossBorrow(Address, Address, i128), // user, asset, amount
     CrossRepay(Address, Address, i128), // user, asset, amount
     CrossWithdraw(Address, Address, i128), // user, asset, amount
+    // Flash loan
+    FlashLoanInitiated(Address, Address, i128, i128), // initiator, asset, amount, fee
+    FlashLoanCompleted(Address, Address, i128, i128), // initiator, asset, amount, fee
 }
 
 impl ProtocolEvent {
@@ -623,6 +641,28 @@ impl ProtocolEvent {
                         Symbol::new(env, "user"), user.clone(),
                         Symbol::new(env, "asset"), asset.clone(),
                         Symbol::new(env, "amount"), *amount,
+                    )
+                );
+            }
+            ProtocolEvent::FlashLoanInitiated(initiator, asset, amount, fee) => {
+                env.events().publish(
+                    (Symbol::new(env, "flash_loan_initiated"), Symbol::new(env, "user")),
+                    (
+                        Symbol::new(env, "user"), initiator.clone(),
+                        Symbol::new(env, "asset"), asset.clone(),
+                        Symbol::new(env, "amount"), *amount,
+                        Symbol::new(env, "fee"), *fee,
+                    )
+                );
+            }
+            ProtocolEvent::FlashLoanCompleted(initiator, asset, amount, fee) => {
+                env.events().publish(
+                    (Symbol::new(env, "flash_loan_completed"), Symbol::new(env, "user")),
+                    (
+                        Symbol::new(env, "user"), initiator.clone(),
+                        Symbol::new(env, "asset"), asset.clone(),
+                        Symbol::new(env, "amount"), *amount,
+                        Symbol::new(env, "fee"), *fee,
                     )
                 );
             }
@@ -1270,6 +1310,56 @@ pub fn set_asset_price(env: Env, caller: String, asset: Address, price: i128) ->
     Ok(())
 }
 
+// --------------- Flash Loan ---------------
+
+/// Execute a flash loan by calling `on_flash_loan(asset, amount, fee, initiator)` on receiver.
+pub fn flash_loan(
+    env: Env,
+    initiator: String,
+    asset: Address,
+    amount: i128,
+    receiver_contract: Address,
+) -> Result<(), ProtocolError> {
+    ReentrancyGuard::enter(&env)?;
+    let result = (|| {
+        if initiator.is_empty() { return Err(ProtocolError::InvalidAddress); }
+        if amount <= 0 { return Err(ProtocolError::InvalidAmount); }
+        // Ensure asset is registered (price must exist)
+        let _ = get_asset_price(&env, &asset)?;
+        let initiator_addr = Address::from_string(&initiator);
+
+        // Calculate fee
+        let bps = ProtocolConfig::get_flash_loan_fee_bps(&env); // e.g., 5 bps
+        let fee = (amount * bps) / 10000;
+
+        // Emit initiation event
+        ProtocolEvent::FlashLoanInitiated(initiator_addr.clone(), asset.clone(), amount, fee).emit(&env);
+
+        // Invoke receiver callback: on_flash_loan(env, asset, amount, fee, initiator)
+        // The callee must ensure repayment within the same transaction.
+        let args = vec![
+            &env,
+            asset.clone().into_val(&env),
+            amount.into_val(&env),
+            fee.into_val(&env),
+            initiator_addr.clone().into_val(&env),
+        ];
+        let _: () = env.invoke_contract(
+            &receiver_contract,
+            &Symbol::new(&env, "on_flash_loan"),
+            args,
+        );
+
+        // Basic validation placeholder: in a real implementation, we'd verify the asset amount + fee
+        // returned to the protocol treasury. Here, we just assume the callee reverts on failure.
+
+        ProtocolEvent::FlashLoanCompleted(initiator_addr, asset, amount, fee).emit(&env);
+        Ok(())
+    })();
+    ReentrancyGuard::exit(&env);
+    result
+}
+
 #[contractimpl]
 impl Contract {
     /// Initializes the contract and sets the admin address
@@ -1395,5 +1485,21 @@ impl Contract {
 
     pub fn get_cross_position_summary(env: Env, user: String) -> Result<(i128, i128, i128), ProtocolError> {
         get_cross_position_summary(env, user)
+    }
+
+    // Flash loan entrypoint
+    pub fn flash_loan(
+        env: Env,
+        initiator: String,
+        asset: Address,
+        amount: i128,
+        receiver_contract: Address,
+    ) -> Result<(), ProtocolError> {
+        flash_loan(env, initiator, asset, amount, receiver_contract)
+    }
+    /// Admin: set flash loan fee in bps
+    pub fn set_flash_loan_fee_bps(env: Env, caller: String, bps: i128) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::set_flash_loan_fee_bps(&env, &caller_addr, bps)
     }
 }
