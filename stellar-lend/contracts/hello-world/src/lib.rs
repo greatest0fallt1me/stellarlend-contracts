@@ -134,6 +134,39 @@ impl MarketState {
     pub fn initial() -> Self { Self { last_price: 0, vol_index_bps: 0 } }
 }
 
+/// Global risk parameters
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct RiskParamsGlobal {
+    pub base_limit_value: i128,    // in 1e8 value units
+    pub score_to_limit_factor: i128, // multiplier per score unit to increase limit
+    pub min_rate_adj_bps: i128,
+    pub max_rate_adj_bps: i128,
+}
+
+impl RiskParamsGlobal {
+    pub fn default() -> Self {
+        Self { base_limit_value: 0, score_to_limit_factor: 0, min_rate_adj_bps: 0, max_rate_adj_bps: 0 }
+    }
+}
+
+/// Per-user risk state
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct UserRiskState {
+    pub user: Address,
+    pub score: i128,              // 0..=1000
+    pub credit_limit_value: i128, // 1e8 value units
+    pub tx_count: i128,
+    pub last_update: u64,
+}
+
+impl UserRiskState {
+    pub fn new(user: Address) -> Self {
+        Self { user, score: 0, credit_limit_value: 0, tx_count: 0, last_update: 0 }
+    }
+}
+
 /// Cross-asset position with per-asset collateral and debt
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
@@ -367,6 +400,8 @@ impl AssetRegistryStorage {
     fn dyn_params_key(env: &Env) -> Symbol { Symbol::new(env, "dyn_cf_params_map") }
     fn market_state_key(env: &Env) -> Symbol { Symbol::new(env, "market_state_map") }
     fn amm_registry_key(env: &Env) -> Symbol { Symbol::new(env, "amm_registry_map") }
+    fn user_risk_key(env: &Env) -> Symbol { Symbol::new(env, "user_risk_map") }
+    fn risk_params_key(env: &Env) -> Symbol { Symbol::new(env, "risk_params") }
 
     pub fn get_params_map(env: &Env) -> Map<Address, AssetParams> {
         env.storage().instance().get(&Self::params_key(env)).unwrap_or_else(|| Map::new(env))
@@ -414,6 +449,22 @@ impl AssetRegistryStorage {
 
     pub fn put_amm_registry(env: &Env, map: &Map<PairKey, Address>) {
         env.storage().instance().set(&Self::amm_registry_key(env), map);
+    }
+
+    pub fn get_user_risk(env: &Env) -> Map<Address, UserRiskState> {
+        env.storage().instance().get(&Self::user_risk_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+
+    pub fn put_user_risk(env: &Env, map: &Map<Address, UserRiskState>) {
+        env.storage().instance().set(&Self::user_risk_key(env), map);
+    }
+
+    pub fn save_risk_params(env: &Env, params: &RiskParamsGlobal) {
+        env.storage().instance().set(&Self::risk_params_key(env), params);
+    }
+
+    pub fn get_risk_params(env: &Env) -> RiskParamsGlobal {
+        env.storage().instance().get(&Self::risk_params_key(env)).unwrap_or_else(RiskParamsGlobal::default)
     }
 }
 
@@ -623,6 +674,9 @@ pub enum ProtocolEvent {
     AMMSwap(Address, Address, Address, i128, i128), // user, asset_in, asset_out, amount_in, amount_out
     AMMLiquidityAdded(Address, Address, Address, i128, i128), // user, asset_a, asset_b, amt_a, amt_b
     AMMLiquidityRemoved(Address, Address, i128), // user, pool, lp_amount
+    // Risk scoring
+    RiskParamsSet(i128, i128, i128, i128), // base_limit, factor, min_rate_bps, max_rate_bps
+    UserRiskUpdated(Address, i128, i128), // user, score, credit_limit_value
 }
 
 impl ProtocolEvent {
@@ -782,6 +836,27 @@ impl ProtocolEvent {
                         Symbol::new(env, "user"), user.clone(),
                         Symbol::new(env, "pool"), pool.clone(),
                         Symbol::new(env, "lp_amount"), *lp_amount,
+                    )
+                );
+            }
+            ProtocolEvent::RiskParamsSet(base_limit, factor, min_rate_bps, max_rate_bps) => {
+                env.events().publish(
+                    (Symbol::new(env, "risk_params_set"), Symbol::new(env, "base_limit")),
+                    (
+                        Symbol::new(env, "base_limit"), *base_limit,
+                        Symbol::new(env, "factor"), *factor,
+                        Symbol::new(env, "min_rate_bps"), *min_rate_bps,
+                        Symbol::new(env, "max_rate_bps"), *max_rate_bps,
+                    )
+                );
+            }
+            ProtocolEvent::UserRiskUpdated(user, score, limit) => {
+                env.events().publish(
+                    (Symbol::new(env, "user_risk_updated"), Symbol::new(env, "user")),
+                    (
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "score"), *score,
+                        Symbol::new(env, "credit_limit"), *limit,
                     )
                 );
             }
@@ -1595,6 +1670,47 @@ pub fn amm_remove_liquidity(env: Env, user: String, pool: Address, lp_amount: i1
     result
 }
 
+// ---- Risk Scoring ----
+
+/// Admin: set global risk parameters
+pub fn set_risk_scoring_params(env: Env, caller: String, base_limit_value: i128, score_to_limit_factor: i128, min_rate_adj_bps: i128, max_rate_adj_bps: i128) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    ProtocolConfig::require_admin(&env, &caller_addr)?;
+    let params = RiskParamsGlobal { base_limit_value, score_to_limit_factor, min_rate_adj_bps, max_rate_adj_bps };
+    AssetRegistryStorage::save_risk_params(&env, &params);
+    ProtocolEvent::RiskParamsSet(base_limit_value, score_to_limit_factor, min_rate_adj_bps, max_rate_adj_bps).emit(&env);
+    Ok(())
+}
+
+/// Record a user action and update their risk score
+pub fn record_user_action(env: Env, user: String, _action: Symbol) -> Result<(i128, i128), ProtocolError> {
+    if user.is_empty() { return Err(ProtocolError::InvalidAddress); }
+    let user_addr = Address::from_string(&user);
+    let mut risk_map = AssetRegistryStorage::get_user_risk(&env);
+    let mut st = risk_map.get(user_addr.clone()).unwrap_or_else(|| UserRiskState::new(user_addr.clone()));
+    st.tx_count += 1;
+    st.last_update = env.ledger().timestamp();
+
+    // Very simple scoring: score capped by activity count up to 1000
+    let score = if st.tx_count > 1000 { 1000 } else { st.tx_count };
+    st.score = score;
+    let params = AssetRegistryStorage::get_risk_params(&env);
+    st.credit_limit_value = params.base_limit_value + params.score_to_limit_factor * st.score;
+    risk_map.set(user_addr.clone(), st.clone());
+    AssetRegistryStorage::put_user_risk(&env, &risk_map);
+    ProtocolEvent::UserRiskUpdated(user_addr, st.score, st.credit_limit_value).emit(&env);
+    Ok((st.score, st.credit_limit_value))
+}
+
+/// Get user risk state
+pub fn get_user_risk(env: Env, user: String) -> Result<(i128, i128, i128, u64), ProtocolError> {
+    if user.is_empty() { return Err(ProtocolError::InvalidAddress); }
+    let user_addr = Address::from_string(&user);
+    let risk_map = AssetRegistryStorage::get_user_risk(&env);
+    let st = risk_map.get(user_addr).unwrap_or_else(|| UserRiskState::new(Address::from_string(&String::from_str(&env, ""))));
+    Ok((st.score, st.credit_limit_value, st.tx_count, st.last_update))
+}
+
 // --------------- Flash Loan ---------------
 
 /// Execute a flash loan by calling `on_flash_loan(asset, amount, fee, initiator)` on receiver.
@@ -1820,5 +1936,18 @@ impl Contract {
 
     pub fn amm_remove_liquidity(env: Env, user: String, pool: Address, lp_amount: i128) -> Result<(), ProtocolError> {
         amm_remove_liquidity(env, user, pool, lp_amount)
+    }
+
+    // Risk scoring entrypoints
+    pub fn set_risk_scoring_params(env: Env, caller: String, base_limit_value: i128, score_to_limit_factor: i128, min_rate_adj_bps: i128, max_rate_adj_bps: i128) -> Result<(), ProtocolError> {
+        set_risk_scoring_params(env, caller, base_limit_value, score_to_limit_factor, min_rate_adj_bps, max_rate_adj_bps)
+    }
+
+    pub fn record_user_action(env: Env, user: String, action: Symbol) -> Result<(i128, i128), ProtocolError> {
+        record_user_action(env, user, action)
+    }
+
+    pub fn get_user_risk(env: Env, user: String) -> Result<(i128, i128, i128, u64), ProtocolError> {
+        get_user_risk(env, user)
     }
 }
