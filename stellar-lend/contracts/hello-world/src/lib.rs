@@ -11,6 +11,8 @@ use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, vec, Address, Env,
     IntoVal, Map, String, Symbol, Vec,
 };
+mod oracle;
+use oracle::{Oracle, OracleSource, OracleStorage};
 
 // Global allocator for Soroban contracts
 #[global_allocator]
@@ -1314,6 +1316,9 @@ pub fn get_system_stats(env: Env) -> Result<(i128, i128, i128, i128), ProtocolEr
 // --------------- Cross-Asset Core ---------------
 
 fn get_asset_price(env: &Env, asset: &Address) -> Result<i128, ProtocolError> {
+    if let Some(p) = Oracle::aggregate_price(env, asset) {
+        return Ok(p);
+    }
     let prices = AssetRegistryStorage::get_prices_map(env);
     let price = prices.get(asset.clone()).ok_or(ProtocolError::PriceNotAvailable)?;
     if price <= 0 { return Err(ProtocolError::PriceNotAvailable); }
@@ -1949,5 +1954,26 @@ impl Contract {
 
     pub fn get_user_risk(env: Env, user: String) -> Result<(i128, i128, i128, u64), ProtocolError> {
         get_user_risk(env, user)
+    }
+
+    // Oracle admin controls
+    pub fn oracle_set_source(env: Env, caller: String, asset: Address, oracle_addr: Address, weight: i128, last_heartbeat: u64) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+        let src = OracleSource::new(oracle_addr, weight, last_heartbeat);
+        Oracle::set_source(&env, &caller_addr, &asset, src);
+        Ok(())
+    }
+    pub fn oracle_remove_source(env: Env, caller: String, asset: Address, oracle_addr: Address) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+        Oracle::remove_source(&env, &caller_addr, &asset, &oracle_addr);
+        Ok(())
+    }
+    pub fn oracle_set_heartbeat_ttl(env: Env, caller: String, ttl: u64) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+        OracleStorage::set_heartbeat_ttl(&env, ttl);
+        Ok(())
     }
 }
