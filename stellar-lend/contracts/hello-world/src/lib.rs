@@ -11,8 +11,13 @@ use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, vec, Address, Env,
     IntoVal, Map, String, Symbol, Vec,
 };
+use soroban_sdk::token::TokenClient;
 mod oracle;
 use oracle::{Oracle, OracleSource, OracleStorage};
+mod governance;
+use governance::{Governance, GovStorage, Proposal};
+mod flash_loan;
+use flash_loan::FlashLoan;
 
 // Global allocator for Soroban contracts
 #[global_allocator]
@@ -208,6 +213,18 @@ impl PairKey {
     }
 }
 
+/// Auction state for advanced liquidation
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct LiquidationAuction {
+    pub user: Address,
+    pub asset: Address,
+    pub debt_portion: i128,
+    pub highest_bid: i128,
+    pub highest_bidder: Option<Address>,
+    pub start_time: u64,
+}
+
 /// Interest rate configuration parameters
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
@@ -226,6 +243,10 @@ pub struct InterestRateConfig {
     pub rate_floor: i128,
     /// Last time config was updated
     pub last_update: u64,
+    /// Smoothing factor in bps for rate changes (0..=10000)
+    pub smoothing_bps: i128,
+    /// Volatility sensitivity in bps (impact of utilization change)
+    pub util_sensitivity_bps: i128,
 }
 
 impl InterestRateConfig {
@@ -239,6 +260,8 @@ impl InterestRateConfig {
             rate_ceiling: 50000000,     // 50%
             rate_floor: 100000,         // 0.1%
             last_update: 0,
+            smoothing_bps: 2000,        // 20% smoothing by default
+            util_sensitivity_bps: 100,  // 1% per 1% util change
         }
     }
 }
@@ -259,6 +282,8 @@ pub struct InterestRateState {
     pub total_supplied: i128,
     /// Last time interest was accrued
     pub last_accrual_time: u64,
+    /// Smoothed borrow rate
+    pub smoothed_borrow_rate: i128,
 }
 
 impl InterestRateState {
@@ -271,6 +296,7 @@ impl InterestRateState {
             total_borrowed: 0,
             total_supplied: 0,
             last_accrual_time: 0,
+            smoothed_borrow_rate: 0,
         }
     }
 }
@@ -382,9 +408,14 @@ impl InterestRateStorage {
             state.current_borrow_rate = config.rate_floor;
         }
 
-        // Calculate supply rate (borrow rate minus reserve factor)
-        state.current_supply_rate = state.current_borrow_rate * 
-            (100000000 - config.reserve_factor) / 100000000;
+        // Smoothing for borrow rate: new = old*(s) + current*(1-s)
+        let s_bps = config.smoothing_bps;
+        let old = state.smoothed_borrow_rate;
+        let cur = state.current_borrow_rate;
+        state.smoothed_borrow_rate = (old * s_bps + cur * (10000 - s_bps)) / 10000;
+
+        // Calculate supply rate from smoothed borrow rate
+        state.current_supply_rate = state.smoothed_borrow_rate * (100000000 - config.reserve_factor) / 100000000;
 
         state.last_accrual_time = env.ledger().timestamp();
         Self::save_state(env, &state);
@@ -404,6 +435,11 @@ impl AssetRegistryStorage {
     fn amm_registry_key(env: &Env) -> Symbol { Symbol::new(env, "amm_registry_map") }
     fn user_risk_key(env: &Env) -> Symbol { Symbol::new(env, "user_risk_map") }
     fn risk_params_key(env: &Env) -> Symbol { Symbol::new(env, "risk_params") }
+    fn token_registry_key(env: &Env) -> Symbol { Symbol::new(env, "token_registry") }
+    fn enforce_transfers_key(env: &Env) -> Symbol { Symbol::new(env, "enforce_transfers") }
+    fn base_token_key(env: &Env) -> Symbol { Symbol::new(env, "base_token") }
+    fn auction_book_key(env: &Env) -> Symbol { Symbol::new(env, "auction_book") }
+    fn corr_key(env: &Env) -> Symbol { Symbol::new(env, "asset_correlations") }
 
     pub fn get_params_map(env: &Env) -> Map<Address, AssetParams> {
         env.storage().instance().get(&Self::params_key(env)).unwrap_or_else(|| Map::new(env))
@@ -451,6 +487,46 @@ impl AssetRegistryStorage {
 
     pub fn put_amm_registry(env: &Env, map: &Map<PairKey, Address>) {
         env.storage().instance().set(&Self::amm_registry_key(env), map);
+    }
+
+    pub fn get_token_registry(env: &Env) -> Map<Address, Address> {
+        env.storage().instance().get(&Self::token_registry_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+
+    pub fn put_token_registry(env: &Env, map: &Map<Address, Address>) {
+        env.storage().instance().set(&Self::token_registry_key(env), map);
+    }
+
+    pub fn get_enforce_transfers(env: &Env) -> bool {
+        env.storage().instance().get(&Self::enforce_transfers_key(env)).unwrap_or(false)
+    }
+
+    pub fn set_enforce_transfers(env: &Env, flag: bool) {
+        env.storage().instance().set(&Self::enforce_transfers_key(env), &flag);
+    }
+
+    pub fn set_base_token(env: &Env, token: &Address) {
+        env.storage().instance().set(&Self::base_token_key(env), token);
+    }
+
+    pub fn get_base_token(env: &Env) -> Option<Address> {
+        env.storage().instance().get(&Self::base_token_key(env))
+    }
+
+    pub fn get_auction_book(env: &Env) -> Map<Address, LiquidationAuction> {
+        env.storage().instance().get(&Self::auction_book_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+
+    pub fn put_auction_book(env: &Env, map: &Map<Address, LiquidationAuction>) {
+        env.storage().instance().set(&Self::auction_book_key(env), map);
+    }
+
+    pub fn get_correlations(env: &Env) -> Map<PairKey, i128> {
+        env.storage().instance().get(&Self::corr_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+
+    pub fn put_correlations(env: &Env, map: &Map<PairKey, i128>) {
+        env.storage().instance().set(&Self::corr_key(env), map);
     }
 
     pub fn get_user_risk(env: &Env) -> Map<Address, UserRiskState> {
@@ -679,6 +755,12 @@ pub enum ProtocolEvent {
     // Risk scoring
     RiskParamsSet(i128, i128, i128, i128), // base_limit, factor, min_rate_bps, max_rate_bps
     UserRiskUpdated(Address, i128, i128), // user, score, credit_limit_value
+    // Liquidation advanced
+    AuctionStarted(Address, Address, i128), // user, asset, debt_portion
+    AuctionBidPlaced(Address, Address, i128), // bidder, user, bid_amount
+    AuctionSettled(Address, Address, i128, i128), // winner, user, seized_collateral, repaid_debt
+    // Risk monitoring
+    RiskAlert(Address, i128), // user, risk_score
 }
 
 impl ProtocolEvent {
@@ -862,6 +944,46 @@ impl ProtocolEvent {
                     )
                 );
             }
+            ProtocolEvent::AuctionStarted(user, asset, debt_portion) => {
+                env.events().publish(
+                    (Symbol::new(env, "auction_started"), Symbol::new(env, "user")),
+                    (
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "asset"), asset.clone(),
+                        Symbol::new(env, "debt_portion"), *debt_portion,
+                    )
+                );
+            }
+            ProtocolEvent::AuctionBidPlaced(bidder, user, bid_amount) => {
+                env.events().publish(
+                    (Symbol::new(env, "auction_bid"), Symbol::new(env, "bidder")),
+                    (
+                        Symbol::new(env, "bidder"), bidder.clone(),
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "bid_amount"), *bid_amount,
+                    )
+                );
+            }
+            ProtocolEvent::AuctionSettled(winner, user, seized, repaid) => {
+                env.events().publish(
+                    (Symbol::new(env, "auction_settled"), Symbol::new(env, "winner")),
+                    (
+                        Symbol::new(env, "winner"), winner.clone(),
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "seized_collateral"), *seized,
+                        Symbol::new(env, "repaid_debt"), *repaid,
+                    )
+                );
+            }
+            ProtocolEvent::RiskAlert(user, score) => {
+                env.events().publish(
+                    (Symbol::new(env, "risk_alert"), Symbol::new(env, "user")),
+                    (
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "score"), *score,
+                    )
+                );
+            }
         }
     }
 }
@@ -895,6 +1017,14 @@ pub fn deposit_collateral(env: Env, depositor: String, amount: i128) -> Result<(
             Some(pos) => pos,
             None => Position::new(depositor_addr.clone(), 0, 0),
         };
+
+        // If token transfers enforced, perform transferFrom depositor -> this contract for configured base asset (single-asset path)
+        if AssetRegistryStorage::get_enforce_transfers(&env) {
+            if let Some(token_addr) = AssetRegistryStorage::get_base_token(&env) {
+                let client = TokenClient::new(&env, &token_addr);
+                client.transfer_from(&depositor_addr, &env.current_contract_address(), &depositor_addr, &amount);
+            }
+        }
 
         // Accrue interest before updating position
         let state = InterestRateStorage::update_state(&env);
@@ -1119,6 +1249,14 @@ pub fn withdraw(env: Env, withdrawer: String, amount: i128) -> Result<(), Protoc
         // Update position
         position.collateral = new_collateral;
         StateHelper::save_position(&env, &position);
+
+        // If token transfers enforced, perform transfer to withdrawer for configured base asset (single-asset path)
+        if AssetRegistryStorage::get_enforce_transfers(&env) {
+            if let Some(token_addr) = AssetRegistryStorage::get_base_token(&env) {
+                let client = TokenClient::new(&env, &token_addr);
+                client.transfer(&env.current_contract_address(), &withdrawer_addr, &amount);
+            }
+        }
 
         // Emit event
         ProtocolEvent::PositionUpdated(
@@ -1473,6 +1611,31 @@ pub fn get_cross_position_summary(env: Env, user: String) -> Result<(i128, i128,
     Ok((tc, td, ratio))
 }
 
+/// Set pairwise asset correlation in bps (-10000..=10000)
+pub fn set_asset_correlation(env: Env, caller: String, a: Address, b: Address, corr_bps: i128) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    ProtocolConfig::require_admin(&env, &caller_addr)?;
+    if corr_bps < -10000 || corr_bps > 10000 { return Err(ProtocolError::InvalidInput); }
+    let mut map = AssetRegistryStorage::get_correlations(&env);
+    map.set(PairKey::ordered(a, b), corr_bps);
+    AssetRegistryStorage::put_correlations(&env, &map);
+    Ok(())
+}
+
+/// Portfolio-adjusted ratio using correlations (placeholder: reduces collateral by average positive corr)
+pub fn get_portfolio_risk_ratio(env: Env, user: String) -> Result<i128, ProtocolError> {
+    if user.is_empty() { return Err(ProtocolError::InvalidAddress); }
+    let user_addr = Address::from_string(&user);
+    let x = CrossStateHelper::get_or_init_position(&env, &user_addr);
+    let (tc, td) = calc_cross_totals(&env, &x)?;
+    if td == 0 { return Ok(0); }
+    let corr = AssetRegistryStorage::get_correlations(&env);
+    // naive penalty: if any positive corr exists, reduce 5%
+    let penalty = if corr.len() > 0 { 5 } else { 0 };
+    let ratio = (tc * 100) / td;
+    Ok(ratio - penalty)
+}
+
 // ---- Admin helpers for cross-asset ----
 
 /// Add or update supported asset params
@@ -1506,6 +1669,47 @@ pub fn set_asset_price(env: Env, caller: String, asset: Address, price: i128) ->
     let mut map = AssetRegistryStorage::get_prices_map(&env);
     map.set(asset, price);
     AssetRegistryStorage::put_prices_map(&env, &map);
+    Ok(())
+}
+
+// ---- Advanced Liquidation: Auction Scaffold ----
+pub fn start_liquidation_auction(env: Env, caller: String, user: Address, asset: Address, debt_portion: i128) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    // Allow anyone to start if position is eligible
+    let mut book = AssetRegistryStorage::get_auction_book(&env);
+    if book.get(user.clone()).is_some() { return Err(ProtocolError::InvalidOperation); }
+    let auction = LiquidationAuction { user: user.clone(), asset: asset.clone(), debt_portion, highest_bid: 0, highest_bidder: None, start_time: env.ledger().timestamp() };
+    book.set(user.clone(), auction);
+    AssetRegistryStorage::put_auction_book(&env, &book);
+    ProtocolEvent::AuctionStarted(user, asset, debt_portion).emit(&env);
+    Ok(())
+}
+
+pub fn place_liquidation_bid(env: Env, bidder: String, user: Address, amount: i128) -> Result<(), ProtocolError> {
+    if bidder.is_empty() { return Err(ProtocolError::InvalidAddress); }
+    if amount <= 0 { return Err(ProtocolError::InvalidAmount); }
+    let bidder_addr = Address::from_string(&bidder);
+    let mut book = AssetRegistryStorage::get_auction_book(&env);
+    let mut auction = book.get(user.clone()).ok_or(ProtocolError::NotFound)?;
+    if amount <= auction.highest_bid { return Err(ProtocolError::InvalidOperation); }
+    auction.highest_bid = amount;
+    auction.highest_bidder = Some(bidder_addr.clone());
+    book.set(user.clone(), auction);
+    AssetRegistryStorage::put_auction_book(&env, &book);
+    ProtocolEvent::AuctionBidPlaced(bidder_addr, user, amount).emit(&env);
+    Ok(())
+}
+
+pub fn settle_liquidation_auction(env: Env, caller: String, user: Address) -> Result<(), ProtocolError> {
+    let _caller_addr = Address::from_string(&caller);
+    let mut book = AssetRegistryStorage::get_auction_book(&env);
+    let auction = book.get(user.clone()).ok_or(ProtocolError::NotFound)?;
+    let winner = auction.highest_bidder.ok_or(ProtocolError::NotFound)?;
+    let seized = auction.highest_bid; // placeholder
+    let repaid = auction.debt_portion;
+    book.remove(user.clone());
+    AssetRegistryStorage::put_auction_book(&env, &book);
+    ProtocolEvent::AuctionSettled(winner, user, seized, repaid).emit(&env);
     Ok(())
 }
 
@@ -1703,7 +1907,9 @@ pub fn record_user_action(env: Env, user: String, _action: Symbol) -> Result<(i1
     st.credit_limit_value = params.base_limit_value + params.score_to_limit_factor * st.score;
     risk_map.set(user_addr.clone(), st.clone());
     AssetRegistryStorage::put_user_risk(&env, &risk_map);
-    ProtocolEvent::UserRiskUpdated(user_addr, st.score, st.credit_limit_value).emit(&env);
+    ProtocolEvent::UserRiskUpdated(user_addr.clone(), st.score, st.credit_limit_value).emit(&env);
+    // Alert when score exceeds threshold (placeholder)
+    if st.score > 800 { ProtocolEvent::RiskAlert(user_addr, st.score).emit(&env); }
     Ok((st.score, st.credit_limit_value))
 }
 
@@ -1729,38 +1935,10 @@ pub fn flash_loan(
     ReentrancyGuard::enter(&env)?;
     let result = (|| {
         if initiator.is_empty() { return Err(ProtocolError::InvalidAddress); }
-        if amount <= 0 { return Err(ProtocolError::InvalidAmount); }
-        // Ensure asset is registered (price must exist)
         let _ = get_asset_price(&env, &asset)?;
         let initiator_addr = Address::from_string(&initiator);
-
-        // Calculate fee
-        let bps = ProtocolConfig::get_flash_loan_fee_bps(&env); // e.g., 5 bps
-        let fee = (amount * bps) / 10000;
-
-        // Emit initiation event
-        ProtocolEvent::FlashLoanInitiated(initiator_addr.clone(), asset.clone(), amount, fee).emit(&env);
-
-        // Invoke receiver callback: on_flash_loan(env, asset, amount, fee, initiator)
-        // The callee must ensure repayment within the same transaction.
-        let args = vec![
-            &env,
-            asset.clone().into_val(&env),
-            amount.into_val(&env),
-            fee.into_val(&env),
-            initiator_addr.clone().into_val(&env),
-        ];
-        let _: () = env.invoke_contract(
-            &receiver_contract,
-            &Symbol::new(&env, "on_flash_loan"),
-            args,
-        );
-
-        // Basic validation placeholder: in a real implementation, we'd verify the asset amount + fee
-        // returned to the protocol treasury. Here, we just assume the callee reverts on failure.
-
-        ProtocolEvent::FlashLoanCompleted(initiator_addr, asset, amount, fee).emit(&env);
-        Ok(())
+        let bps = ProtocolConfig::get_flash_loan_fee_bps(&env);
+        FlashLoan::execute(&env, &initiator_addr, &asset, amount, bps, &receiver_contract)
     })();
     ReentrancyGuard::exit(&env);
     result
@@ -1892,6 +2070,12 @@ impl Contract {
     pub fn get_cross_position_summary(env: Env, user: String) -> Result<(i128, i128, i128), ProtocolError> {
         get_cross_position_summary(env, user)
     }
+    pub fn set_asset_correlation(env: Env, caller: String, a: Address, b: Address, corr_bps: i128) -> Result<(), ProtocolError> {
+        set_asset_correlation(env, caller, a, b, corr_bps)
+    }
+    pub fn get_portfolio_risk_ratio(env: Env, user: String) -> Result<i128, ProtocolError> {
+        get_portfolio_risk_ratio(env, user)
+    }
 
     // Flash loan entrypoint
     pub fn flash_loan(
@@ -1976,4 +2160,42 @@ impl Contract {
         OracleStorage::set_heartbeat_ttl(&env, ttl);
         Ok(())
     }
+
+    // Token transfer admin controls
+    pub fn set_enforce_transfers(env: Env, caller: String, flag: bool) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+        AssetRegistryStorage::set_enforce_transfers(&env, flag);
+        Ok(())
+    }
+    pub fn set_base_token(env: Env, caller: String, token: Address) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+        AssetRegistryStorage::set_base_token(&env, &token);
+        Ok(())
+    }
+
+    // Governance entrypoints
+    pub fn gov_set_quorum_bps(env: Env, caller: String, bps: i128) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+        GovStorage::set_quorum_bps(&env, bps);
+        Ok(())
+    }
+    pub fn gov_set_timelock(env: Env, caller: String, secs: u64) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+        GovStorage::set_timelock(&env, secs);
+        Ok(())
+    }
+    pub fn gov_propose(env: Env, proposer: String, title: String, voting_period_secs: u64) -> Proposal {
+        let proposer_addr = Address::from_string(&proposer);
+        Governance::propose(&env, &proposer_addr, title, voting_period_secs)
+    }
+    pub fn gov_vote(env: Env, id: u64, voter: String, support: bool, weight: i128) -> Proposal {
+        let voter_addr = Address::from_string(&voter);
+        Governance::vote(&env, id, &voter_addr, support, weight)
+    }
+    pub fn gov_queue(env: Env, id: u64) -> Proposal { Governance::queue(&env, id) }
+    pub fn gov_execute(env: Env, id: u64) -> Proposal { Governance::execute(&env, id) }
 }
