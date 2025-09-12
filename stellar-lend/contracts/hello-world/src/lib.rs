@@ -16,6 +16,8 @@ mod oracle;
 use oracle::{Oracle, OracleSource, OracleStorage};
 mod governance;
 use governance::{Governance, GovStorage, Proposal};
+mod flash_loan;
+use flash_loan::FlashLoan;
 
 // Global allocator for Soroban contracts
 #[global_allocator]
@@ -1920,38 +1922,10 @@ pub fn flash_loan(
     ReentrancyGuard::enter(&env)?;
     let result = (|| {
         if initiator.is_empty() { return Err(ProtocolError::InvalidAddress); }
-        if amount <= 0 { return Err(ProtocolError::InvalidAmount); }
-        // Ensure asset is registered (price must exist)
         let _ = get_asset_price(&env, &asset)?;
         let initiator_addr = Address::from_string(&initiator);
-
-        // Calculate fee
-        let bps = ProtocolConfig::get_flash_loan_fee_bps(&env); // e.g., 5 bps
-        let fee = (amount * bps) / 10000;
-
-        // Emit initiation event
-        ProtocolEvent::FlashLoanInitiated(initiator_addr.clone(), asset.clone(), amount, fee).emit(&env);
-
-        // Invoke receiver callback: on_flash_loan(env, asset, amount, fee, initiator)
-        // The callee must ensure repayment within the same transaction.
-        let args = vec![
-            &env,
-            asset.clone().into_val(&env),
-            amount.into_val(&env),
-            fee.into_val(&env),
-            initiator_addr.clone().into_val(&env),
-        ];
-        let _: () = env.invoke_contract(
-            &receiver_contract,
-            &Symbol::new(&env, "on_flash_loan"),
-            args,
-        );
-
-        // Basic validation placeholder: in a real implementation, we'd verify the asset amount + fee
-        // returned to the protocol treasury. Here, we just assume the callee reverts on failure.
-
-        ProtocolEvent::FlashLoanCompleted(initiator_addr, asset, amount, fee).emit(&env);
-        Ok(())
+        let bps = ProtocolConfig::get_flash_loan_fee_bps(&env);
+        FlashLoan::execute(&env, &initiator_addr, &asset, amount, bps, &receiver_contract)
     })();
     ReentrancyGuard::exit(&env);
     result
