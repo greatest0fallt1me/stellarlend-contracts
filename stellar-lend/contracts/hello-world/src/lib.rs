@@ -209,6 +209,18 @@ impl PairKey {
     }
 }
 
+/// Auction state for advanced liquidation
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct LiquidationAuction {
+    pub user: Address,
+    pub asset: Address,
+    pub debt_portion: i128,
+    pub highest_bid: i128,
+    pub highest_bidder: Option<Address>,
+    pub start_time: u64,
+}
+
 /// Interest rate configuration parameters
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
@@ -422,6 +434,7 @@ impl AssetRegistryStorage {
     fn token_registry_key(env: &Env) -> Symbol { Symbol::new(env, "token_registry") }
     fn enforce_transfers_key(env: &Env) -> Symbol { Symbol::new(env, "enforce_transfers") }
     fn base_token_key(env: &Env) -> Symbol { Symbol::new(env, "base_token") }
+    fn auction_book_key(env: &Env) -> Symbol { Symbol::new(env, "auction_book") }
 
     pub fn get_params_map(env: &Env) -> Map<Address, AssetParams> {
         env.storage().instance().get(&Self::params_key(env)).unwrap_or_else(|| Map::new(env))
@@ -493,6 +506,14 @@ impl AssetRegistryStorage {
 
     pub fn get_base_token(env: &Env) -> Option<Address> {
         env.storage().instance().get(&Self::base_token_key(env))
+    }
+
+    pub fn get_auction_book(env: &Env) -> Map<Address, LiquidationAuction> {
+        env.storage().instance().get(&Self::auction_book_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+
+    pub fn put_auction_book(env: &Env, map: &Map<Address, LiquidationAuction>) {
+        env.storage().instance().set(&Self::auction_book_key(env), map);
     }
 
     pub fn get_user_risk(env: &Env) -> Map<Address, UserRiskState> {
@@ -721,6 +742,10 @@ pub enum ProtocolEvent {
     // Risk scoring
     RiskParamsSet(i128, i128, i128, i128), // base_limit, factor, min_rate_bps, max_rate_bps
     UserRiskUpdated(Address, i128, i128), // user, score, credit_limit_value
+    // Liquidation advanced
+    AuctionStarted(Address, Address, i128), // user, asset, debt_portion
+    AuctionBidPlaced(Address, Address, i128), // bidder, user, bid_amount
+    AuctionSettled(Address, Address, i128, i128), // winner, user, seized_collateral, repaid_debt
 }
 
 impl ProtocolEvent {
@@ -901,6 +926,37 @@ impl ProtocolEvent {
                         Symbol::new(env, "user"), user.clone(),
                         Symbol::new(env, "score"), *score,
                         Symbol::new(env, "credit_limit"), *limit,
+                    )
+                );
+            }
+            ProtocolEvent::AuctionStarted(user, asset, debt_portion) => {
+                env.events().publish(
+                    (Symbol::new(env, "auction_started"), Symbol::new(env, "user")),
+                    (
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "asset"), asset.clone(),
+                        Symbol::new(env, "debt_portion"), *debt_portion,
+                    )
+                );
+            }
+            ProtocolEvent::AuctionBidPlaced(bidder, user, bid_amount) => {
+                env.events().publish(
+                    (Symbol::new(env, "auction_bid"), Symbol::new(env, "bidder")),
+                    (
+                        Symbol::new(env, "bidder"), bidder.clone(),
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "bid_amount"), *bid_amount,
+                    )
+                );
+            }
+            ProtocolEvent::AuctionSettled(winner, user, seized, repaid) => {
+                env.events().publish(
+                    (Symbol::new(env, "auction_settled"), Symbol::new(env, "winner")),
+                    (
+                        Symbol::new(env, "winner"), winner.clone(),
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "seized_collateral"), *seized,
+                        Symbol::new(env, "repaid_debt"), *repaid,
                     )
                 );
             }
@@ -1564,6 +1620,47 @@ pub fn set_asset_price(env: Env, caller: String, asset: Address, price: i128) ->
     let mut map = AssetRegistryStorage::get_prices_map(&env);
     map.set(asset, price);
     AssetRegistryStorage::put_prices_map(&env, &map);
+    Ok(())
+}
+
+// ---- Advanced Liquidation: Auction Scaffold ----
+pub fn start_liquidation_auction(env: Env, caller: String, user: Address, asset: Address, debt_portion: i128) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    // Allow anyone to start if position is eligible
+    let mut book = AssetRegistryStorage::get_auction_book(&env);
+    if book.get(user.clone()).is_some() { return Err(ProtocolError::InvalidOperation); }
+    let auction = LiquidationAuction { user: user.clone(), asset: asset.clone(), debt_portion, highest_bid: 0, highest_bidder: None, start_time: env.ledger().timestamp() };
+    book.set(user.clone(), auction);
+    AssetRegistryStorage::put_auction_book(&env, &book);
+    ProtocolEvent::AuctionStarted(user, asset, debt_portion).emit(&env);
+    Ok(())
+}
+
+pub fn place_liquidation_bid(env: Env, bidder: String, user: Address, amount: i128) -> Result<(), ProtocolError> {
+    if bidder.is_empty() { return Err(ProtocolError::InvalidAddress); }
+    if amount <= 0 { return Err(ProtocolError::InvalidAmount); }
+    let bidder_addr = Address::from_string(&bidder);
+    let mut book = AssetRegistryStorage::get_auction_book(&env);
+    let mut auction = book.get(user.clone()).ok_or(ProtocolError::NotFound)?;
+    if amount <= auction.highest_bid { return Err(ProtocolError::InvalidOperation); }
+    auction.highest_bid = amount;
+    auction.highest_bidder = Some(bidder_addr.clone());
+    book.set(user.clone(), auction);
+    AssetRegistryStorage::put_auction_book(&env, &book);
+    ProtocolEvent::AuctionBidPlaced(bidder_addr, user, amount).emit(&env);
+    Ok(())
+}
+
+pub fn settle_liquidation_auction(env: Env, caller: String, user: Address) -> Result<(), ProtocolError> {
+    let _caller_addr = Address::from_string(&caller);
+    let mut book = AssetRegistryStorage::get_auction_book(&env);
+    let auction = book.get(user.clone()).ok_or(ProtocolError::NotFound)?;
+    let winner = auction.highest_bidder.ok_or(ProtocolError::NotFound)?;
+    let seized = auction.highest_bid; // placeholder
+    let repaid = auction.debt_portion;
+    book.remove(user.clone());
+    AssetRegistryStorage::put_auction_book(&env, &book);
+    ProtocolEvent::AuctionSettled(winner, user, seized, repaid).emit(&env);
     Ok(())
 }
 
