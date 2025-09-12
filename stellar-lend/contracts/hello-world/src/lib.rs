@@ -435,6 +435,7 @@ impl AssetRegistryStorage {
     fn enforce_transfers_key(env: &Env) -> Symbol { Symbol::new(env, "enforce_transfers") }
     fn base_token_key(env: &Env) -> Symbol { Symbol::new(env, "base_token") }
     fn auction_book_key(env: &Env) -> Symbol { Symbol::new(env, "auction_book") }
+    fn corr_key(env: &Env) -> Symbol { Symbol::new(env, "asset_correlations") }
 
     pub fn get_params_map(env: &Env) -> Map<Address, AssetParams> {
         env.storage().instance().get(&Self::params_key(env)).unwrap_or_else(|| Map::new(env))
@@ -514,6 +515,14 @@ impl AssetRegistryStorage {
 
     pub fn put_auction_book(env: &Env, map: &Map<Address, LiquidationAuction>) {
         env.storage().instance().set(&Self::auction_book_key(env), map);
+    }
+
+    pub fn get_correlations(env: &Env) -> Map<PairKey, i128> {
+        env.storage().instance().get(&Self::corr_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+
+    pub fn put_correlations(env: &Env, map: &Map<PairKey, i128>) {
+        env.storage().instance().set(&Self::corr_key(env), map);
     }
 
     pub fn get_user_risk(env: &Env) -> Map<Address, UserRiskState> {
@@ -1587,6 +1596,31 @@ pub fn get_cross_position_summary(env: Env, user: String) -> Result<(i128, i128,
     Ok((tc, td, ratio))
 }
 
+/// Set pairwise asset correlation in bps (-10000..=10000)
+pub fn set_asset_correlation(env: Env, caller: String, a: Address, b: Address, corr_bps: i128) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    ProtocolConfig::require_admin(&env, &caller_addr)?;
+    if corr_bps < -10000 || corr_bps > 10000 { return Err(ProtocolError::InvalidInput); }
+    let mut map = AssetRegistryStorage::get_correlations(&env);
+    map.set(PairKey::ordered(a, b), corr_bps);
+    AssetRegistryStorage::put_correlations(&env, &map);
+    Ok(())
+}
+
+/// Portfolio-adjusted ratio using correlations (placeholder: reduces collateral by average positive corr)
+pub fn get_portfolio_risk_ratio(env: Env, user: String) -> Result<i128, ProtocolError> {
+    if user.is_empty() { return Err(ProtocolError::InvalidAddress); }
+    let user_addr = Address::from_string(&user);
+    let x = CrossStateHelper::get_or_init_position(&env, &user_addr);
+    let (tc, td) = calc_cross_totals(&env, &x)?;
+    if td == 0 { return Ok(0); }
+    let corr = AssetRegistryStorage::get_correlations(&env);
+    // naive penalty: if any positive corr exists, reduce 5%
+    let penalty = if corr.len() > 0 { 5 } else { 0 };
+    let ratio = (tc * 100) / td;
+    Ok(ratio - penalty)
+}
+
 // ---- Admin helpers for cross-asset ----
 
 /// Add or update supported asset params
@@ -2046,6 +2080,12 @@ impl Contract {
 
     pub fn get_cross_position_summary(env: Env, user: String) -> Result<(i128, i128, i128), ProtocolError> {
         get_cross_position_summary(env, user)
+    }
+    pub fn set_asset_correlation(env: Env, caller: String, a: Address, b: Address, corr_bps: i128) -> Result<(), ProtocolError> {
+        set_asset_correlation(env, caller, a, b, corr_bps)
+    }
+    pub fn get_portfolio_risk_ratio(env: Env, user: String) -> Result<i128, ProtocolError> {
+        get_portfolio_risk_ratio(env, user)
     }
 
     // Flash loan entrypoint
