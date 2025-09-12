@@ -11,6 +11,7 @@ use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, vec, Address, Env,
     IntoVal, Map, String, Symbol, Vec,
 };
+use soroban_sdk::token::TokenClient;
 mod oracle;
 use oracle::{Oracle, OracleSource, OracleStorage};
 
@@ -404,6 +405,9 @@ impl AssetRegistryStorage {
     fn amm_registry_key(env: &Env) -> Symbol { Symbol::new(env, "amm_registry_map") }
     fn user_risk_key(env: &Env) -> Symbol { Symbol::new(env, "user_risk_map") }
     fn risk_params_key(env: &Env) -> Symbol { Symbol::new(env, "risk_params") }
+    fn token_registry_key(env: &Env) -> Symbol { Symbol::new(env, "token_registry") }
+    fn enforce_transfers_key(env: &Env) -> Symbol { Symbol::new(env, "enforce_transfers") }
+    fn base_token_key(env: &Env) -> Symbol { Symbol::new(env, "base_token") }
 
     pub fn get_params_map(env: &Env) -> Map<Address, AssetParams> {
         env.storage().instance().get(&Self::params_key(env)).unwrap_or_else(|| Map::new(env))
@@ -451,6 +455,30 @@ impl AssetRegistryStorage {
 
     pub fn put_amm_registry(env: &Env, map: &Map<PairKey, Address>) {
         env.storage().instance().set(&Self::amm_registry_key(env), map);
+    }
+
+    pub fn get_token_registry(env: &Env) -> Map<Address, Address> {
+        env.storage().instance().get(&Self::token_registry_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+
+    pub fn put_token_registry(env: &Env, map: &Map<Address, Address>) {
+        env.storage().instance().set(&Self::token_registry_key(env), map);
+    }
+
+    pub fn get_enforce_transfers(env: &Env) -> bool {
+        env.storage().instance().get(&Self::enforce_transfers_key(env)).unwrap_or(false)
+    }
+
+    pub fn set_enforce_transfers(env: &Env, flag: bool) {
+        env.storage().instance().set(&Self::enforce_transfers_key(env), &flag);
+    }
+
+    pub fn set_base_token(env: &Env, token: &Address) {
+        env.storage().instance().set(&Self::base_token_key(env), token);
+    }
+
+    pub fn get_base_token(env: &Env) -> Option<Address> {
+        env.storage().instance().get(&Self::base_token_key(env))
     }
 
     pub fn get_user_risk(env: &Env) -> Map<Address, UserRiskState> {
@@ -896,6 +924,14 @@ pub fn deposit_collateral(env: Env, depositor: String, amount: i128) -> Result<(
             None => Position::new(depositor_addr.clone(), 0, 0),
         };
 
+        // If token transfers enforced, perform transferFrom depositor -> this contract for configured base asset (single-asset path)
+        if AssetRegistryStorage::get_enforce_transfers(&env) {
+            if let Some(token_addr) = AssetRegistryStorage::get_base_token(&env) {
+                let client = TokenClient::new(&env, &token_addr);
+                client.transfer_from(&depositor_addr, &env.current_contract_address(), &depositor_addr, &amount);
+            }
+        }
+
         // Accrue interest before updating position
         let state = InterestRateStorage::update_state(&env);
         InterestRateManager::accrue_interest_for_position(
@@ -1119,6 +1155,14 @@ pub fn withdraw(env: Env, withdrawer: String, amount: i128) -> Result<(), Protoc
         // Update position
         position.collateral = new_collateral;
         StateHelper::save_position(&env, &position);
+
+        // If token transfers enforced, perform transfer to withdrawer for configured base asset (single-asset path)
+        if AssetRegistryStorage::get_enforce_transfers(&env) {
+            if let Some(token_addr) = AssetRegistryStorage::get_base_token(&env) {
+                let client = TokenClient::new(&env, &token_addr);
+                client.transfer(&env.current_contract_address(), &withdrawer_addr, &amount);
+            }
+        }
 
         // Emit event
         ProtocolEvent::PositionUpdated(
@@ -1974,6 +2018,20 @@ impl Contract {
         let caller_addr = Address::from_string(&caller);
         ProtocolConfig::require_admin(&env, &caller_addr)?;
         OracleStorage::set_heartbeat_ttl(&env, ttl);
+        Ok(())
+    }
+
+    // Token transfer admin controls
+    pub fn set_enforce_transfers(env: Env, caller: String, flag: bool) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+        AssetRegistryStorage::set_enforce_transfers(&env, flag);
+        Ok(())
+    }
+    pub fn set_base_token(env: Env, caller: String, token: Address) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+        AssetRegistryStorage::set_base_token(&env, &token);
         Ok(())
     }
 }
