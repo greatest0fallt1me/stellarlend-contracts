@@ -14,6 +14,8 @@ use soroban_sdk::{
 use soroban_sdk::token::TokenClient;
 mod oracle;
 use oracle::{Oracle, OracleSource, OracleStorage};
+mod governance;
+use governance::{Governance, GovStorage, Proposal};
 
 // Global allocator for Soroban contracts
 #[global_allocator]
@@ -2185,4 +2187,28 @@ impl Contract {
         AssetRegistryStorage::set_base_token(&env, &token);
         Ok(())
     }
+
+    // Governance entrypoints
+    pub fn gov_set_quorum_bps(env: Env, caller: String, bps: i128) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+        GovStorage::set_quorum_bps(&env, bps);
+        Ok(())
+    }
+    pub fn gov_set_timelock(env: Env, caller: String, secs: u64) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+        GovStorage::set_timelock(&env, secs);
+        Ok(())
+    }
+    pub fn gov_propose(env: Env, proposer: String, title: String, voting_period_secs: u64) -> Proposal {
+        let proposer_addr = Address::from_string(&proposer);
+        Governance::propose(&env, &proposer_addr, title, voting_period_secs)
+    }
+    pub fn gov_vote(env: Env, id: u64, voter: String, support: bool, weight: i128) -> Proposal {
+        let voter_addr = Address::from_string(&voter);
+        Governance::vote(&env, id, &voter_addr, support, weight)
+    }
+    pub fn gov_queue(env: Env, id: u64) -> Proposal { Governance::queue(&env, id) }
+    pub fn gov_execute(env: Env, id: u64) -> Proposal { Governance::execute(&env, id) }
 }
