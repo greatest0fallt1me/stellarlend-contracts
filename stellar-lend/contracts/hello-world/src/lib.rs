@@ -227,6 +227,10 @@ pub struct InterestRateConfig {
     pub rate_floor: i128,
     /// Last time config was updated
     pub last_update: u64,
+    /// Smoothing factor in bps for rate changes (0..=10000)
+    pub smoothing_bps: i128,
+    /// Volatility sensitivity in bps (impact of utilization change)
+    pub util_sensitivity_bps: i128,
 }
 
 impl InterestRateConfig {
@@ -240,6 +244,8 @@ impl InterestRateConfig {
             rate_ceiling: 50000000,     // 50%
             rate_floor: 100000,         // 0.1%
             last_update: 0,
+            smoothing_bps: 2000,        // 20% smoothing by default
+            util_sensitivity_bps: 100,  // 1% per 1% util change
         }
     }
 }
@@ -260,6 +266,8 @@ pub struct InterestRateState {
     pub total_supplied: i128,
     /// Last time interest was accrued
     pub last_accrual_time: u64,
+    /// Smoothed borrow rate
+    pub smoothed_borrow_rate: i128,
 }
 
 impl InterestRateState {
@@ -272,6 +280,7 @@ impl InterestRateState {
             total_borrowed: 0,
             total_supplied: 0,
             last_accrual_time: 0,
+            smoothed_borrow_rate: 0,
         }
     }
 }
@@ -383,9 +392,14 @@ impl InterestRateStorage {
             state.current_borrow_rate = config.rate_floor;
         }
 
-        // Calculate supply rate (borrow rate minus reserve factor)
-        state.current_supply_rate = state.current_borrow_rate * 
-            (100000000 - config.reserve_factor) / 100000000;
+        // Smoothing for borrow rate: new = old*(s) + current*(1-s)
+        let s_bps = config.smoothing_bps;
+        let old = state.smoothed_borrow_rate;
+        let cur = state.current_borrow_rate;
+        state.smoothed_borrow_rate = (old * s_bps + cur * (10000 - s_bps)) / 10000;
+
+        // Calculate supply rate from smoothed borrow rate
+        state.current_supply_rate = state.smoothed_borrow_rate * (100000000 - config.reserve_factor) / 100000000;
 
         state.last_accrual_time = env.ledger().timestamp();
         Self::save_state(env, &state);
