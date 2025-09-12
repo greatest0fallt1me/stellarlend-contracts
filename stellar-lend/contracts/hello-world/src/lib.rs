@@ -759,6 +759,8 @@ pub enum ProtocolEvent {
     AuctionStarted(Address, Address, i128), // user, asset, debt_portion
     AuctionBidPlaced(Address, Address, i128), // bidder, user, bid_amount
     AuctionSettled(Address, Address, i128, i128), // winner, user, seized_collateral, repaid_debt
+    // Risk monitoring
+    RiskAlert(Address, i128), // user, risk_score
 }
 
 impl ProtocolEvent {
@@ -970,6 +972,15 @@ impl ProtocolEvent {
                         Symbol::new(env, "user"), user.clone(),
                         Symbol::new(env, "seized_collateral"), *seized,
                         Symbol::new(env, "repaid_debt"), *repaid,
+                    )
+                );
+            }
+            ProtocolEvent::RiskAlert(user, score) => {
+                env.events().publish(
+                    (Symbol::new(env, "risk_alert"), Symbol::new(env, "user")),
+                    (
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "score"), *score,
                     )
                 );
             }
@@ -1896,7 +1907,9 @@ pub fn record_user_action(env: Env, user: String, _action: Symbol) -> Result<(i1
     st.credit_limit_value = params.base_limit_value + params.score_to_limit_factor * st.score;
     risk_map.set(user_addr.clone(), st.clone());
     AssetRegistryStorage::put_user_risk(&env, &risk_map);
-    ProtocolEvent::UserRiskUpdated(user_addr, st.score, st.credit_limit_value).emit(&env);
+    ProtocolEvent::UserRiskUpdated(user_addr.clone(), st.score, st.credit_limit_value).emit(&env);
+    // Alert when score exceeds threshold (placeholder)
+    if st.score > 800 { ProtocolEvent::RiskAlert(user_addr, st.score).emit(&env); }
     Ok((st.score, st.credit_limit_value))
 }
 
