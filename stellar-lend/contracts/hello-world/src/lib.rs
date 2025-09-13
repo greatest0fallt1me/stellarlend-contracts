@@ -440,6 +440,7 @@ impl AssetRegistryStorage {
     fn base_token_key(env: &Env) -> Symbol { Symbol::new(env, "base_token") }
     fn auction_book_key(env: &Env) -> Symbol { Symbol::new(env, "auction_book") }
     fn corr_key(env: &Env) -> Symbol { Symbol::new(env, "asset_correlations") }
+    fn liq_queue_key(env: &Env) -> Symbol { Symbol::new(env, "liquidation_queue") }
     fn kyc_map_key(env: &Env) -> Symbol { Symbol::new(env, "kyc_map") }
     fn mm_params_key(env: &Env) -> Symbol { Symbol::new(env, "mm_params") }
     fn webhook_registry_key(env: &Env) -> Symbol { Symbol::new(env, "webhook_registry") }
@@ -536,6 +537,11 @@ impl AssetRegistryStorage {
     pub fn put_kyc_map(env: &Env, map: &Map<Address, bool>) {
         env.storage().instance().set(&Self::kyc_map_key(env), map);
     }
+
+    pub fn get_liq_queue(env: &Env) -> Vec<Address> {
+        env.storage().instance().get(&Self::liq_queue_key(env)).unwrap_or_else(|| Vec::new(env))
+    }
+    pub fn put_liq_queue(env: &Env, q: &Vec<Address>) { env.storage().instance().set(&Self::liq_queue_key(env), q); }
 
     pub fn save_mm_params(env: &Env, spread_bps: i128, inventory_cap: i128) {
         let key = Self::mm_params_key(env);
@@ -2054,6 +2060,23 @@ pub fn settle_liquidation_auction(env: Env, caller: String, user: Address) -> Re
     Ok(())
 }
 
+// Liquidation queue helpers
+pub fn enqueue_for_liquidation(env: Env, user: Address) {
+    let mut q = AssetRegistryStorage::get_liq_queue(&env);
+    q.push_back(user);
+    AssetRegistryStorage::put_liq_queue(&env, &q);
+}
+pub fn dequeue_liquidation(env: Env) -> Option<Address> {
+    let mut q = AssetRegistryStorage::get_liq_queue(&env);
+    if q.len() == 0 { return None; }
+    let head = q.get(0);
+    // rebuild without head (simple O(n))
+    let mut nq: Vec<Address> = Vec::new(&env);
+    for i in 1..q.len() { nq.push_back(q.get(i).unwrap()); }
+    AssetRegistryStorage::put_liq_queue(&env, &nq);
+    head
+}
+
 /// Admin: set dynamic CF parameters for an asset
 pub fn set_dynamic_cf_params(
     env: Env,
@@ -2548,6 +2571,9 @@ impl Contract {
     pub fn set_circuit_breaker(env: Env, caller: String, flag: bool) -> Result<(), ProtocolError> { set_circuit_breaker(env, caller, flag) }
     pub fn is_circuit_breaker(env: Env) -> bool { is_circuit_breaker(env) }
     pub fn file_insurance_claim(env: Env, user: String, amount: i128, reason: Symbol) -> Result<(), ProtocolError> { file_insurance_claim(env, user, amount, reason) }
+    // Liquidation queue
+    pub fn enqueue_for_liquidation(env: Env, user: Address) { enqueue_for_liquidation(env, user) }
+    pub fn dequeue_liquidation(env: Env) -> Option<Address> { dequeue_liquidation(env) }
     // Fees
     pub fn set_fees(env: Env, caller: String, base_bps: i128, tier1_bps: i128) -> Result<(), ProtocolError> { set_fees(env, caller, base_bps, tier1_bps) }
     pub fn get_fees(env: Env) -> (i128, i128) { get_fees(env) }
