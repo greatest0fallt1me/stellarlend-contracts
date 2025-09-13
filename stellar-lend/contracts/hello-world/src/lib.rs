@@ -444,6 +444,8 @@ impl AssetRegistryStorage {
     fn mm_params_key(env: &Env) -> Symbol { Symbol::new(env, "mm_params") }
     fn webhook_registry_key(env: &Env) -> Symbol { Symbol::new(env, "webhook_registry") }
     fn fees_key(env: &Env) -> Symbol { Symbol::new(env, "fees_config") }
+    fn insurance_key(env: &Env) -> Symbol { Symbol::new(env, "insurance_params") }
+    fn breaker_key(env: &Env) -> Symbol { Symbol::new(env, "circuit_breaker") }
 
     pub fn get_params_map(env: &Env) -> Map<Address, AssetParams> {
         env.storage().instance().get(&Self::params_key(env)).unwrap_or_else(|| Map::new(env))
@@ -559,6 +561,15 @@ impl AssetRegistryStorage {
     pub fn get_fees(env: &Env) -> (i128, i128) {
         env.storage().instance().get(&Self::fees_key(env)).unwrap_or((5, 3))
     }
+
+    pub fn save_insurance(env: &Env, premium_bps: i128, coverage_cap: i128) {
+        env.storage().instance().set(&Self::insurance_key(env), &(premium_bps, coverage_cap));
+    }
+    pub fn get_insurance(env: &Env) -> (i128, i128) {
+        env.storage().instance().get(&Self::insurance_key(env)).unwrap_or((10, 1_000_000))
+    }
+    pub fn set_breaker(env: &Env, flag: bool) { env.storage().instance().set(&Self::breaker_key(env), &flag); }
+    pub fn get_breaker(env: &Env) -> bool { env.storage().instance().get(&Self::breaker_key(env)).unwrap_or(false) }
 
     pub fn get_correlations(env: &Env) -> Map<PairKey, i128> {
         env.storage().instance().get(&Self::corr_key(env)).unwrap_or_else(|| Map::new(env))
@@ -849,6 +860,10 @@ pub enum ProtocolEvent {
     AuditTrail(Symbol, Symbol), // action, ref
     // Fees
     FeesUpdated(i128, i128), // base_bps, tier1_bps
+    // Insurance
+    InsuranceParamsUpdated(i128, i128), // premium_bps, coverage_cap
+    CircuitBreaker(bool),
+    ClaimFiled(Address, i128, Symbol), // user, amount, reason
 }
 
 impl ProtocolEvent {
@@ -1150,6 +1165,42 @@ impl ProtocolEvent {
                     (
                         Symbol::new(env, "action"), action.clone(),
                         Symbol::new(env, "ref"), reference.clone(),
+                    )
+                );
+            }
+            ProtocolEvent::FeesUpdated(base, tier1) => {
+                env.events().publish(
+                    (Symbol::new(env, "fees_updated"), Symbol::new(env, "base")),
+                    (
+                        Symbol::new(env, "base"), *base,
+                        Symbol::new(env, "tier1"), *tier1,
+                    )
+                );
+            }
+            ProtocolEvent::InsuranceParamsUpdated(premium, cap) => {
+                env.events().publish(
+                    (Symbol::new(env, "insurance_params"), Symbol::new(env, "premium")),
+                    (
+                        Symbol::new(env, "premium"), *premium,
+                        Symbol::new(env, "cap"), *cap,
+                    )
+                );
+            }
+            ProtocolEvent::CircuitBreaker(flag) => {
+                env.events().publish(
+                    (Symbol::new(env, "circuit_breaker"), Symbol::new(env, "flag")),
+                    (
+                        Symbol::new(env, "flag"), *flag,
+                    )
+                );
+            }
+            ProtocolEvent::ClaimFiled(user, amount, reason) => {
+                env.events().publish(
+                    (Symbol::new(env, "claim_filed"), Symbol::new(env, "user")),
+                    (
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "amount"), *amount,
+                        Symbol::new(env, "reason"), reason.clone(),
                     )
                 );
             }
@@ -1938,6 +1989,30 @@ pub fn compute_user_fee_bps(env: Env, user: Address, utilization_bps: i128, acti
     fee
 }
 
+// ---- Insurance & Safety ----
+pub fn set_insurance_params(env: Env, caller: String, premium_bps: i128, coverage_cap: i128) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    ProtocolConfig::require_admin(&env, &caller_addr)?;
+    AssetRegistryStorage::save_insurance(&env, premium_bps, coverage_cap);
+    ProtocolEvent::InsuranceParamsUpdated(premium_bps, coverage_cap).emit(&env);
+    Ok(())
+}
+pub fn get_insurance_params(env: Env) -> (i128, i128) { AssetRegistryStorage::get_insurance(&env) }
+pub fn set_circuit_breaker(env: Env, caller: String, flag: bool) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    ProtocolConfig::require_admin(&env, &caller_addr)?;
+    AssetRegistryStorage::set_breaker(&env, flag);
+    ProtocolEvent::CircuitBreaker(flag).emit(&env);
+    Ok(())
+}
+pub fn is_circuit_breaker(env: Env) -> bool { AssetRegistryStorage::get_breaker(&env) }
+pub fn file_insurance_claim(env: Env, user: String, amount: i128, reason: Symbol) -> Result<(), ProtocolError> {
+    if user.is_empty() || amount <= 0 { return Err(ProtocolError::InvalidInput); }
+    let user_addr = Address::from_string(&user);
+    ProtocolEvent::ClaimFiled(user_addr, amount, reason).emit(&env);
+    Ok(())
+}
+
 // ---- Advanced Liquidation: Auction Scaffold ----
 pub fn start_liquidation_auction(env: Env, caller: String, user: Address, asset: Address, debt_portion: i128) -> Result<(), ProtocolError> {
     let caller_addr = Address::from_string(&caller);
@@ -2467,6 +2542,12 @@ impl Contract {
         AssetRegistryStorage::set_base_token(&env, &token);
         Ok(())
     }
+    // Insurance & Safety
+    pub fn set_insurance_params(env: Env, caller: String, premium_bps: i128, coverage_cap: i128) -> Result<(), ProtocolError> { set_insurance_params(env, caller, premium_bps, coverage_cap) }
+    pub fn get_insurance_params(env: Env) -> (i128, i128) { get_insurance_params(env) }
+    pub fn set_circuit_breaker(env: Env, caller: String, flag: bool) -> Result<(), ProtocolError> { set_circuit_breaker(env, caller, flag) }
+    pub fn is_circuit_breaker(env: Env) -> bool { is_circuit_breaker(env) }
+    pub fn file_insurance_claim(env: Env, user: String, amount: i128, reason: Symbol) -> Result<(), ProtocolError> { file_insurance_claim(env, user, amount, reason) }
     // Fees
     pub fn set_fees(env: Env, caller: String, base_bps: i128, tier1_bps: i128) -> Result<(), ProtocolError> { set_fees(env, caller, base_bps, tier1_bps) }
     pub fn get_fees(env: Env) -> (i128, i128) { get_fees(env) }
