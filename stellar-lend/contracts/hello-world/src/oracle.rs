@@ -20,6 +20,8 @@ pub struct OracleStorage;
 impl OracleStorage {
     fn sources_key(env: &Env) -> Symbol { Symbol::new(env, "oracle_sources") }
     fn heartbeat_ttl_key(env: &Env) -> Symbol { Symbol::new(env, "oracle_heartbeat_ttl") }
+    fn mode_key(env: &Env) -> Symbol { Symbol::new(env, "oracle_mode") }
+    fn perf_count_key(env: &Env) -> Symbol { Symbol::new(env, "oracle_perf_count") }
 
     pub fn get_sources(env: &Env, asset: &Address) -> Vec<OracleSource> {
         let key = (Self::sources_key(env), asset.clone());
@@ -37,6 +39,14 @@ impl OracleStorage {
 
     pub fn set_heartbeat_ttl(env: &Env, ttl: u64) {
         env.storage().instance().set(&Self::heartbeat_ttl_key(env), &ttl);
+    }
+
+    pub fn set_mode(env: &Env, mode: i128) { env.storage().instance().set(&Self::mode_key(env), &mode); }
+    pub fn get_mode(env: &Env) -> i128 { env.storage().instance().get(&Self::mode_key(env)).unwrap_or(0) } // 0=median,1=twap
+    pub fn inc_perf(env: &Env) -> i128 {
+        let cur: i128 = env.storage().instance().get(&Self::perf_count_key(env)).unwrap_or(0) + 1;
+        env.storage().instance().set(&Self::perf_count_key(env), &cur);
+        cur
     }
 }
 
@@ -84,12 +94,25 @@ impl Oracle {
     /// Aggregate prices using median; returns None if no healthy sources
     pub fn aggregate_price(env: &Env, asset: &Address) -> Option<i128> {
         let mut prices = Self::fetch_prices(env, asset);
+        OracleStorage::inc_perf(env);
         let n = prices.len();
         if n == 0 { return None; }
-        // Simple selection sort for no_std friendliness
-        for i in 0..n { for j in i+1..n { if prices.get(i).unwrap() > prices.get(j).unwrap() { let a = prices.get(i).unwrap(); let b = prices.get(j).unwrap(); prices.set(i, b); prices.set(j, a); } } }
-        let mid = n / 2;
-        let med = if n % 2 == 1 { prices.get(mid).unwrap() } else { (prices.get(mid-1).unwrap() + prices.get(mid).unwrap()) / 2 };
-        Some(med)
+        let mode = OracleStorage::get_mode(env);
+        if mode == 1 {
+            // TWAP approximation: simple average
+            let mut sum: i128 = 0;
+            for i in 0..n { sum += prices.get(i).unwrap_or(0); }
+            Some(sum / (n as i128))
+        } else {
+            // Median with outlier trim (drop max and min if enough sources)
+            for i in 0..n { for j in i+1..n { if prices.get(i).unwrap() > prices.get(j).unwrap() { let a = prices.get(i).unwrap(); let b = prices.get(j).unwrap(); prices.set(i, b); prices.set(j, a); } } }
+            let mut start = 0; let mut end = n;
+            if n >= 3 { start = 1; end = n-1; }
+            let span = end - start;
+            if span == 0 { return Some(prices.get(0).unwrap()); }
+            let mid = start + span / 2;
+            let med = if span % 2 == 1 { prices.get(mid).unwrap() } else { (prices.get(mid-1).unwrap() + prices.get(mid).unwrap()) / 2 };
+            Some(med)
+        }
     }
 }
