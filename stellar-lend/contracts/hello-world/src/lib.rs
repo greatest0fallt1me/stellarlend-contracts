@@ -2391,6 +2391,12 @@ impl Contract {
         OracleStorage::set_heartbeat_ttl(&env, ttl);
         Ok(())
     }
+    pub fn oracle_set_mode(env: Env, caller: String, mode: i128) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+        OracleStorage::set_mode(&env, mode);
+        Ok(())
+    }
 
     // Compliance entrypoints
     pub fn set_kyc_status(env: Env, caller: String, user: Address, status: bool) -> Result<(), ProtocolError> {
