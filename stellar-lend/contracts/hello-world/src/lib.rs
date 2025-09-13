@@ -2495,4 +2495,13 @@ impl Contract {
     }
     pub fn gov_queue(env: Env, id: u64) -> Proposal { Governance::queue(&env, id) }
     pub fn gov_execute(env: Env, id: u64) -> Proposal { Governance::execute(&env, id) }
+    pub fn gov_delegate(env: Env, from: String, to: String) {
+        let from_addr = Address::from_string(&from);
+        let to_addr = Address::from_string(&to);
+        Governance::delegate(&env, &from_addr, &to_addr);
+    }
+    pub fn gov_get_delegate(env: Env, from: String) -> Option<Address> {
+        let from_addr = Address::from_string(&from);
+        Governance::get_delegate(&env, &from_addr)
+    }
 }
