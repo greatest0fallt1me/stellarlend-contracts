@@ -443,6 +443,7 @@ impl AssetRegistryStorage {
     fn kyc_map_key(env: &Env) -> Symbol { Symbol::new(env, "kyc_map") }
     fn mm_params_key(env: &Env) -> Symbol { Symbol::new(env, "mm_params") }
     fn webhook_registry_key(env: &Env) -> Symbol { Symbol::new(env, "webhook_registry") }
+    fn fees_key(env: &Env) -> Symbol { Symbol::new(env, "fees_config") }
 
     pub fn get_params_map(env: &Env) -> Map<Address, AssetParams> {
         env.storage().instance().get(&Self::params_key(env)).unwrap_or_else(|| Map::new(env))
@@ -549,6 +550,14 @@ impl AssetRegistryStorage {
 
     pub fn put_webhooks(env: &Env, map: &Map<Symbol, Address>) {
         env.storage().instance().set(&Self::webhook_registry_key(env), map);
+    }
+
+    pub fn save_fees(env: &Env, base_bps: i128, tier1_bps: i128) {
+        env.storage().instance().set(&Self::fees_key(env), &(base_bps, tier1_bps));
+    }
+
+    pub fn get_fees(env: &Env) -> (i128, i128) {
+        env.storage().instance().get(&Self::fees_key(env)).unwrap_or((5, 3))
     }
 
     pub fn get_correlations(env: &Env) -> Map<PairKey, i128> {
@@ -838,6 +847,8 @@ pub enum ProtocolEvent {
     // Security
     BugReportLogged(Address, Symbol), // reporter, code
     AuditTrail(Symbol, Symbol), // action, ref
+    // Fees
+    FeesUpdated(i128, i128), // base_bps, tier1_bps
 }
 
 impl ProtocolEvent {
@@ -1139,6 +1150,15 @@ impl ProtocolEvent {
                     (
                         Symbol::new(env, "action"), action.clone(),
                         Symbol::new(env, "ref"), reference.clone(),
+                    )
+                );
+            }
+            ProtocolEvent::FeesUpdated(base, tier1) => {
+                env.events().publish(
+                    (Symbol::new(env, "fees_updated"), Symbol::new(env, "base")),
+                    (
+                        Symbol::new(env, "base"), *base,
+                        Symbol::new(env, "tier1"), *tier1,
                     )
                 );
             }
@@ -1897,6 +1917,27 @@ pub fn set_asset_price(env: Env, caller: String, asset: Address, price: i128) ->
     Ok(())
 }
 
+// ---- Fees: dynamic/tiered configuration and computation ----
+pub fn set_fees(env: Env, caller: String, base_bps: i128, tier1_bps: i128) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    ProtocolConfig::require_admin(&env, &caller_addr)?;
+    if base_bps < 0 || tier1_bps < 0 { return Err(ProtocolError::InvalidInput); }
+    AssetRegistryStorage::save_fees(&env, base_bps, tier1_bps);
+    ProtocolEvent::FeesUpdated(base_bps, tier1_bps).emit(&env);
+    Ok(())
+}
+
+pub fn get_fees(env: Env) -> (i128, i128) { AssetRegistryStorage::get_fees(&env) }
+
+pub fn compute_user_fee_bps(env: Env, user: Address, utilization_bps: i128, activity_score: i128) -> i128 {
+    let (base, tier1) = AssetRegistryStorage::get_fees(&env);
+    let util_adj = utilization_bps / 100; // simple 1% of util
+    let tier_adj = if activity_score > 100 { -tier1 } else { 0 };
+    let mut fee = base + util_adj + tier_adj;
+    if fee < 0 { fee = 0; }
+    fee
+}
+
 // ---- Advanced Liquidation: Auction Scaffold ----
 pub fn start_liquidation_auction(env: Env, caller: String, user: Address, asset: Address, debt_portion: i128) -> Result<(), ProtocolError> {
     let caller_addr = Address::from_string(&caller);
@@ -2426,6 +2467,10 @@ impl Contract {
         AssetRegistryStorage::set_base_token(&env, &token);
         Ok(())
     }
+    // Fees
+    pub fn set_fees(env: Env, caller: String, base_bps: i128, tier1_bps: i128) -> Result<(), ProtocolError> { set_fees(env, caller, base_bps, tier1_bps) }
+    pub fn get_fees(env: Env) -> (i128, i128) { get_fees(env) }
+    pub fn compute_user_fee_bps(env: Env, user: Address, utilization_bps: i128, activity_score: i128) -> i128 { compute_user_fee_bps(env, user, utilization_bps, activity_score) }
 
     // Governance entrypoints
     pub fn gov_set_quorum_bps(env: Env, caller: String, bps: i128) -> Result<(), ProtocolError> {
