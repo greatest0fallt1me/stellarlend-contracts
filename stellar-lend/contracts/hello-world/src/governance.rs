@@ -31,6 +31,7 @@ impl GovStorage {
     fn counter_key(env: &Env) -> Symbol { Symbol::new(env, "gov_counter") }
     fn quorum_bps_key(env: &Env) -> Symbol { Symbol::new(env, "gov_quorum_bps") }
     fn timelock_key(env: &Env) -> Symbol { Symbol::new(env, "gov_timelock") }
+    fn delegation_key(env: &Env) -> Symbol { Symbol::new(env, "gov_delegation") }
 
     pub fn next_id(env: &Env) -> u64 {
         let id: u64 = env.storage().instance().get(&Self::counter_key(env)).unwrap_or(0);
@@ -100,5 +101,14 @@ impl Governance {
         GovStorage::save_proposal(env, &p);
         p
     }
-}
 
+    pub fn delegate(env: &Env, from: &Address, to: &Address) {
+        let key = (GovStorage::delegation_key(env), from.clone());
+        env.storage().instance().set(&key, to);
+    }
+
+    pub fn get_delegate(env: &Env, from: &Address) -> Option<Address> {
+        let key = (GovStorage::delegation_key(env), from.clone());
+        env.storage().instance().get(&key)
+    }
+}
