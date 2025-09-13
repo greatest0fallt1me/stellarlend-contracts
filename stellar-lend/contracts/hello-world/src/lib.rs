@@ -440,6 +440,7 @@ impl AssetRegistryStorage {
     fn base_token_key(env: &Env) -> Symbol { Symbol::new(env, "base_token") }
     fn auction_book_key(env: &Env) -> Symbol { Symbol::new(env, "auction_book") }
     fn corr_key(env: &Env) -> Symbol { Symbol::new(env, "asset_correlations") }
+    fn kyc_map_key(env: &Env) -> Symbol { Symbol::new(env, "kyc_map") }
 
     pub fn get_params_map(env: &Env) -> Map<Address, AssetParams> {
         env.storage().instance().get(&Self::params_key(env)).unwrap_or_else(|| Map::new(env))
@@ -519,6 +520,16 @@ impl AssetRegistryStorage {
 
     pub fn put_auction_book(env: &Env, map: &Map<Address, LiquidationAuction>) {
         env.storage().instance().set(&Self::auction_book_key(env), map);
+    }
+
+    
+
+    pub fn get_kyc_map(env: &Env) -> Map<Address, bool> {
+        env.storage().instance().get(&Self::kyc_map_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+
+    pub fn put_kyc_map(env: &Env, map: &Map<Address, bool>) {
+        env.storage().instance().set(&Self::kyc_map_key(env), map);
     }
 
     pub fn get_correlations(env: &Env) -> Map<PairKey, i128> {
@@ -797,6 +808,9 @@ pub enum ProtocolEvent {
     // Performance & Ops
     PerfMetric(Symbol, i128), // metric_name, value
     CacheUpdated(Symbol, Symbol), // cache_key, op (set/evict)
+    // Compliance
+    ComplianceKycUpdated(Address, bool),
+    ComplianceAlert(Address, Symbol),
 }
 
 impl ProtocolEvent {
@@ -1035,6 +1049,24 @@ impl ProtocolEvent {
                     (
                         Symbol::new(env, "key"), key.clone(),
                         Symbol::new(env, "op"), op.clone(),
+                    )
+                );
+            }
+            ProtocolEvent::ComplianceKycUpdated(user, status) => {
+                env.events().publish(
+                    (Symbol::new(env, "kyc_updated"), Symbol::new(env, "user")),
+                    (
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "status"), *status,
+                    )
+                );
+            }
+            ProtocolEvent::ComplianceAlert(user, code) => {
+                env.events().publish(
+                    (Symbol::new(env, "compliance_alert"), Symbol::new(env, "user")),
+                    (
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "code"), code.clone(),
                     )
                 );
             }
@@ -1690,6 +1722,28 @@ pub fn get_portfolio_risk_ratio(env: Env, user: String) -> Result<i128, Protocol
     Ok(ratio - penalty)
 }
 
+// ---- Compliance: KYC/AML scaffolding ----
+pub fn set_kyc_status(env: Env, caller: String, user: Address, status: bool) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    ProtocolConfig::require_admin(&env, &caller_addr)?;
+    let mut map = AssetRegistryStorage::get_kyc_map(&env);
+    map.set(user.clone(), status);
+    AssetRegistryStorage::put_kyc_map(&env, &map);
+    ProtocolEvent::ComplianceKycUpdated(user, status).emit(&env);
+    Ok(())
+}
+
+pub fn get_kyc_status(env: Env, user: Address) -> bool {
+    let map = AssetRegistryStorage::get_kyc_map(&env);
+    map.get(user).unwrap_or(false)
+}
+
+pub fn report_compliance_event(env: Env, reporter: String, user: Address, code: Symbol) -> Result<(), ProtocolError> {
+    if reporter.is_empty() { return Err(ProtocolError::InvalidAddress); }
+    ProtocolEvent::ComplianceAlert(user, code).emit(&env);
+    Ok(())
+}
+
 // ---- Admin helpers for cross-asset ----
 
 /// Add or update supported asset params
@@ -2213,6 +2267,15 @@ impl Contract {
         ProtocolConfig::require_admin(&env, &caller_addr)?;
         OracleStorage::set_heartbeat_ttl(&env, ttl);
         Ok(())
+    }
+
+    // Compliance entrypoints
+    pub fn set_kyc_status(env: Env, caller: String, user: Address, status: bool) -> Result<(), ProtocolError> {
+        set_kyc_status(env, caller, user, status)
+    }
+    pub fn get_kyc_status(env: Env, user: Address) -> bool { get_kyc_status(env, user) }
+    pub fn report_compliance_event(env: Env, reporter: String, user: Address, code: Symbol) -> Result<(), ProtocolError> {
+        report_compliance_event(env, reporter, user, code)
     }
 
     // Token transfer admin controls
