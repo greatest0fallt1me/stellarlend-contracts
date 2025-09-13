@@ -835,6 +835,9 @@ pub enum ProtocolEvent {
     MMIncentiveAccrued(Address, i128), // user, amount
     // Integration/API
     WebhookRegistered(Address, Symbol), // target, topic
+    // Security
+    BugReportLogged(Address, Symbol), // reporter, code
+    AuditTrail(Symbol, Symbol), // action, ref
 }
 
 impl ProtocolEvent {
@@ -1118,6 +1121,24 @@ impl ProtocolEvent {
                     (
                         Symbol::new(env, "target"), target.clone(),
                         Symbol::new(env, "topic"), topic.clone(),
+                    )
+                );
+            }
+            ProtocolEvent::BugReportLogged(reporter, code) => {
+                env.events().publish(
+                    (Symbol::new(env, "bug_report"), Symbol::new(env, "reporter")),
+                    (
+                        Symbol::new(env, "reporter"), reporter.clone(),
+                        Symbol::new(env, "code"), code.clone(),
+                    )
+                );
+            }
+            ProtocolEvent::AuditTrail(action, reference) => {
+                env.events().publish(
+                    (Symbol::new(env, "audit_trail"), action.clone()),
+                    (
+                        Symbol::new(env, "action"), action.clone(),
+                        Symbol::new(env, "ref"), reference.clone(),
                     )
                 );
             }
@@ -1828,6 +1849,18 @@ pub fn get_system_overview(env: Env) -> (i128, i128, i128, i128) {
     get_system_stats(env).unwrap_or((0,0,0,0))
 }
 
+// ---- Security: logging & audit ----
+pub fn log_bug_report(env: Env, reporter: String, code: Symbol) -> Result<(), ProtocolError> {
+    if reporter.is_empty() { return Err(ProtocolError::InvalidAddress); }
+    let reporter_addr = Address::from_string(&reporter);
+    ProtocolEvent::BugReportLogged(reporter_addr, code).emit(&env);
+    Ok(())
+}
+
+pub fn log_audit_event(env: Env, action: Symbol, reference: Symbol) {
+    ProtocolEvent::AuditTrail(action, reference).emit(&env);
+}
+
 // ---- Admin helpers for cross-asset ----
 
 /// Add or update supported asset params
@@ -2335,6 +2368,8 @@ impl Contract {
         register_webhook(env, caller, topic, target)
     }
     pub fn get_system_overview(env: Env) -> (i128, i128, i128, i128) { get_system_overview(env) }
+    pub fn log_bug_report(env: Env, reporter: String, code: Symbol) -> Result<(), ProtocolError> { log_bug_report(env, reporter, code) }
+    pub fn log_audit_event(env: Env, action: Symbol, reference: Symbol) { log_audit_event(env, action, reference) }
 
     // Oracle admin controls
     pub fn oracle_set_source(env: Env, caller: String, asset: Address, oracle_addr: Address, weight: i128, last_heartbeat: u64) -> Result<(), ProtocolError> {
