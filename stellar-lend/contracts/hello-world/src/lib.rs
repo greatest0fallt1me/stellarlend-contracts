@@ -602,6 +602,39 @@ impl StateHelper {
     }
 }
 
+/// Simple performance counters and cache storage
+pub struct PerfStorage;
+
+impl PerfStorage {
+    fn counters_key(env: &Env) -> Symbol { Symbol::new(env, "perf_counters") }
+    fn cache_key(env: &Env) -> Symbol { Symbol::new(env, "perf_cache") }
+
+    pub fn inc_counter(env: &Env, name: &Symbol, by: i128) -> i128 {
+        let mut map: Map<Symbol, i128> = env.storage().instance().get(&Self::counters_key(env)).unwrap_or_else(|| Map::new(env));
+        let cur = map.get(name.clone()).unwrap_or(0) + by;
+        map.set(name.clone(), cur);
+        env.storage().instance().set(&Self::counters_key(env), &map);
+        cur
+    }
+
+    pub fn get_counter(env: &Env, name: &Symbol) -> i128 {
+        let map: Map<Symbol, i128> = env.storage().instance().get(&Self::counters_key(env)).unwrap_or_else(|| Map::new(env));
+        map.get(name.clone()).unwrap_or(0)
+    }
+
+    pub fn cache_set(env: &Env, key: &Symbol, val: &Symbol) {
+        let mut map: Map<Symbol, Symbol> = env.storage().instance().get(&Self::cache_key(env)).unwrap_or_else(|| Map::new(env));
+        map.set(key.clone(), val.clone());
+        env.storage().instance().set(&Self::cache_key(env), &map);
+        ProtocolEvent::CacheUpdated(key.clone(), Symbol::new(env, "set")).emit(env);
+    }
+
+    pub fn cache_get(env: &Env, key: &Symbol) -> Option<Symbol> {
+        let map: Map<Symbol, Symbol> = env.storage().instance().get(&Self::cache_key(env)).unwrap_or_else(|| Map::new(env));
+        map.get(key.clone())
+    }
+}
+
 /// Helper for cross-asset positions
 pub struct CrossStateHelper;
 
@@ -761,6 +794,9 @@ pub enum ProtocolEvent {
     AuctionSettled(Address, Address, i128, i128), // winner, user, seized_collateral, repaid_debt
     // Risk monitoring
     RiskAlert(Address, i128), // user, risk_score
+    // Performance & Ops
+    PerfMetric(Symbol, i128), // metric_name, value
+    CacheUpdated(Symbol, Symbol), // cache_key, op (set/evict)
 }
 
 impl ProtocolEvent {
@@ -981,6 +1017,24 @@ impl ProtocolEvent {
                     (
                         Symbol::new(env, "user"), user.clone(),
                         Symbol::new(env, "score"), *score,
+                    )
+                );
+            }
+            ProtocolEvent::PerfMetric(name, value) => {
+                env.events().publish(
+                    (Symbol::new(env, "perf_metric"), name.clone()),
+                    (
+                        Symbol::new(env, "metric"), name.clone(),
+                        Symbol::new(env, "value"), *value,
+                    )
+                );
+            }
+            ProtocolEvent::CacheUpdated(key, op) => {
+                env.events().publish(
+                    (Symbol::new(env, "cache_updated"), key.clone()),
+                    (
+                        Symbol::new(env, "key"), key.clone(),
+                        Symbol::new(env, "op"), op.clone(),
                     )
                 );
             }
