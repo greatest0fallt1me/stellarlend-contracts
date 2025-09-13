@@ -442,6 +442,7 @@ impl AssetRegistryStorage {
     fn corr_key(env: &Env) -> Symbol { Symbol::new(env, "asset_correlations") }
     fn kyc_map_key(env: &Env) -> Symbol { Symbol::new(env, "kyc_map") }
     fn mm_params_key(env: &Env) -> Symbol { Symbol::new(env, "mm_params") }
+    fn webhook_registry_key(env: &Env) -> Symbol { Symbol::new(env, "webhook_registry") }
 
     pub fn get_params_map(env: &Env) -> Map<Address, AssetParams> {
         env.storage().instance().get(&Self::params_key(env)).unwrap_or_else(|| Map::new(env))
@@ -540,6 +541,14 @@ impl AssetRegistryStorage {
 
     pub fn get_mm_params(env: &Env) -> (i128, i128) {
         env.storage().instance().get(&Self::mm_params_key(env)).unwrap_or((50, 1_000_000))
+    }
+
+    pub fn get_webhooks(env: &Env) -> Map<Symbol, Address> {
+        env.storage().instance().get(&Self::webhook_registry_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+
+    pub fn put_webhooks(env: &Env, map: &Map<Symbol, Address>) {
+        env.storage().instance().set(&Self::webhook_registry_key(env), map);
     }
 
     pub fn get_correlations(env: &Env) -> Map<PairKey, i128> {
@@ -824,6 +833,8 @@ pub enum ProtocolEvent {
     // Market making
     MMParamsUpdated(i128, i128), // spread_bps, inventory_cap
     MMIncentiveAccrued(Address, i128), // user, amount
+    // Integration/API
+    WebhookRegistered(Address, Symbol), // target, topic
 }
 
 impl ProtocolEvent {
@@ -1098,6 +1109,15 @@ impl ProtocolEvent {
                     (
                         Symbol::new(env, "user"), user.clone(),
                         Symbol::new(env, "amount"), *amount,
+                    )
+                );
+            }
+            ProtocolEvent::WebhookRegistered(target, topic) => {
+                env.events().publish(
+                    (Symbol::new(env, "webhook_registered"), Symbol::new(env, "target")),
+                    (
+                        Symbol::new(env, "target"), target.clone(),
+                        Symbol::new(env, "topic"), topic.clone(),
                     )
                 );
             }
@@ -1793,6 +1813,21 @@ pub fn accrue_mm_incentive(env: Env, user: Address, amount: i128) -> Result<(), 
     Ok(())
 }
 
+// ---- Integration/API: webhook registry and basic views ----
+pub fn register_webhook(env: Env, caller: String, topic: Symbol, target: Address) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    ProtocolConfig::require_admin(&env, &caller_addr)?;
+    let mut map = AssetRegistryStorage::get_webhooks(&env);
+    map.set(topic.clone(), target.clone());
+    AssetRegistryStorage::put_webhooks(&env, &map);
+    ProtocolEvent::WebhookRegistered(target, topic).emit(&env);
+    Ok(())
+}
+
+pub fn get_system_overview(env: Env) -> (i128, i128, i128, i128) {
+    get_system_stats(env).unwrap_or((0,0,0,0))
+}
+
 // ---- Admin helpers for cross-asset ----
 
 /// Add or update supported asset params
@@ -2296,6 +2331,10 @@ impl Contract {
     pub fn get_user_risk(env: Env, user: String) -> Result<(i128, i128, i128, u64), ProtocolError> {
         get_user_risk(env, user)
     }
+    pub fn register_webhook(env: Env, caller: String, topic: Symbol, target: Address) -> Result<(), ProtocolError> {
+        register_webhook(env, caller, topic, target)
+    }
+    pub fn get_system_overview(env: Env) -> (i128, i128, i128, i128) { get_system_overview(env) }
 
     // Oracle admin controls
     pub fn oracle_set_source(env: Env, caller: String, asset: Address, oracle_addr: Address, weight: i128, last_heartbeat: u64) -> Result<(), ProtocolError> {
