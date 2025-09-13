@@ -440,6 +440,8 @@ impl AssetRegistryStorage {
     fn base_token_key(env: &Env) -> Symbol { Symbol::new(env, "base_token") }
     fn auction_book_key(env: &Env) -> Symbol { Symbol::new(env, "auction_book") }
     fn corr_key(env: &Env) -> Symbol { Symbol::new(env, "asset_correlations") }
+    fn kyc_map_key(env: &Env) -> Symbol { Symbol::new(env, "kyc_map") }
+    fn mm_params_key(env: &Env) -> Symbol { Symbol::new(env, "mm_params") }
 
     pub fn get_params_map(env: &Env) -> Map<Address, AssetParams> {
         env.storage().instance().get(&Self::params_key(env)).unwrap_or_else(|| Map::new(env))
@@ -519,6 +521,25 @@ impl AssetRegistryStorage {
 
     pub fn put_auction_book(env: &Env, map: &Map<Address, LiquidationAuction>) {
         env.storage().instance().set(&Self::auction_book_key(env), map);
+    }
+
+    
+
+    pub fn get_kyc_map(env: &Env) -> Map<Address, bool> {
+        env.storage().instance().get(&Self::kyc_map_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+
+    pub fn put_kyc_map(env: &Env, map: &Map<Address, bool>) {
+        env.storage().instance().set(&Self::kyc_map_key(env), map);
+    }
+
+    pub fn save_mm_params(env: &Env, spread_bps: i128, inventory_cap: i128) {
+        let key = Self::mm_params_key(env);
+        env.storage().instance().set(&key, &(spread_bps, inventory_cap));
+    }
+
+    pub fn get_mm_params(env: &Env) -> (i128, i128) {
+        env.storage().instance().get(&Self::mm_params_key(env)).unwrap_or((50, 1_000_000))
     }
 
     pub fn get_correlations(env: &Env) -> Map<PairKey, i128> {
@@ -797,6 +818,12 @@ pub enum ProtocolEvent {
     // Performance & Ops
     PerfMetric(Symbol, i128), // metric_name, value
     CacheUpdated(Symbol, Symbol), // cache_key, op (set/evict)
+    // Compliance
+    ComplianceKycUpdated(Address, bool),
+    ComplianceAlert(Address, Symbol),
+    // Market making
+    MMParamsUpdated(i128, i128), // spread_bps, inventory_cap
+    MMIncentiveAccrued(Address, i128), // user, amount
 }
 
 impl ProtocolEvent {
@@ -1035,6 +1062,42 @@ impl ProtocolEvent {
                     (
                         Symbol::new(env, "key"), key.clone(),
                         Symbol::new(env, "op"), op.clone(),
+                    )
+                );
+            }
+            ProtocolEvent::ComplianceKycUpdated(user, status) => {
+                env.events().publish(
+                    (Symbol::new(env, "kyc_updated"), Symbol::new(env, "user")),
+                    (
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "status"), *status,
+                    )
+                );
+            }
+            ProtocolEvent::ComplianceAlert(user, code) => {
+                env.events().publish(
+                    (Symbol::new(env, "compliance_alert"), Symbol::new(env, "user")),
+                    (
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "code"), code.clone(),
+                    )
+                );
+            }
+            ProtocolEvent::MMParamsUpdated(spread_bps, cap) => {
+                env.events().publish(
+                    (Symbol::new(env, "mm_params_updated"), Symbol::new(env, "spread_bps")),
+                    (
+                        Symbol::new(env, "spread_bps"), *spread_bps,
+                        Symbol::new(env, "inventory_cap"), *cap,
+                    )
+                );
+            }
+            ProtocolEvent::MMIncentiveAccrued(user, amount) => {
+                env.events().publish(
+                    (Symbol::new(env, "mm_incentive"), Symbol::new(env, "user")),
+                    (
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "amount"), *amount,
                     )
                 );
             }
@@ -1690,6 +1753,46 @@ pub fn get_portfolio_risk_ratio(env: Env, user: String) -> Result<i128, Protocol
     Ok(ratio - penalty)
 }
 
+// ---- Compliance: KYC/AML scaffolding ----
+pub fn set_kyc_status(env: Env, caller: String, user: Address, status: bool) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    ProtocolConfig::require_admin(&env, &caller_addr)?;
+    let mut map = AssetRegistryStorage::get_kyc_map(&env);
+    map.set(user.clone(), status);
+    AssetRegistryStorage::put_kyc_map(&env, &map);
+    ProtocolEvent::ComplianceKycUpdated(user, status).emit(&env);
+    Ok(())
+}
+
+pub fn get_kyc_status(env: Env, user: Address) -> bool {
+    let map = AssetRegistryStorage::get_kyc_map(&env);
+    map.get(user).unwrap_or(false)
+}
+
+pub fn report_compliance_event(env: Env, reporter: String, user: Address, code: Symbol) -> Result<(), ProtocolError> {
+    if reporter.is_empty() { return Err(ProtocolError::InvalidAddress); }
+    ProtocolEvent::ComplianceAlert(user, code).emit(&env);
+    Ok(())
+}
+
+// ---- Market Making: params & incentives ----
+pub fn set_mm_params(env: Env, caller: String, spread_bps: i128, inventory_cap: i128) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    ProtocolConfig::require_admin(&env, &caller_addr)?;
+    if spread_bps < 0 || inventory_cap < 0 { return Err(ProtocolError::InvalidInput); }
+    AssetRegistryStorage::save_mm_params(&env, spread_bps, inventory_cap);
+    ProtocolEvent::MMParamsUpdated(spread_bps, inventory_cap).emit(&env);
+    Ok(())
+}
+
+pub fn get_mm_params(env: Env) -> (i128, i128) { AssetRegistryStorage::get_mm_params(&env) }
+
+pub fn accrue_mm_incentive(env: Env, user: Address, amount: i128) -> Result<(), ProtocolError> {
+    if amount <= 0 { return Err(ProtocolError::InvalidAmount); }
+    ProtocolEvent::MMIncentiveAccrued(user, amount).emit(&env);
+    Ok(())
+}
+
 // ---- Admin helpers for cross-asset ----
 
 /// Add or update supported asset params
@@ -2214,6 +2317,21 @@ impl Contract {
         OracleStorage::set_heartbeat_ttl(&env, ttl);
         Ok(())
     }
+
+    // Compliance entrypoints
+    pub fn set_kyc_status(env: Env, caller: String, user: Address, status: bool) -> Result<(), ProtocolError> {
+        set_kyc_status(env, caller, user, status)
+    }
+    pub fn get_kyc_status(env: Env, user: Address) -> bool { get_kyc_status(env, user) }
+    pub fn report_compliance_event(env: Env, reporter: String, user: Address, code: Symbol) -> Result<(), ProtocolError> {
+        report_compliance_event(env, reporter, user, code)
+    }
+    // MM
+    pub fn set_mm_params(env: Env, caller: String, spread_bps: i128, inventory_cap: i128) -> Result<(), ProtocolError> {
+        set_mm_params(env, caller, spread_bps, inventory_cap)
+    }
+    pub fn get_mm_params(env: Env) -> (i128, i128) { get_mm_params(env) }
+    pub fn accrue_mm_incentive(env: Env, user: Address, amount: i128) -> Result<(), ProtocolError> { accrue_mm_incentive(env, user, amount) }
 
     // Token transfer admin controls
     pub fn set_enforce_transfers(env: Env, caller: String, flag: bool) -> Result<(), ProtocolError> {
