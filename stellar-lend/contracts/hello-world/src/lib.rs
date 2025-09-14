@@ -440,13 +440,8 @@ impl AssetRegistryStorage {
     fn base_token_key(env: &Env) -> Symbol { Symbol::new(env, "base_token") }
     fn auction_book_key(env: &Env) -> Symbol { Symbol::new(env, "auction_book") }
     fn corr_key(env: &Env) -> Symbol { Symbol::new(env, "asset_correlations") }
-    fn liq_queue_key(env: &Env) -> Symbol { Symbol::new(env, "liquidation_queue") }
-    fn kyc_map_key(env: &Env) -> Symbol { Symbol::new(env, "kyc_map") }
-    fn mm_params_key(env: &Env) -> Symbol { Symbol::new(env, "mm_params") }
-    fn webhook_registry_key(env: &Env) -> Symbol { Symbol::new(env, "webhook_registry") }
-    fn fees_key(env: &Env) -> Symbol { Symbol::new(env, "fees_config") }
-    fn insurance_key(env: &Env) -> Symbol { Symbol::new(env, "insurance_params") }
-    fn breaker_key(env: &Env) -> Symbol { Symbol::new(env, "circuit_breaker") }
+    fn price_cache_key(env: &Env) -> Symbol { Symbol::new(env, "price_cache_map") }
+    fn price_cache_ttl_key(env: &Env) -> Symbol { Symbol::new(env, "price_cache_ttl") }
 
     pub fn get_params_map(env: &Env) -> Map<Address, AssetParams> {
         env.storage().instance().get(&Self::params_key(env)).unwrap_or_else(|| Map::new(env))
@@ -528,55 +523,6 @@ impl AssetRegistryStorage {
         env.storage().instance().set(&Self::auction_book_key(env), map);
     }
 
-    
-
-    pub fn get_kyc_map(env: &Env) -> Map<Address, bool> {
-        env.storage().instance().get(&Self::kyc_map_key(env)).unwrap_or_else(|| Map::new(env))
-    }
-
-    pub fn put_kyc_map(env: &Env, map: &Map<Address, bool>) {
-        env.storage().instance().set(&Self::kyc_map_key(env), map);
-    }
-
-    pub fn get_liq_queue(env: &Env) -> Vec<Address> {
-        env.storage().instance().get(&Self::liq_queue_key(env)).unwrap_or_else(|| Vec::new(env))
-    }
-    pub fn put_liq_queue(env: &Env, q: &Vec<Address>) { env.storage().instance().set(&Self::liq_queue_key(env), q); }
-
-    pub fn save_mm_params(env: &Env, spread_bps: i128, inventory_cap: i128) {
-        let key = Self::mm_params_key(env);
-        env.storage().instance().set(&key, &(spread_bps, inventory_cap));
-    }
-
-    pub fn get_mm_params(env: &Env) -> (i128, i128) {
-        env.storage().instance().get(&Self::mm_params_key(env)).unwrap_or((50, 1_000_000))
-    }
-
-    pub fn get_webhooks(env: &Env) -> Map<Symbol, Address> {
-        env.storage().instance().get(&Self::webhook_registry_key(env)).unwrap_or_else(|| Map::new(env))
-    }
-
-    pub fn put_webhooks(env: &Env, map: &Map<Symbol, Address>) {
-        env.storage().instance().set(&Self::webhook_registry_key(env), map);
-    }
-
-    pub fn save_fees(env: &Env, base_bps: i128, tier1_bps: i128) {
-        env.storage().instance().set(&Self::fees_key(env), &(base_bps, tier1_bps));
-    }
-
-    pub fn get_fees(env: &Env) -> (i128, i128) {
-        env.storage().instance().get(&Self::fees_key(env)).unwrap_or((5, 3))
-    }
-
-    pub fn save_insurance(env: &Env, premium_bps: i128, coverage_cap: i128) {
-        env.storage().instance().set(&Self::insurance_key(env), &(premium_bps, coverage_cap));
-    }
-    pub fn get_insurance(env: &Env) -> (i128, i128) {
-        env.storage().instance().get(&Self::insurance_key(env)).unwrap_or((10, 1_000_000))
-    }
-    pub fn set_breaker(env: &Env, flag: bool) { env.storage().instance().set(&Self::breaker_key(env), &flag); }
-    pub fn get_breaker(env: &Env) -> bool { env.storage().instance().get(&Self::breaker_key(env)).unwrap_or(false) }
-
     pub fn get_correlations(env: &Env) -> Map<PairKey, i128> {
         env.storage().instance().get(&Self::corr_key(env)).unwrap_or_else(|| Map::new(env))
     }
@@ -584,6 +530,15 @@ impl AssetRegistryStorage {
     pub fn put_correlations(env: &Env, map: &Map<PairKey, i128>) {
         env.storage().instance().set(&Self::corr_key(env), map);
     }
+
+    pub fn get_price_cache(env: &Env) -> Map<Address, (i128, u64)> {
+        env.storage().instance().get(&Self::price_cache_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+    pub fn put_price_cache(env: &Env, map: &Map<Address, (i128, u64)>) {
+        env.storage().instance().set(&Self::price_cache_key(env), map);
+    }
+    pub fn get_price_cache_ttl(env: &Env) -> u64 { env.storage().instance().get(&Self::price_cache_ttl_key(env)).unwrap_or(30) }
+    pub fn set_price_cache_ttl(env: &Env, ttl: u64) { env.storage().instance().set(&Self::price_cache_ttl_key(env), &ttl); }
 
     pub fn get_user_risk(env: &Env) -> Map<Address, UserRiskState> {
         env.storage().instance().get(&Self::user_risk_key(env)).unwrap_or_else(|| Map::new(env))
@@ -655,39 +610,6 @@ impl StateHelper {
     pub fn get_position(env: &Env, user: &Address) -> Option<Position> {
         let key = Self::position_key(env, user);
         env.storage().instance().get::<Symbol, Position>(&key)
-    }
-}
-
-/// Simple performance counters and cache storage
-pub struct PerfStorage;
-
-impl PerfStorage {
-    fn counters_key(env: &Env) -> Symbol { Symbol::new(env, "perf_counters") }
-    fn cache_key(env: &Env) -> Symbol { Symbol::new(env, "perf_cache") }
-
-    pub fn inc_counter(env: &Env, name: &Symbol, by: i128) -> i128 {
-        let mut map: Map<Symbol, i128> = env.storage().instance().get(&Self::counters_key(env)).unwrap_or_else(|| Map::new(env));
-        let cur = map.get(name.clone()).unwrap_or(0) + by;
-        map.set(name.clone(), cur);
-        env.storage().instance().set(&Self::counters_key(env), &map);
-        cur
-    }
-
-    pub fn get_counter(env: &Env, name: &Symbol) -> i128 {
-        let map: Map<Symbol, i128> = env.storage().instance().get(&Self::counters_key(env)).unwrap_or_else(|| Map::new(env));
-        map.get(name.clone()).unwrap_or(0)
-    }
-
-    pub fn cache_set(env: &Env, key: &Symbol, val: &Symbol) {
-        let mut map: Map<Symbol, Symbol> = env.storage().instance().get(&Self::cache_key(env)).unwrap_or_else(|| Map::new(env));
-        map.set(key.clone(), val.clone());
-        env.storage().instance().set(&Self::cache_key(env), &map);
-        ProtocolEvent::CacheUpdated(key.clone(), Symbol::new(env, "set")).emit(env);
-    }
-
-    pub fn cache_get(env: &Env, key: &Symbol) -> Option<Symbol> {
-        let map: Map<Symbol, Symbol> = env.storage().instance().get(&Self::cache_key(env)).unwrap_or_else(|| Map::new(env));
-        map.get(key.clone())
     }
 }
 
@@ -850,26 +772,6 @@ pub enum ProtocolEvent {
     AuctionSettled(Address, Address, i128, i128), // winner, user, seized_collateral, repaid_debt
     // Risk monitoring
     RiskAlert(Address, i128), // user, risk_score
-    // Performance & Ops
-    PerfMetric(Symbol, i128), // metric_name, value
-    CacheUpdated(Symbol, Symbol), // cache_key, op (set/evict)
-    // Compliance
-    ComplianceKycUpdated(Address, bool),
-    ComplianceAlert(Address, Symbol),
-    // Market making
-    MMParamsUpdated(i128, i128), // spread_bps, inventory_cap
-    MMIncentiveAccrued(Address, i128), // user, amount
-    // Integration/API
-    WebhookRegistered(Address, Symbol), // target, topic
-    // Security
-    BugReportLogged(Address, Symbol), // reporter, code
-    AuditTrail(Symbol, Symbol), // action, ref
-    // Fees
-    FeesUpdated(i128, i128), // base_bps, tier1_bps
-    // Insurance
-    InsuranceParamsUpdated(i128, i128), // premium_bps, coverage_cap
-    CircuitBreaker(bool),
-    ClaimFiled(Address, i128, Symbol), // user, amount, reason
     // Bridge
     BridgeRegistered(String, Address, i128), // network_id, bridge, fee_bps
     BridgeFeeUpdated(String, i128),          // network_id, fee_bps
@@ -1101,133 +1003,6 @@ impl ProtocolEvent {
                     (
                         Symbol::new(env, "user"), user.clone(),
                         Symbol::new(env, "score"), *score,
-                    )
-                );
-            }
-<<<<<<< HEAD
-            ProtocolEvent::PerfMetric(name, value) => {
-                env.events().publish(
-                    (Symbol::new(env, "perf_metric"), name.clone()),
-                    (
-                        Symbol::new(env, "metric"), name.clone(),
-                        Symbol::new(env, "value"), *value,
-                    )
-                );
-            }
-            ProtocolEvent::CacheUpdated(key, op) => {
-                env.events().publish(
-                    (Symbol::new(env, "cache_updated"), key.clone()),
-                    (
-                        Symbol::new(env, "key"), key.clone(),
-                        Symbol::new(env, "op"), op.clone(),
-                    )
-                );
-            }
-            ProtocolEvent::ComplianceKycUpdated(user, status) => {
-                env.events().publish(
-                    (Symbol::new(env, "kyc_updated"), Symbol::new(env, "user")),
-                    (
-                        Symbol::new(env, "user"), user.clone(),
-                        Symbol::new(env, "status"), *status,
-                    )
-                );
-            }
-            ProtocolEvent::ComplianceAlert(user, code) => {
-                env.events().publish(
-                    (Symbol::new(env, "compliance_alert"), Symbol::new(env, "user")),
-                    (
-                        Symbol::new(env, "user"), user.clone(),
-                        Symbol::new(env, "code"), code.clone(),
-                    )
-                );
-            }
-            ProtocolEvent::MMParamsUpdated(spread_bps, cap) => {
-                env.events().publish(
-                    (Symbol::new(env, "mm_params_updated"), Symbol::new(env, "spread_bps")),
-                    (
-                        Symbol::new(env, "spread_bps"), *spread_bps,
-                        Symbol::new(env, "inventory_cap"), *cap,
-                    )
-                );
-            }
-            ProtocolEvent::MMIncentiveAccrued(user, amount) => {
-                env.events().publish(
-                    (Symbol::new(env, "mm_incentive"), Symbol::new(env, "user")),
-                    (
-                        Symbol::new(env, "user"), user.clone(),
-                        Symbol::new(env, "amount"), *amount,
-                    )
-                );
-            }
-            ProtocolEvent::WebhookRegistered(target, topic) => {
-                env.events().publish(
-                    (Symbol::new(env, "webhook_registered"), Symbol::new(env, "target")),
-                    (
-                        Symbol::new(env, "target"), target.clone(),
-                        Symbol::new(env, "topic"), topic.clone(),
-                    )
-                );
-            }
-            ProtocolEvent::BugReportLogged(reporter, code) => {
-                env.events().publish(
-                    (Symbol::new(env, "bug_report"), Symbol::new(env, "reporter")),
-                    (
-                        Symbol::new(env, "reporter"), reporter.clone(),
-                        Symbol::new(env, "code"), code.clone(),
-                    )
-                );
-            }
-            ProtocolEvent::AuditTrail(action, reference) => {
-                env.events().publish(
-                    (Symbol::new(env, "audit_trail"), action.clone()),
-                    (
-                        Symbol::new(env, "action"), action.clone(),
-                        Symbol::new(env, "ref"), reference.clone(),
-                    )
-                );
-            }
-            ProtocolEvent::FeesUpdated(base, tier1) => {
-                env.events().publish(
-                    (Symbol::new(env, "fees_updated"), Symbol::new(env, "base")),
-                    (
-                        Symbol::new(env, "base"), *base,
-                        Symbol::new(env, "tier1"), *tier1,
-                    )
-                );
-            }
-            ProtocolEvent::InsuranceParamsUpdated(premium, cap) => {
-                env.events().publish(
-                    (Symbol::new(env, "insurance_params"), Symbol::new(env, "premium")),
-                    (
-                        Symbol::new(env, "premium"), *premium,
-                        Symbol::new(env, "cap"), *cap,
-                    )
-                );
-            }
-            ProtocolEvent::CircuitBreaker(flag) => {
-                env.events().publish(
-                    (Symbol::new(env, "circuit_breaker"), Symbol::new(env, "flag")),
-                    (
-                        Symbol::new(env, "flag"), *flag,
-                    )
-                );
-            }
-            ProtocolEvent::ClaimFiled(user, amount, reason) => {
-                env.events().publish(
-                    (Symbol::new(env, "claim_filed"), Symbol::new(env, "user")),
-                    (
-                        Symbol::new(env, "user"), user.clone(),
-                        Symbol::new(env, "amount"), *amount,
-                        Symbol::new(env, "reason"), reason.clone(),
-                    )
-                );
-            }
-            ProtocolEvent::FeesUpdated(base, tier1) => {
-                env.events().publish(
-                    (Symbol::new(env, "fees_updated"), Symbol::new(env, "base")),
-                    (
-                        Symbol::new(env, "base"), *base,
-                        Symbol::new(env, "tier1"), *tier1,
                     )
                 );
             }
@@ -2354,6 +2129,20 @@ fn get_asset_price(env: &Env, asset: &Address) -> Result<i128, ProtocolError> {
     Ok(price)
 }
 
+fn get_asset_price_cached(env: &Env, asset: &Address) -> Result<i128, ProtocolError> {
+    // Simple TTL cache over get_asset_price
+    let ttl = AssetRegistryStorage::get_price_cache_ttl(env);
+    let ts = env.ledger().timestamp();
+    let mut cache = AssetRegistryStorage::get_price_cache(env);
+    if let Some((p, t)) = cache.get(asset.clone()) {
+        if ts - t <= ttl { return Ok(p); }
+    }
+    let p = get_asset_price(env, asset)?;
+    cache.set(asset.clone(), (p, ts));
+    AssetRegistryStorage::put_price_cache(env, &cache);
+    Ok(p)
+}
+
 fn get_asset_params(env: &Env, asset: &Address) -> Result<AssetParams, ProtocolError> {
     let params_map = AssetRegistryStorage::get_params_map(env);
     let params = params_map.get(asset.clone()).ok_or(ProtocolError::AssetNotSupported)?;
@@ -2380,7 +2169,7 @@ fn calc_cross_totals(env: &Env, pos: &CrossPosition) -> Result<(i128, i128), Pro
     }
 
     for asset in uniq.iter() {
-        let price = get_asset_price(env, &asset)?; // 1e8 scaled
+        let price = get_asset_price_cached(env, &asset)?; // 1e8 scaled
         let params = get_asset_params(env, &asset)?;
         let c = pos.collateral.get(asset.clone()).unwrap_or(0);
         let d = pos.debt.get(asset.clone()).unwrap_or(0);
@@ -2527,73 +2316,6 @@ pub fn get_portfolio_risk_ratio(env: Env, user: String) -> Result<i128, Protocol
     Ok(ratio - penalty)
 }
 
-// ---- Compliance: KYC/AML scaffolding ----
-pub fn set_kyc_status(env: Env, caller: String, user: Address, status: bool) -> Result<(), ProtocolError> {
-    let caller_addr = Address::from_string(&caller);
-    ProtocolConfig::require_admin(&env, &caller_addr)?;
-    let mut map = AssetRegistryStorage::get_kyc_map(&env);
-    map.set(user.clone(), status);
-    AssetRegistryStorage::put_kyc_map(&env, &map);
-    ProtocolEvent::ComplianceKycUpdated(user, status).emit(&env);
-    Ok(())
-}
-
-pub fn get_kyc_status(env: Env, user: Address) -> bool {
-    let map = AssetRegistryStorage::get_kyc_map(&env);
-    map.get(user).unwrap_or(false)
-}
-
-pub fn report_compliance_event(env: Env, reporter: String, user: Address, code: Symbol) -> Result<(), ProtocolError> {
-    if reporter.is_empty() { return Err(ProtocolError::InvalidAddress); }
-    ProtocolEvent::ComplianceAlert(user, code).emit(&env);
-    Ok(())
-}
-
-// ---- Market Making: params & incentives ----
-pub fn set_mm_params(env: Env, caller: String, spread_bps: i128, inventory_cap: i128) -> Result<(), ProtocolError> {
-    let caller_addr = Address::from_string(&caller);
-    ProtocolConfig::require_admin(&env, &caller_addr)?;
-    if spread_bps < 0 || inventory_cap < 0 { return Err(ProtocolError::InvalidInput); }
-    AssetRegistryStorage::save_mm_params(&env, spread_bps, inventory_cap);
-    ProtocolEvent::MMParamsUpdated(spread_bps, inventory_cap).emit(&env);
-    Ok(())
-}
-
-pub fn get_mm_params(env: Env) -> (i128, i128) { AssetRegistryStorage::get_mm_params(&env) }
-
-pub fn accrue_mm_incentive(env: Env, user: Address, amount: i128) -> Result<(), ProtocolError> {
-    if amount <= 0 { return Err(ProtocolError::InvalidAmount); }
-    ProtocolEvent::MMIncentiveAccrued(user, amount).emit(&env);
-    Ok(())
-}
-
-// ---- Integration/API: webhook registry and basic views ----
-pub fn register_webhook(env: Env, caller: String, topic: Symbol, target: Address) -> Result<(), ProtocolError> {
-    let caller_addr = Address::from_string(&caller);
-    ProtocolConfig::require_admin(&env, &caller_addr)?;
-    let mut map = AssetRegistryStorage::get_webhooks(&env);
-    map.set(topic.clone(), target.clone());
-    AssetRegistryStorage::put_webhooks(&env, &map);
-    ProtocolEvent::WebhookRegistered(target, topic).emit(&env);
-    Ok(())
-}
-
-pub fn get_system_overview(env: Env) -> (i128, i128, i128, i128) {
-    get_system_stats(env).unwrap_or((0,0,0,0))
-}
-
-// ---- Security: logging & audit ----
-pub fn log_bug_report(env: Env, reporter: String, code: Symbol) -> Result<(), ProtocolError> {
-    if reporter.is_empty() { return Err(ProtocolError::InvalidAddress); }
-    let reporter_addr = Address::from_string(&reporter);
-    ProtocolEvent::BugReportLogged(reporter_addr, code).emit(&env);
-    Ok(())
-}
-
-pub fn log_audit_event(env: Env, action: Symbol, reference: Symbol) {
-    ProtocolEvent::AuditTrail(action, reference).emit(&env);
-}
-
 // ---- Admin helpers for cross-asset ----
 
 /// Add or update supported asset params
@@ -2627,51 +2349,6 @@ pub fn set_asset_price(env: Env, caller: String, asset: Address, price: i128) ->
     let mut map = AssetRegistryStorage::get_prices_map(&env);
     map.set(asset, price);
     AssetRegistryStorage::put_prices_map(&env, &map);
-    Ok(())
-}
-
-// ---- Fees: dynamic/tiered configuration and computation ----
-pub fn set_fees(env: Env, caller: String, base_bps: i128, tier1_bps: i128) -> Result<(), ProtocolError> {
-    let caller_addr = Address::from_string(&caller);
-    ProtocolConfig::require_admin(&env, &caller_addr)?;
-    if base_bps < 0 || tier1_bps < 0 { return Err(ProtocolError::InvalidInput); }
-    AssetRegistryStorage::save_fees(&env, base_bps, tier1_bps);
-    ProtocolEvent::FeesUpdated(base_bps, tier1_bps).emit(&env);
-    Ok(())
-}
-
-pub fn get_fees(env: Env) -> (i128, i128) { AssetRegistryStorage::get_fees(&env) }
-
-pub fn compute_user_fee_bps(env: Env, user: Address, utilization_bps: i128, activity_score: i128) -> i128 {
-    let (base, tier1) = AssetRegistryStorage::get_fees(&env);
-    let util_adj = utilization_bps / 100; // simple 1% of util
-    let tier_adj = if activity_score > 100 { -tier1 } else { 0 };
-    let mut fee = base + util_adj + tier_adj;
-    if fee < 0 { fee = 0; }
-    fee
-}
-
-// ---- Insurance & Safety ----
-pub fn set_insurance_params(env: Env, caller: String, premium_bps: i128, coverage_cap: i128) -> Result<(), ProtocolError> {
-    let caller_addr = Address::from_string(&caller);
-    ProtocolConfig::require_admin(&env, &caller_addr)?;
-    AssetRegistryStorage::save_insurance(&env, premium_bps, coverage_cap);
-    ProtocolEvent::InsuranceParamsUpdated(premium_bps, coverage_cap).emit(&env);
-    Ok(())
-}
-pub fn get_insurance_params(env: Env) -> (i128, i128) { AssetRegistryStorage::get_insurance(&env) }
-pub fn set_circuit_breaker(env: Env, caller: String, flag: bool) -> Result<(), ProtocolError> {
-    let caller_addr = Address::from_string(&caller);
-    ProtocolConfig::require_admin(&env, &caller_addr)?;
-    AssetRegistryStorage::set_breaker(&env, flag);
-    ProtocolEvent::CircuitBreaker(flag).emit(&env);
-    Ok(())
-}
-pub fn is_circuit_breaker(env: Env) -> bool { AssetRegistryStorage::get_breaker(&env) }
-pub fn file_insurance_claim(env: Env, user: String, amount: i128, reason: Symbol) -> Result<(), ProtocolError> {
-    if user.is_empty() || amount <= 0 { return Err(ProtocolError::InvalidInput); }
-    let user_addr = Address::from_string(&user);
-    ProtocolEvent::ClaimFiled(user_addr, amount, reason).emit(&env);
     Ok(())
 }
 
@@ -2714,23 +2391,6 @@ pub fn settle_liquidation_auction(env: Env, caller: String, user: Address) -> Re
     AssetRegistryStorage::put_auction_book(&env, &book);
     ProtocolEvent::AuctionSettled(winner, user, seized, repaid).emit(&env);
     Ok(())
-}
-
-// Liquidation queue helpers
-pub fn enqueue_for_liquidation(env: Env, user: Address) {
-    let mut q = AssetRegistryStorage::get_liq_queue(&env);
-    q.push_back(user);
-    AssetRegistryStorage::put_liq_queue(&env, &q);
-}
-pub fn dequeue_liquidation(env: Env) -> Option<Address> {
-    let mut q = AssetRegistryStorage::get_liq_queue(&env);
-    if q.len() == 0 { return None; }
-    let head = q.get(0);
-    // rebuild without head (simple O(n))
-    let mut nq: Vec<Address> = Vec::new(&env);
-    for i in 1..q.len() { nq.push_back(q.get(i).unwrap()); }
-    AssetRegistryStorage::put_liq_queue(&env, &nq);
-    head
 }
 
 /// Admin: set dynamic CF parameters for an asset
@@ -3234,12 +2894,6 @@ impl Contract {
     pub fn get_user_risk(env: Env, user: String) -> Result<(i128, i128, i128, u64), ProtocolError> {
         get_user_risk(env, user)
     }
-    pub fn register_webhook(env: Env, caller: String, topic: Symbol, target: Address) -> Result<(), ProtocolError> {
-        register_webhook(env, caller, topic, target)
-    }
-    pub fn get_system_overview(env: Env) -> (i128, i128, i128, i128) { get_system_overview(env) }
-    pub fn log_bug_report(env: Env, reporter: String, code: Symbol) -> Result<(), ProtocolError> { log_bug_report(env, reporter, code) }
-    pub fn log_audit_event(env: Env, action: Symbol, reference: Symbol) { log_audit_event(env, action, reference) }
 
     // Oracle admin controls
     pub fn oracle_set_source(env: Env, caller: String, asset: Address, oracle_addr: Address, weight: i128, last_heartbeat: u64) -> Result<(), ProtocolError> {
@@ -3261,27 +2915,14 @@ impl Contract {
         OracleStorage::set_heartbeat_ttl(&env, ttl);
         Ok(())
     }
-    pub fn oracle_set_mode(env: Env, caller: String, mode: i128) -> Result<(), ProtocolError> {
+
+    /// Admin: set price cache TTL seconds
+    pub fn set_price_cache_ttl(env: Env, caller: String, ttl: u64) -> Result<(), ProtocolError> {
         let caller_addr = Address::from_string(&caller);
         ProtocolConfig::require_admin(&env, &caller_addr)?;
-        OracleStorage::set_mode(&env, mode);
+        AssetRegistryStorage::set_price_cache_ttl(&env, ttl);
         Ok(())
     }
-
-    // Compliance entrypoints
-    pub fn set_kyc_status(env: Env, caller: String, user: Address, status: bool) -> Result<(), ProtocolError> {
-        set_kyc_status(env, caller, user, status)
-    }
-    pub fn get_kyc_status(env: Env, user: Address) -> bool { get_kyc_status(env, user) }
-    pub fn report_compliance_event(env: Env, reporter: String, user: Address, code: Symbol) -> Result<(), ProtocolError> {
-        report_compliance_event(env, reporter, user, code)
-    }
-    // MM
-    pub fn set_mm_params(env: Env, caller: String, spread_bps: i128, inventory_cap: i128) -> Result<(), ProtocolError> {
-        set_mm_params(env, caller, spread_bps, inventory_cap)
-    }
-    pub fn get_mm_params(env: Env) -> (i128, i128) { get_mm_params(env) }
-    pub fn accrue_mm_incentive(env: Env, user: Address, amount: i128) -> Result<(), ProtocolError> { accrue_mm_incentive(env, user, amount) }
 
     // Token transfer admin controls
     pub fn set_enforce_transfers(env: Env, caller: String, flag: bool) -> Result<(), ProtocolError> {
@@ -3296,19 +2937,6 @@ impl Contract {
         AssetRegistryStorage::set_base_token(&env, &token);
         Ok(())
     }
-    // Insurance & Safety
-    pub fn set_insurance_params(env: Env, caller: String, premium_bps: i128, coverage_cap: i128) -> Result<(), ProtocolError> { set_insurance_params(env, caller, premium_bps, coverage_cap) }
-    pub fn get_insurance_params(env: Env) -> (i128, i128) { get_insurance_params(env) }
-    pub fn set_circuit_breaker(env: Env, caller: String, flag: bool) -> Result<(), ProtocolError> { set_circuit_breaker(env, caller, flag) }
-    pub fn is_circuit_breaker(env: Env) -> bool { is_circuit_breaker(env) }
-    pub fn file_insurance_claim(env: Env, user: String, amount: i128, reason: Symbol) -> Result<(), ProtocolError> { file_insurance_claim(env, user, amount, reason) }
-    // Liquidation queue
-    pub fn enqueue_for_liquidation(env: Env, user: Address) { enqueue_for_liquidation(env, user) }
-    pub fn dequeue_liquidation(env: Env) -> Option<Address> { dequeue_liquidation(env) }
-    // Fees
-    pub fn set_fees(env: Env, caller: String, base_bps: i128, tier1_bps: i128) -> Result<(), ProtocolError> { set_fees(env, caller, base_bps, tier1_bps) }
-    pub fn get_fees(env: Env) -> (i128, i128) { get_fees(env) }
-    pub fn compute_user_fee_bps(env: Env, user: Address, utilization_bps: i128, activity_score: i128) -> i128 { compute_user_fee_bps(env, user, utilization_bps, activity_score) }
 
     // Governance entrypoints
     pub fn gov_set_quorum_bps(env: Env, caller: String, bps: i128) -> Result<(), ProtocolError> {
@@ -3333,15 +2961,6 @@ impl Contract {
     }
     pub fn gov_queue(env: Env, id: u64) -> Proposal { Governance::queue(&env, id) }
     pub fn gov_execute(env: Env, id: u64) -> Proposal { Governance::execute(&env, id) }
-    pub fn gov_delegate(env: Env, from: String, to: String) {
-        let from_addr = Address::from_string(&from);
-        let to_addr = Address::from_string(&to);
-        Governance::delegate(&env, &from_addr, &to_addr);
-    }
-    pub fn gov_get_delegate(env: Env, from: String) -> Option<Address> {
-        let from_addr = Address::from_string(&from);
-        Governance::get_delegate(&env, &from_addr)
-    }
 
     // Bridge admin/user entrypoints
     pub fn register_bridge(env: Env, caller: String, network_id: String, bridge: Address, fee_bps: i128) -> Result<(), ProtocolError> {
