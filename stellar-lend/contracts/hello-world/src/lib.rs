@@ -766,6 +766,10 @@ pub enum ProtocolEvent {
     BridgeFeeUpdated(String, i128),          // network_id, fee_bps
     AssetBridgedIn(Address, String, Address, i128, i128),  // user, network_id, asset, amount, fee
     AssetBridgedOut(Address, String, Address, i128, i128), // user, network_id, asset, amount, fee
+    // Monitoring
+    HealthReported(String),
+    PerformanceReported(i128),
+    SecurityIncident(String),
 }
 
 impl ProtocolEvent {
@@ -1030,6 +1034,24 @@ impl ProtocolEvent {
                         Symbol::new(env, "amount"), *amount,
                         Symbol::new(env, "fee"), *fee,
                     )
+                );
+            }
+            ProtocolEvent::HealthReported(msg) => {
+                env.events().publish(
+                    (Symbol::new(env, "health_report"), Symbol::new(env, "msg")),
+                    (Symbol::new(env, "msg"), msg.clone())
+                );
+            }
+            ProtocolEvent::PerformanceReported(gas) => {
+                env.events().publish(
+                    (Symbol::new(env, "performance_report"), Symbol::new(env, "gas")),
+                    (Symbol::new(env, "gas"), *gas)
+                );
+            }
+            ProtocolEvent::SecurityIncident(msg) => {
+                env.events().publish(
+                    (Symbol::new(env, "security_incident"), Symbol::new(env, "msg")),
+                    (Symbol::new(env, "msg"), msg.clone())
                 );
             }
         }
@@ -1518,6 +1540,56 @@ pub fn data_migrate_bump_version(env: Env, name: Symbol, new_version: u32) -> Re
     DataStorage::save(&env, &name, &b);
     Ok(())
 }
+
+// --- Monitoring & Alerting ---
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct MonitorMetrics {
+    pub last_health: String,
+    pub perf_gas: i128,
+    pub security_incidents: i128,
+    pub last_update: u64,
+}
+
+impl MonitorMetrics { pub fn zero(env: &Env) -> Self { Self { last_health: String::from_str(env, ""), perf_gas: 0, security_incidents: 0, last_update: 0 } } }
+
+pub struct MonitorStorage;
+
+impl MonitorStorage {
+    fn key(env: &Env) -> Symbol { Symbol::new(env, "monitor_metrics") }
+    pub fn get(env: &Env) -> MonitorMetrics { env.storage().instance().get(&Self::key(env)).unwrap_or_else(|| MonitorMetrics::zero(env)) }
+    pub fn put(env: &Env, m: &MonitorMetrics) { env.storage().instance().set(&Self::key(env), m); }
+}
+
+pub fn monitor_report_health(env: Env, msg: String) -> Result<(), ProtocolError> {
+    let mut m = MonitorStorage::get(&env);
+    m.last_health = msg.clone();
+    m.last_update = env.ledger().timestamp();
+    MonitorStorage::put(&env, &m);
+    ProtocolEvent::HealthReported(msg).emit(&env);
+    Ok(())
+}
+
+pub fn monitor_report_performance(env: Env, gas_used: i128) -> Result<(), ProtocolError> {
+    if gas_used < 0 { return Err(ProtocolError::InvalidInput); }
+    let mut m = MonitorStorage::get(&env);
+    m.perf_gas = gas_used;
+    m.last_update = env.ledger().timestamp();
+    MonitorStorage::put(&env, &m);
+    ProtocolEvent::PerformanceReported(gas_used).emit(&env);
+    Ok(())
+}
+
+pub fn monitor_report_security(env: Env, msg: String) -> Result<(), ProtocolError> {
+    let mut m = MonitorStorage::get(&env);
+    m.security_incidents += 1;
+    m.last_update = env.ledger().timestamp();
+    MonitorStorage::put(&env, &m);
+    ProtocolEvent::SecurityIncident(msg).emit(&env);
+    Ok(())
+}
+
+pub fn monitor_get(env: Env) -> MonitorMetrics { MonitorStorage::get(&env) }
 
 // --- Core Protocol Function Placeholders ---
 /// Deposit collateral into the protocol
@@ -2862,6 +2934,12 @@ impl Contract {
     pub fn data_backup(env: Env, name: Symbol) -> Result<(), ProtocolError> { data_backup(env, name) }
     pub fn data_restore(env: Env, name: Symbol) -> Result<(), ProtocolError> { data_restore(env, name) }
     pub fn data_migrate_bump_version(env: Env, name: Symbol, new_version: u32) -> Result<(), ProtocolError> { data_migrate_bump_version(env, name, new_version) }
+
+    // Monitoring
+    pub fn monitor_report_health(env: Env, msg: String) -> Result<(), ProtocolError> { monitor_report_health(env, msg) }
+    pub fn monitor_report_performance(env: Env, gas_used: i128) -> Result<(), ProtocolError> { monitor_report_performance(env, gas_used) }
+    pub fn monitor_report_security(env: Env, msg: String) -> Result<(), ProtocolError> { monitor_report_security(env, msg) }
+    pub fn monitor_get(env: Env) -> MonitorMetrics { monitor_get(env) }
 
     // Social recovery entrypoints
     pub fn set_guardians(env: Env, user: String, guardians: Vec<Address>) -> Result<(), ProtocolError> {
