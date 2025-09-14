@@ -870,6 +870,11 @@ pub enum ProtocolEvent {
     InsuranceParamsUpdated(i128, i128), // premium_bps, coverage_cap
     CircuitBreaker(bool),
     ClaimFiled(Address, i128, Symbol), // user, amount, reason
+    // Bridge
+    BridgeRegistered(String, Address, i128), // network_id, bridge, fee_bps
+    BridgeFeeUpdated(String, i128),          // network_id, fee_bps
+    AssetBridgedIn(Address, String, Address, i128, i128),  // user, network_id, asset, amount, fee
+    AssetBridgedOut(Address, String, Address, i128, i128), // user, network_id, asset, amount, fee
 }
 
 impl ProtocolEvent {
@@ -1093,6 +1098,7 @@ impl ProtocolEvent {
                     )
                 );
             }
+<<<<<<< HEAD
             ProtocolEvent::PerfMetric(name, value) => {
                 env.events().publish(
                     (Symbol::new(env, "perf_metric"), name.clone()),
@@ -1219,8 +1225,186 @@ impl ProtocolEvent {
                     )
                 );
             }
+            ProtocolEvent::BridgeRegistered(network_id, bridge, fee_bps) => {
+                env.events().publish(
+                    (Symbol::new(env, "bridge_registered"), Symbol::new(env, "network")),
+                    (
+                        Symbol::new(env, "network"), network_id.clone(),
+                        Symbol::new(env, "bridge"), bridge.clone(),
+                        Symbol::new(env, "fee_bps"), *fee_bps,
+                    )
+                );
+            }
+            ProtocolEvent::BridgeFeeUpdated(network_id, fee_bps) => {
+                env.events().publish(
+                    (Symbol::new(env, "bridge_fee_updated"), Symbol::new(env, "network")),
+                    (
+                        Symbol::new(env, "network"), network_id.clone(),
+                        Symbol::new(env, "fee_bps"), *fee_bps,
+                    )
+                );
+            }
+            ProtocolEvent::AssetBridgedIn(user, network_id, asset, amount, fee) => {
+                env.events().publish(
+                    (Symbol::new(env, "asset_bridged_in"), Symbol::new(env, "user")),
+                    (
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "network"), network_id.clone(),
+                        Symbol::new(env, "asset"), asset.clone(),
+                        Symbol::new(env, "amount"), *amount,
+                        Symbol::new(env, "fee"), *fee,
+                    )
+                );
+            }
+            ProtocolEvent::AssetBridgedOut(user, network_id, asset, amount, fee) => {
+                env.events().publish(
+                    (Symbol::new(env, "asset_bridged_out"), Symbol::new(env, "user")),
+                    (
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "network"), network_id.clone(),
+                        Symbol::new(env, "asset"), asset.clone(),
+                        Symbol::new(env, "amount"), *amount,
+                        Symbol::new(env, "fee"), *fee,
+                    )
+                );
+            }
         }
     }
+}
+
+/// Analytics structures
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct Metrics {
+    pub total_deposited: i128,
+    pub total_borrowed: i128,
+    pub total_withdrawn: i128,
+    pub total_repaid: i128,
+    pub active_users: i128,
+    pub last_update: u64,
+}
+
+impl Metrics { pub fn zero() -> Self { Self { total_deposited:0, total_borrowed:0, total_withdrawn:0, total_repaid:0, active_users:0, last_update:0 } } }
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct UserMetrics {
+    pub deposits: i128,
+    pub borrows: i128,
+    pub withdrawals: i128,
+    pub repayments: i128,
+    pub last_active: u64,
+}
+
+impl UserMetrics { pub fn zero() -> Self { Self { deposits:0, borrows:0, withdrawals:0, repayments:0, last_active:0 } } }
+
+pub struct AnalyticsStorage;
+
+impl AnalyticsStorage {
+    fn metrics_key(env: &Env) -> Symbol { Symbol::new(env, "metrics") }
+    fn user_metrics_key(env: &Env) -> Symbol { Symbol::new(env, "user_metrics") }
+    fn history_key(env: &Env) -> Symbol { Symbol::new(env, "metrics_history") }
+
+    pub fn get_metrics(env: &Env) -> Metrics {
+        env.storage().instance().get(&Self::metrics_key(env)).unwrap_or_else(Metrics::zero)
+    }
+    pub fn put_metrics(env: &Env, m: &Metrics) {
+        env.storage().instance().set(&Self::metrics_key(env), m);
+    }
+    pub fn get_user_map(env: &Env) -> Map<Address, UserMetrics> {
+        env.storage().instance().get(&Self::user_metrics_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+    pub fn put_user_map(env: &Env, m: &Map<Address, UserMetrics>) {
+        env.storage().instance().set(&Self::user_metrics_key(env), m);
+    }
+    pub fn get_history(env: &Env) -> Map<u64, Metrics> {
+        env.storage().instance().get(&Self::history_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+    pub fn put_history(env: &Env, m: &Map<u64, Metrics>) {
+        env.storage().instance().set(&Self::history_key(env), m);
+    }
+}
+
+fn analytics_record_action(env: &Env, user: &Address, action: &str, amount: i128) {
+    // Update global metrics
+    let mut m = AnalyticsStorage::get_metrics(env);
+    match action {
+        "deposit" => m.total_deposited += amount,
+        "borrow" => m.total_borrowed += amount,
+        "withdraw" => m.total_withdrawn += amount,
+        "repay" => m.total_repaid += amount,
+        _ => {}
+    }
+    m.last_update = env.ledger().timestamp();
+    AnalyticsStorage::put_metrics(env, &m);
+
+    // Update per-user metrics
+    let mut umap = AnalyticsStorage::get_user_map(env);
+    let mut um = umap.get(user.clone()).unwrap_or_else(UserMetrics::zero);
+    match action {
+        "deposit" => um.deposits += amount,
+        "borrow" => um.borrows += amount,
+        "withdraw" => um.withdrawals += amount,
+        "repay" => um.repayments += amount,
+        _ => {}
+    }
+    let was_inactive = um.last_active == 0;
+    um.last_active = m.last_update;
+    umap.set(user.clone(), um);
+    AnalyticsStorage::put_user_map(env, &umap);
+
+    if was_inactive {
+        let mut m2 = AnalyticsStorage::get_metrics(env);
+        m2.active_users += 1;
+        AnalyticsStorage::put_metrics(env, &m2);
+    }
+
+    // Append simple daily snapshot
+    let bucket = m.last_update / 86400;
+    let mut hist = AnalyticsStorage::get_history(env);
+    hist.set(bucket, m);
+    AnalyticsStorage::put_history(env, &hist);
+}
+
+/// Bridge configuration per external network
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct BridgeConfig {
+    pub network_id: String,
+    pub bridge: Address,
+    pub fee_bps: i128,
+    pub enabled: bool,
+}
+
+impl BridgeConfig {
+    pub fn new(network_id: String, bridge: Address, fee_bps: i128) -> Self {
+        Self { network_id, bridge, fee_bps, enabled: true }
+    }
+}
+
+/// Storage for bridge registry and helpers
+pub struct BridgeStorage;
+
+impl BridgeStorage {
+    fn bridges_key(env: &Env) -> Symbol { Symbol::new(env, "bridges_registry") }
+
+    pub fn get_registry(env: &Env) -> Map<String, BridgeConfig> {
+        env.storage().instance().get(&Self::bridges_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+
+    pub fn put_registry(env: &Env, m: &Map<String, BridgeConfig>) {
+        env.storage().instance().set(&Self::bridges_key(env), m);
+    }
+
+    pub fn get(env: &Env, id: &String) -> Option<BridgeConfig> {
+        let reg = Self::get_registry(env);
+        reg.get(id.clone())
+    }
+}
+
+fn ensure_amount_positive(amount: i128) -> Result<(), ProtocolError> {
+    if amount <= 0 { return Err(ProtocolError::InvalidAmount); }
+    Ok(())
 }
 
 /// Minimum collateral ratio required (e.g., 150%)
@@ -1290,6 +1474,9 @@ pub fn deposit_collateral(env: Env, depositor: String, amount: i128) -> Result<(
             collateral_ratio,
         ).emit(&env);
 
+        // Analytics
+        analytics_record_action(&env, &Address::from_string(&depositor), "deposit", amount);
+
         Ok(())
     })();
     
@@ -1357,6 +1544,9 @@ pub fn borrow(env: Env, borrower: String, amount: i128) -> Result<(), ProtocolEr
             collateral_ratio,
         ).emit(&env);
 
+        // Analytics
+        analytics_record_action(&env, &Address::from_string(&borrower), "borrow", amount);
+
         Ok(())
     })();
     
@@ -1420,6 +1610,9 @@ pub fn repay(env: Env, repayer: String, amount: i128) -> Result<(), ProtocolErro
             position.debt,
             collateral_ratio,
         ).emit(&env);
+
+        // Analytics
+        analytics_record_action(&env, &Address::from_string(&repayer), "repay", repay_amount);
 
         Ok(())
     })();
@@ -1500,6 +1693,9 @@ pub fn withdraw(env: Env, withdrawer: String, amount: i128) -> Result<(), Protoc
             position.debt,
             collateral_ratio,
         ).emit(&env);
+
+        // Analytics
+        analytics_record_action(&env, &Address::from_string(&withdrawer), "withdraw", amount);
 
         Ok(())
     })();
@@ -2308,6 +2504,81 @@ pub fn flash_loan(
     result
 }
 
+// --- Cross-Chain Bridge Operations ---
+fn bridge_require_network(env: &Env, network_id: &String) -> Result<BridgeConfig, ProtocolError> {
+    let cfg = BridgeStorage::get(env, network_id).ok_or(ProtocolError::NotFound)?;
+    if !cfg.enabled { return Err(ProtocolError::InvalidOperation); }
+    Ok(cfg)
+}
+
+pub fn register_bridge_admin(env: Env, caller: String, network_id: String, bridge: Address, fee_bps: i128) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    ProtocolConfig::require_admin(&env, &caller_addr)?;
+    if network_id.is_empty() { return Err(ProtocolError::InvalidInput); }
+    if fee_bps < 0 || fee_bps > 10000 { return Err(ProtocolError::InvalidInput); }
+    let mut reg = BridgeStorage::get_registry(&env);
+    if reg.contains_key(network_id.clone()) { return Err(ProtocolError::AlreadyExists); }
+    let cfg = BridgeConfig::new(network_id.clone(), bridge.clone(), fee_bps);
+    reg.set(network_id.clone(), cfg);
+    BridgeStorage::put_registry(&env, &reg);
+    ProtocolEvent::BridgeRegistered(network_id, bridge, fee_bps).emit(&env);
+    Ok(())
+}
+
+pub fn set_bridge_fee_admin(env: Env, caller: String, network_id: String, fee_bps: i128) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    ProtocolConfig::require_admin(&env, &caller_addr)?;
+    if fee_bps < 0 || fee_bps > 10000 { return Err(ProtocolError::InvalidInput); }
+    let mut reg = BridgeStorage::get_registry(&env);
+    let mut cfg = reg.get(network_id.clone()).ok_or(ProtocolError::NotFound)?;
+    cfg.fee_bps = fee_bps;
+    reg.set(network_id.clone(), cfg);
+    BridgeStorage::put_registry(&env, &reg);
+    ProtocolEvent::BridgeFeeUpdated(network_id, fee_bps).emit(&env);
+    Ok(())
+}
+
+pub fn bridge_in(env: Env, user: String, network_id: String, asset: Address, amount: i128) -> Result<i128, ProtocolError> {
+    ReentrancyGuard::enter(&env)?;
+    let result = (|| {
+        if user.is_empty() { return Err(ProtocolError::InvalidAddress); }
+        ensure_amount_positive(amount)?;
+        let cfg = bridge_require_network(&env, &network_id)?;
+        let user_addr = Address::from_string(&user);
+        let mut pos = CrossStateHelper::get_or_init_position(&env, &user_addr);
+        let cur = pos.collateral.get(asset.clone()).unwrap_or(0);
+        let fee = amount * cfg.fee_bps / 10000;
+        let net = amount - fee;
+        pos.collateral.set(asset.clone(), cur + net);
+        CrossStateHelper::save_position(&env, &pos);
+        ProtocolEvent::AssetBridgedIn(user_addr, network_id, asset, amount, fee).emit(&env);
+        Ok(fee)
+    })();
+    ReentrancyGuard::exit(&env);
+    result
+}
+
+pub fn bridge_out(env: Env, user: String, network_id: String, asset: Address, amount: i128) -> Result<i128, ProtocolError> {
+    ReentrancyGuard::enter(&env)?;
+    let result = (|| {
+        if user.is_empty() { return Err(ProtocolError::InvalidAddress); }
+        ensure_amount_positive(amount)?;
+        let cfg = bridge_require_network(&env, &network_id)?;
+        let user_addr = Address::from_string(&user);
+        let mut pos = CrossStateHelper::get_or_init_position(&env, &user_addr);
+        let cur = pos.collateral.get(asset.clone()).unwrap_or(0);
+        if cur < amount { return Err(ProtocolError::InsufficientCollateral); }
+        let fee = amount * cfg.fee_bps / 10000;
+        let net = amount - fee;
+        pos.collateral.set(asset.clone(), cur - amount);
+        CrossStateHelper::save_position(&env, &pos);
+        ProtocolEvent::AssetBridgedOut(user_addr, network_id, asset, net, fee).emit(&env);
+        Ok(fee)
+    })();
+    ReentrancyGuard::exit(&env);
+    result
+}
+
 #[contractimpl]
 impl Contract {
     /// Initializes the contract and sets the admin address
@@ -2610,5 +2881,28 @@ impl Contract {
     pub fn gov_get_delegate(env: Env, from: String) -> Option<Address> {
         let from_addr = Address::from_string(&from);
         Governance::get_delegate(&env, &from_addr)
+    }
+
+    // Bridge admin/user entrypoints
+    pub fn register_bridge(env: Env, caller: String, network_id: String, bridge: Address, fee_bps: i128) -> Result<(), ProtocolError> {
+        register_bridge_admin(env, caller, network_id, bridge, fee_bps)
+    }
+    pub fn set_bridge_fee(env: Env, caller: String, network_id: String, fee_bps: i128) -> Result<(), ProtocolError> {
+        set_bridge_fee_admin(env, caller, network_id, fee_bps)
+    }
+    pub fn bridge_deposit(env: Env, user: String, network_id: String, asset: Address, amount: i128) -> Result<i128, ProtocolError> {
+        bridge_in(env, user, network_id, asset, amount)
+    }
+    pub fn bridge_withdraw(env: Env, user: String, network_id: String, asset: Address, amount: i128) -> Result<i128, ProtocolError> {
+        bridge_out(env, user, network_id, asset, amount)
+    }
+    pub fn get_bridge_config(env: Env, network_id: String) -> Option<(Address, i128, bool)> {
+        BridgeStorage::get(&env, &network_id).map(|c| (c.bridge, c.fee_bps, c.enabled))
+    }
+    pub fn list_bridges(env: Env) -> Vec<String> {
+        let reg = BridgeStorage::get_registry(&env);
+        let mut out = Vec::new(&env);
+        for (k, _) in reg.iter() { out.push_back(k); }
+        out
     }
 }
