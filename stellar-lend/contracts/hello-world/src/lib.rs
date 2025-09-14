@@ -879,6 +879,8 @@ pub enum ProtocolEvent {
     HealthReported(String),
     PerformanceReported(i128),
     SecurityIncident(String),
+    IntegrationRegistered(String, Address),
+    IntegrationCalled(String, Symbol),
 }
 
 impl ProtocolEvent {
@@ -1288,6 +1290,18 @@ impl ProtocolEvent {
                 env.events().publish(
                     (Symbol::new(env, "security_incident"), Symbol::new(env, "msg")),
                     (Symbol::new(env, "msg"), msg.clone())
+                );
+            }
+            ProtocolEvent::IntegrationRegistered(name, addr) => {
+                env.events().publish(
+                    (Symbol::new(env, "integration_registered"), Symbol::new(env, "name")),
+                    (Symbol::new(env, "name"), name.clone(), Symbol::new(env, "address"), addr.clone())
+                );
+            }
+            ProtocolEvent::IntegrationCalled(name, method) => {
+                env.events().publish(
+                    (Symbol::new(env, "integration_called"), Symbol::new(env, "name")),
+                    (Symbol::new(env, "name"), name.clone(), Symbol::new(env, "method"), method.clone())
                 );
             }
         }
@@ -1826,6 +1840,35 @@ pub fn monitor_report_security(env: Env, msg: String) -> Result<(), ProtocolErro
 }
 
 pub fn monitor_get(env: Env) -> MonitorMetrics { MonitorStorage::get(&env) }
+
+// --- External Integrations ---
+pub struct IntegrationStorage;
+
+impl IntegrationStorage {
+    fn key(env: &Env) -> Symbol { Symbol::new(env, "integrations") }
+    pub fn get(env: &Env) -> Map<String, Address> { env.storage().instance().get(&Self::key(env)).unwrap_or_else(|| Map::new(env)) }
+    pub fn put(env: &Env, m: &Map<String, Address>) { env.storage().instance().set(&Self::key(env), m); }
+}
+
+pub fn register_integration(env: Env, caller: String, name: String, addr: Address) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    ProtocolConfig::require_admin(&env, &caller_addr)?;
+    if name.is_empty() { return Err(ProtocolError::InvalidInput); }
+    let mut m = IntegrationStorage::get(&env);
+    m.set(name.clone(), addr.clone());
+    IntegrationStorage::put(&env, &m);
+    ProtocolEvent::IntegrationRegistered(name, addr).emit(&env);
+    Ok(())
+}
+
+pub fn integration_call_ping(env: Env, name: String) -> Result<(), ProtocolError> {
+    if name.is_empty() { return Err(ProtocolError::InvalidInput); }
+    let m = IntegrationStorage::get(&env);
+    let addr = m.get(name.clone()).ok_or(ProtocolError::NotFound)?;
+    let _: () = env.invoke_contract(&addr, &Symbol::new(&env, "ping"), Vec::new(&env));
+    ProtocolEvent::IntegrationCalled(name, Symbol::new(&env, "ping")).emit(&env);
+    Ok(())
+}
 
 // --- Core Protocol Function Placeholders ---
 /// Deposit collateral into the protocol
@@ -3354,6 +3397,12 @@ impl Contract {
     pub fn monitor_report_performance(env: Env, gas_used: i128) -> Result<(), ProtocolError> { monitor_report_performance(env, gas_used) }
     pub fn monitor_report_security(env: Env, msg: String) -> Result<(), ProtocolError> { monitor_report_security(env, msg) }
     pub fn monitor_get(env: Env) -> MonitorMetrics { monitor_get(env) }
+
+    // Integrations
+    pub fn register_integration(env: Env, caller: String, name: String, addr: Address) -> Result<(), ProtocolError> {
+        register_integration(env, caller, name, addr)
+    }
+    pub fn integration_call_ping(env: Env, name: String) -> Result<(), ProtocolError> { integration_call_ping(env, name) }
 
     // Social recovery entrypoints
     pub fn set_guardians(env: Env, user: String, guardians: Vec<Address>) -> Result<(), ProtocolError> {
