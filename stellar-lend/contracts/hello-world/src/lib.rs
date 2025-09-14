@@ -8,7 +8,7 @@ extern crate alloc;
 
 use alloc::format;
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, vec, Address, Bytes, Env,
+    contract, contracterror, contractimpl, contracttype, vec, Address, Env,
     IntoVal, Map, String, Symbol, Vec,
 };
 use soroban_sdk::token::TokenClient;
@@ -440,8 +440,6 @@ impl AssetRegistryStorage {
     fn base_token_key(env: &Env) -> Symbol { Symbol::new(env, "base_token") }
     fn auction_book_key(env: &Env) -> Symbol { Symbol::new(env, "auction_book") }
     fn corr_key(env: &Env) -> Symbol { Symbol::new(env, "asset_correlations") }
-    fn price_cache_key(env: &Env) -> Symbol { Symbol::new(env, "price_cache_map") }
-    fn price_cache_ttl_key(env: &Env) -> Symbol { Symbol::new(env, "price_cache_ttl") }
 
     pub fn get_params_map(env: &Env) -> Map<Address, AssetParams> {
         env.storage().instance().get(&Self::params_key(env)).unwrap_or_else(|| Map::new(env))
@@ -530,15 +528,6 @@ impl AssetRegistryStorage {
     pub fn put_correlations(env: &Env, map: &Map<PairKey, i128>) {
         env.storage().instance().set(&Self::corr_key(env), map);
     }
-
-    pub fn get_price_cache(env: &Env) -> Map<Address, (i128, u64)> {
-        env.storage().instance().get(&Self::price_cache_key(env)).unwrap_or_else(|| Map::new(env))
-    }
-    pub fn put_price_cache(env: &Env, map: &Map<Address, (i128, u64)>) {
-        env.storage().instance().set(&Self::price_cache_key(env), map);
-    }
-    pub fn get_price_cache_ttl(env: &Env) -> u64 { env.storage().instance().get(&Self::price_cache_ttl_key(env)).unwrap_or(30) }
-    pub fn set_price_cache_ttl(env: &Env, ttl: u64) { env.storage().instance().set(&Self::price_cache_ttl_key(env), &ttl); }
 
     pub fn get_user_risk(env: &Env) -> Map<Address, UserRiskState> {
         env.storage().instance().get(&Self::user_risk_key(env)).unwrap_or_else(|| Map::new(env))
@@ -777,12 +766,6 @@ pub enum ProtocolEvent {
     BridgeFeeUpdated(String, i128),          // network_id, fee_bps
     AssetBridgedIn(Address, String, Address, i128, i128),  // user, network_id, asset, amount, fee
     AssetBridgedOut(Address, String, Address, i128, i128), // user, network_id, asset, amount, fee
-    // Monitoring
-    HealthReported(String),
-    PerformanceReported(i128),
-    SecurityIncident(String),
-    IntegrationRegistered(String, Address),
-    IntegrationCalled(String, Symbol),
 }
 
 impl ProtocolEvent {
@@ -1047,36 +1030,6 @@ impl ProtocolEvent {
                         Symbol::new(env, "amount"), *amount,
                         Symbol::new(env, "fee"), *fee,
                     )
-                );
-            }
-            ProtocolEvent::HealthReported(msg) => {
-                env.events().publish(
-                    (Symbol::new(env, "health_report"), Symbol::new(env, "msg")),
-                    (Symbol::new(env, "msg"), msg.clone())
-                );
-            }
-            ProtocolEvent::PerformanceReported(gas) => {
-                env.events().publish(
-                    (Symbol::new(env, "performance_report"), Symbol::new(env, "gas")),
-                    (Symbol::new(env, "gas"), *gas)
-                );
-            }
-            ProtocolEvent::SecurityIncident(msg) => {
-                env.events().publish(
-                    (Symbol::new(env, "security_incident"), Symbol::new(env, "msg")),
-                    (Symbol::new(env, "msg"), msg.clone())
-                );
-            }
-            ProtocolEvent::IntegrationRegistered(name, addr) => {
-                env.events().publish(
-                    (Symbol::new(env, "integration_registered"), Symbol::new(env, "name")),
-                    (Symbol::new(env, "name"), name.clone(), Symbol::new(env, "address"), addr.clone())
-                );
-            }
-            ProtocolEvent::IntegrationCalled(name, method) => {
-                env.events().publish(
-                    (Symbol::new(env, "integration_called"), Symbol::new(env, "name")),
-                    (Symbol::new(env, "name"), name.clone(), Symbol::new(env, "method"), method.clone())
                 );
             }
         }
@@ -1421,229 +1374,6 @@ pub fn ms_execute(env: Env, id: u64) -> Result<(), ProtocolError> {
 
 /// Minimum collateral ratio required (e.g., 150%)
 const MIN_COLLATERAL_RATIO: i128 = 150;
-
-// --- Upgrade Mechanism ---
-#[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype]
-pub struct UpgradeInfo {
-    pub current_version: u32,
-    pub previous_version: u32,
-    pub pending_version: u32,
-    pub pending_hash: String,
-    pub approved: bool,
-    pub last_update: u64,
-}
-
-impl UpgradeInfo { pub fn initial(env: &Env) -> Self { Self { current_version: 1, previous_version: 0, pending_version: 0, pending_hash: String::from_str(env, ""), approved: false, last_update: 0 } } }
-
-pub struct UpgradeStorage;
-
-impl UpgradeStorage {
-    fn key(env: &Env) -> Symbol { Symbol::new(env, "upgrade_info") }
-    pub fn get(env: &Env) -> UpgradeInfo { env.storage().instance().get(&Self::key(env)).unwrap_or_else(|| UpgradeInfo::initial(env)) }
-    pub fn put(env: &Env, u: &UpgradeInfo) { env.storage().instance().set(&Self::key(env), u); }
-}
-
-pub fn upgrade_propose(env: Env, caller: String, new_version: u32, code_hash: String) -> Result<(), ProtocolError> {
-    let caller_addr = Address::from_string(&caller);
-    ProtocolConfig::require_admin(&env, &caller_addr)?;
-    if new_version == 0 { return Err(ProtocolError::InvalidInput); }
-    let mut info = UpgradeStorage::get(&env);
-    info.pending_version = new_version;
-    info.pending_hash = code_hash;
-    info.approved = false;
-    info.last_update = env.ledger().timestamp();
-    UpgradeStorage::put(&env, &info);
-    Ok(())
-}
-
-pub fn upgrade_approve(env: Env, caller: String) -> Result<(), ProtocolError> {
-    let caller_addr = Address::from_string(&caller);
-    ProtocolConfig::require_admin(&env, &caller_addr)?;
-    let mut info = UpgradeStorage::get(&env);
-    if info.pending_version == 0 { return Err(ProtocolError::InvalidOperation); }
-    info.approved = true;
-    info.last_update = env.ledger().timestamp();
-    UpgradeStorage::put(&env, &info);
-    Ok(())
-}
-
-pub fn upgrade_execute(env: Env, caller: String) -> Result<u32, ProtocolError> {
-    let caller_addr = Address::from_string(&caller);
-    ProtocolConfig::require_admin(&env, &caller_addr)?;
-    let mut info = UpgradeStorage::get(&env);
-    if !info.approved || info.pending_version == 0 { return Err(ProtocolError::InvalidOperation); }
-    info.previous_version = info.current_version;
-    info.current_version = info.pending_version;
-    info.pending_version = 0;
-    info.pending_hash = String::from_str(&env, "");
-    info.approved = false;
-    info.last_update = env.ledger().timestamp();
-    UpgradeStorage::put(&env, &info);
-    Ok(info.current_version)
-}
-
-pub fn upgrade_rollback(env: Env, caller: String) -> Result<u32, ProtocolError> {
-    let caller_addr = Address::from_string(&caller);
-    ProtocolConfig::require_admin(&env, &caller_addr)?;
-    let mut info = UpgradeStorage::get(&env);
-    if info.previous_version == 0 { return Err(ProtocolError::InvalidOperation); }
-    let tmp = info.current_version;
-    info.current_version = info.previous_version;
-    info.previous_version = tmp;
-    info.last_update = env.ledger().timestamp();
-    UpgradeStorage::put(&env, &info);
-    Ok(info.current_version)
-}
-
-pub fn upgrade_status(env: Env) -> (u32, u32, u32, String, bool, u64) {
-    let i = UpgradeStorage::get(&env);
-    (i.current_version, i.previous_version, i.pending_version, i.pending_hash, i.approved, i.last_update)
-}
-
-// --- Data Management & Storage Optimization ---
-#[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype]
-pub struct DataBlob {
-    pub version: u32,
-    pub compressed: bool,
-    pub data: Bytes,
-}
-
-pub struct DataStorage;
-
-impl DataStorage {
-    fn prefix(env: &Env) -> Symbol { Symbol::new(env, "data_store") }
-    fn backup_prefix(env: &Env) -> Symbol { Symbol::new(env, "data_store_backup") }
-
-    fn key_for(env: &Env, name: &Symbol) -> (Symbol, Symbol) { (Self::prefix(env), name.clone()) }
-    fn bkey_for(env: &Env, name: &Symbol) -> (Symbol, Symbol) { (Self::backup_prefix(env), name.clone()) }
-
-    pub fn save(env: &Env, name: &Symbol, blob: &DataBlob) {
-        env.storage().persistent().set(&Self::key_for(env, name), blob);
-    }
-    pub fn load(env: &Env, name: &Symbol) -> Option<DataBlob> {
-        env.storage().persistent().get(&Self::key_for(env, name))
-    }
-    pub fn backup(env: &Env, name: &Symbol) -> Result<(), ProtocolError> {
-        let blob = Self::load(env, name).ok_or(ProtocolError::NotFound)?;
-        env.storage().persistent().set(&Self::bkey_for(env, name), &blob);
-        Ok(())
-    }
-    pub fn restore(env: &Env, name: &Symbol) -> Result<(), ProtocolError> {
-        let blob: DataBlob = env.storage().persistent().get(&Self::bkey_for(env, name)).ok_or(ProtocolError::NotFound)?;
-        env.storage().persistent().set(&Self::key_for(env, name), &blob);
-        Ok(())
-    }
-}
-
-fn compress_identity(_env: &Env, data: &Bytes) -> Bytes { data.clone() }
-fn decompress_identity(_env: &Env, data: &Bytes) -> Bytes { data.clone() }
-
-pub fn data_save(env: Env, name: Symbol, version: u32, data: Bytes, compress: bool) -> Result<(), ProtocolError> {
-    if version == 0 { return Err(ProtocolError::InvalidInput); }
-    let d = if compress { compress_identity(&env, &data) } else { data };
-    let blob = DataBlob { version, compressed: compress, data: d };
-    DataStorage::save(&env, &name, &blob);
-    Ok(())
-}
-
-pub fn data_load(env: Env, name: Symbol) -> Result<(u32, Bytes), ProtocolError> {
-    let b = DataStorage::load(&env, &name).ok_or(ProtocolError::NotFound)?;
-    let d = if b.compressed { decompress_identity(&env, &b.data) } else { b.data };
-    Ok((b.version, d))
-}
-
-pub fn data_backup(env: Env, name: Symbol) -> Result<(), ProtocolError> { DataStorage::backup(&env, &name) }
-pub fn data_restore(env: Env, name: Symbol) -> Result<(), ProtocolError> { DataStorage::restore(&env, &name) }
-
-pub fn data_migrate_bump_version(env: Env, name: Symbol, new_version: u32) -> Result<(), ProtocolError> {
-    if new_version == 0 { return Err(ProtocolError::InvalidInput); }
-    let mut b = DataStorage::load(&env, &name).ok_or(ProtocolError::NotFound)?;
-    if new_version <= b.version { return Err(ProtocolError::InvalidOperation); }
-    b.version = new_version;
-    DataStorage::save(&env, &name, &b);
-    Ok(())
-}
-
-// --- Monitoring & Alerting ---
-#[derive(Clone, Debug, Eq, PartialEq)]
-#[contracttype]
-pub struct MonitorMetrics {
-    pub last_health: String,
-    pub perf_gas: i128,
-    pub security_incidents: i128,
-    pub last_update: u64,
-}
-
-impl MonitorMetrics { pub fn zero(env: &Env) -> Self { Self { last_health: String::from_str(env, ""), perf_gas: 0, security_incidents: 0, last_update: 0 } } }
-
-pub struct MonitorStorage;
-
-impl MonitorStorage {
-    fn key(env: &Env) -> Symbol { Symbol::new(env, "monitor_metrics") }
-    pub fn get(env: &Env) -> MonitorMetrics { env.storage().instance().get(&Self::key(env)).unwrap_or_else(|| MonitorMetrics::zero(env)) }
-    pub fn put(env: &Env, m: &MonitorMetrics) { env.storage().instance().set(&Self::key(env), m); }
-}
-
-pub fn monitor_report_health(env: Env, msg: String) -> Result<(), ProtocolError> {
-    let mut m = MonitorStorage::get(&env);
-    m.last_health = msg.clone();
-    m.last_update = env.ledger().timestamp();
-    MonitorStorage::put(&env, &m);
-    ProtocolEvent::HealthReported(msg).emit(&env);
-    Ok(())
-}
-
-pub fn monitor_report_performance(env: Env, gas_used: i128) -> Result<(), ProtocolError> {
-    if gas_used < 0 { return Err(ProtocolError::InvalidInput); }
-    let mut m = MonitorStorage::get(&env);
-    m.perf_gas = gas_used;
-    m.last_update = env.ledger().timestamp();
-    MonitorStorage::put(&env, &m);
-    ProtocolEvent::PerformanceReported(gas_used).emit(&env);
-    Ok(())
-}
-
-pub fn monitor_report_security(env: Env, msg: String) -> Result<(), ProtocolError> {
-    let mut m = MonitorStorage::get(&env);
-    m.security_incidents += 1;
-    m.last_update = env.ledger().timestamp();
-    MonitorStorage::put(&env, &m);
-    ProtocolEvent::SecurityIncident(msg).emit(&env);
-    Ok(())
-}
-
-pub fn monitor_get(env: Env) -> MonitorMetrics { MonitorStorage::get(&env) }
-
-// --- External Integrations ---
-pub struct IntegrationStorage;
-
-impl IntegrationStorage {
-    fn key(env: &Env) -> Symbol { Symbol::new(env, "integrations") }
-    pub fn get(env: &Env) -> Map<String, Address> { env.storage().instance().get(&Self::key(env)).unwrap_or_else(|| Map::new(env)) }
-    pub fn put(env: &Env, m: &Map<String, Address>) { env.storage().instance().set(&Self::key(env), m); }
-}
-
-pub fn register_integration(env: Env, caller: String, name: String, addr: Address) -> Result<(), ProtocolError> {
-    let caller_addr = Address::from_string(&caller);
-    ProtocolConfig::require_admin(&env, &caller_addr)?;
-    if name.is_empty() { return Err(ProtocolError::InvalidInput); }
-    let mut m = IntegrationStorage::get(&env);
-    m.set(name.clone(), addr.clone());
-    IntegrationStorage::put(&env, &m);
-    ProtocolEvent::IntegrationRegistered(name, addr).emit(&env);
-    Ok(())
-}
-
-pub fn integration_call_ping(env: Env, name: String) -> Result<(), ProtocolError> {
-    if name.is_empty() { return Err(ProtocolError::InvalidInput); }
-    let m = IntegrationStorage::get(&env);
-    let addr = m.get(name.clone()).ok_or(ProtocolError::NotFound)?;
-    let _: () = env.invoke_contract(&addr, &Symbol::new(&env, "ping"), Vec::new(&env));
-    ProtocolEvent::IntegrationCalled(name, Symbol::new(&env, "ping")).emit(&env);
-    Ok(())
-}
 
 // --- Core Protocol Function Placeholders ---
 /// Deposit collateral into the protocol
@@ -2129,20 +1859,6 @@ fn get_asset_price(env: &Env, asset: &Address) -> Result<i128, ProtocolError> {
     Ok(price)
 }
 
-fn get_asset_price_cached(env: &Env, asset: &Address) -> Result<i128, ProtocolError> {
-    // Simple TTL cache over get_asset_price
-    let ttl = AssetRegistryStorage::get_price_cache_ttl(env);
-    let ts = env.ledger().timestamp();
-    let mut cache = AssetRegistryStorage::get_price_cache(env);
-    if let Some((p, t)) = cache.get(asset.clone()) {
-        if ts - t <= ttl { return Ok(p); }
-    }
-    let p = get_asset_price(env, asset)?;
-    cache.set(asset.clone(), (p, ts));
-    AssetRegistryStorage::put_price_cache(env, &cache);
-    Ok(p)
-}
-
 fn get_asset_params(env: &Env, asset: &Address) -> Result<AssetParams, ProtocolError> {
     let params_map = AssetRegistryStorage::get_params_map(env);
     let params = params_map.get(asset.clone()).ok_or(ProtocolError::AssetNotSupported)?;
@@ -2169,7 +1885,7 @@ fn calc_cross_totals(env: &Env, pos: &CrossPosition) -> Result<(i128, i128), Pro
     }
 
     for asset in uniq.iter() {
-        let price = get_asset_price_cached(env, &asset)?; // 1e8 scaled
+        let price = get_asset_price(env, &asset)?; // 1e8 scaled
         let params = get_asset_params(env, &asset)?;
         let c = pos.collateral.get(asset.clone()).unwrap_or(0);
         let d = pos.debt.get(asset.clone()).unwrap_or(0);
@@ -2916,14 +2632,6 @@ impl Contract {
         Ok(())
     }
 
-    /// Admin: set price cache TTL seconds
-    pub fn set_price_cache_ttl(env: Env, caller: String, ttl: u64) -> Result<(), ProtocolError> {
-        let caller_addr = Address::from_string(&caller);
-        ProtocolConfig::require_admin(&env, &caller_addr)?;
-        AssetRegistryStorage::set_price_cache_ttl(&env, ttl);
-        Ok(())
-    }
-
     // Token transfer admin controls
     pub fn set_enforce_transfers(env: Env, caller: String, flag: bool) -> Result<(), ProtocolError> {
         let caller_addr = Address::from_string(&caller);
@@ -2984,44 +2692,6 @@ impl Contract {
         for (k, _) in reg.iter() { out.push_back(k); }
         out
     }
-
-    // Upgrades
-    pub fn upgrade_propose(env: Env, caller: String, new_version: u32, code_hash: String) -> Result<(), ProtocolError> {
-        upgrade_propose(env, caller, new_version, code_hash)
-    }
-    pub fn upgrade_approve(env: Env, caller: String) -> Result<(), ProtocolError> {
-        upgrade_approve(env, caller)
-    }
-    pub fn upgrade_execute(env: Env, caller: String) -> Result<u32, ProtocolError> {
-        upgrade_execute(env, caller)
-    }
-    pub fn upgrade_rollback(env: Env, caller: String) -> Result<u32, ProtocolError> {
-        upgrade_rollback(env, caller)
-    }
-    pub fn upgrade_status(env: Env) -> (u32, u32, u32, String, bool, u64) {
-        upgrade_status(env)
-    }
-
-    // Data management entrypoints
-    pub fn data_save(env: Env, name: Symbol, version: u32, data: Bytes, compress: bool) -> Result<(), ProtocolError> {
-        data_save(env, name, version, data, compress)
-    }
-    pub fn data_load(env: Env, name: Symbol) -> Result<(u32, Bytes), ProtocolError> { data_load(env, name) }
-    pub fn data_backup(env: Env, name: Symbol) -> Result<(), ProtocolError> { data_backup(env, name) }
-    pub fn data_restore(env: Env, name: Symbol) -> Result<(), ProtocolError> { data_restore(env, name) }
-    pub fn data_migrate_bump_version(env: Env, name: Symbol, new_version: u32) -> Result<(), ProtocolError> { data_migrate_bump_version(env, name, new_version) }
-
-    // Monitoring
-    pub fn monitor_report_health(env: Env, msg: String) -> Result<(), ProtocolError> { monitor_report_health(env, msg) }
-    pub fn monitor_report_performance(env: Env, gas_used: i128) -> Result<(), ProtocolError> { monitor_report_performance(env, gas_used) }
-    pub fn monitor_report_security(env: Env, msg: String) -> Result<(), ProtocolError> { monitor_report_security(env, msg) }
-    pub fn monitor_get(env: Env) -> MonitorMetrics { monitor_get(env) }
-
-    // Integrations
-    pub fn register_integration(env: Env, caller: String, name: String, addr: Address) -> Result<(), ProtocolError> {
-        register_integration(env, caller, name, addr)
-    }
-    pub fn integration_call_ping(env: Env, name: String) -> Result<(), ProtocolError> { integration_call_ping(env, name) }
 
     // Social recovery entrypoints
     pub fn set_guardians(env: Env, user: String, guardians: Vec<Address>) -> Result<(), ProtocolError> {
