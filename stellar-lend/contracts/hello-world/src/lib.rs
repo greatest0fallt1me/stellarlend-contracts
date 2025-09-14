@@ -1611,6 +1611,85 @@ pub fn ms_execute(env: Env, id: u64) -> Result<(), ProtocolError> {
 /// Minimum collateral ratio required (e.g., 150%)
 const MIN_COLLATERAL_RATIO: i128 = 150;
 
+// --- Upgrade Mechanism ---
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct UpgradeInfo {
+    pub current_version: u32,
+    pub previous_version: u32,
+    pub pending_version: u32,
+    pub pending_hash: String,
+    pub approved: bool,
+    pub last_update: u64,
+}
+
+impl UpgradeInfo { pub fn initial(env: &Env) -> Self { Self { current_version: 1, previous_version: 0, pending_version: 0, pending_hash: String::from_str(env, ""), approved: false, last_update: 0 } } }
+
+pub struct UpgradeStorage;
+
+impl UpgradeStorage {
+    fn key(env: &Env) -> Symbol { Symbol::new(env, "upgrade_info") }
+    pub fn get(env: &Env) -> UpgradeInfo { env.storage().instance().get(&Self::key(env)).unwrap_or_else(|| UpgradeInfo::initial(env)) }
+    pub fn put(env: &Env, u: &UpgradeInfo) { env.storage().instance().set(&Self::key(env), u); }
+}
+
+pub fn upgrade_propose(env: Env, caller: String, new_version: u32, code_hash: String) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    ProtocolConfig::require_admin(&env, &caller_addr)?;
+    if new_version == 0 { return Err(ProtocolError::InvalidInput); }
+    let mut info = UpgradeStorage::get(&env);
+    info.pending_version = new_version;
+    info.pending_hash = code_hash;
+    info.approved = false;
+    info.last_update = env.ledger().timestamp();
+    UpgradeStorage::put(&env, &info);
+    Ok(())
+}
+
+pub fn upgrade_approve(env: Env, caller: String) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    ProtocolConfig::require_admin(&env, &caller_addr)?;
+    let mut info = UpgradeStorage::get(&env);
+    if info.pending_version == 0 { return Err(ProtocolError::InvalidOperation); }
+    info.approved = true;
+    info.last_update = env.ledger().timestamp();
+    UpgradeStorage::put(&env, &info);
+    Ok(())
+}
+
+pub fn upgrade_execute(env: Env, caller: String) -> Result<u32, ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    ProtocolConfig::require_admin(&env, &caller_addr)?;
+    let mut info = UpgradeStorage::get(&env);
+    if !info.approved || info.pending_version == 0 { return Err(ProtocolError::InvalidOperation); }
+    info.previous_version = info.current_version;
+    info.current_version = info.pending_version;
+    info.pending_version = 0;
+    info.pending_hash = String::from_str(&env, "");
+    info.approved = false;
+    info.last_update = env.ledger().timestamp();
+    UpgradeStorage::put(&env, &info);
+    Ok(info.current_version)
+}
+
+pub fn upgrade_rollback(env: Env, caller: String) -> Result<u32, ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    ProtocolConfig::require_admin(&env, &caller_addr)?;
+    let mut info = UpgradeStorage::get(&env);
+    if info.previous_version == 0 { return Err(ProtocolError::InvalidOperation); }
+    let tmp = info.current_version;
+    info.current_version = info.previous_version;
+    info.previous_version = tmp;
+    info.last_update = env.ledger().timestamp();
+    UpgradeStorage::put(&env, &info);
+    Ok(info.current_version)
+}
+
+pub fn upgrade_status(env: Env) -> (u32, u32, u32, String, bool, u64) {
+    let i = UpgradeStorage::get(&env);
+    (i.current_version, i.previous_version, i.pending_version, i.pending_hash, i.approved, i.last_update)
+}
+
 // --- Core Protocol Function Placeholders ---
 /// Deposit collateral into the protocol
 pub fn deposit_collateral(env: Env, depositor: String, amount: i128) -> Result<(), ProtocolError> {
@@ -3105,6 +3184,23 @@ impl Contract {
         let mut out = Vec::new(&env);
         for (k, _) in reg.iter() { out.push_back(k); }
         out
+    }
+
+    // Upgrades
+    pub fn upgrade_propose(env: Env, caller: String, new_version: u32, code_hash: String) -> Result<(), ProtocolError> {
+        upgrade_propose(env, caller, new_version, code_hash)
+    }
+    pub fn upgrade_approve(env: Env, caller: String) -> Result<(), ProtocolError> {
+        upgrade_approve(env, caller)
+    }
+    pub fn upgrade_execute(env: Env, caller: String) -> Result<u32, ProtocolError> {
+        upgrade_execute(env, caller)
+    }
+    pub fn upgrade_rollback(env: Env, caller: String) -> Result<u32, ProtocolError> {
+        upgrade_rollback(env, caller)
+    }
+    pub fn upgrade_status(env: Env) -> (u32, u32, u32, String, bool, u64) {
+        upgrade_status(env)
     }
 
     // Social recovery entrypoints
