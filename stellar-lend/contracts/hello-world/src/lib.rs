@@ -1098,7 +1098,6 @@ impl ProtocolEvent {
                     )
                 );
             }
-<<<<<<< HEAD
             ProtocolEvent::PerfMetric(name, value) => {
                 env.events().publish(
                     (Symbol::new(env, "perf_metric"), name.clone()),
