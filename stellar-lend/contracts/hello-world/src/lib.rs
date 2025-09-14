@@ -440,6 +440,8 @@ impl AssetRegistryStorage {
     fn base_token_key(env: &Env) -> Symbol { Symbol::new(env, "base_token") }
     fn auction_book_key(env: &Env) -> Symbol { Symbol::new(env, "auction_book") }
     fn corr_key(env: &Env) -> Symbol { Symbol::new(env, "asset_correlations") }
+    fn price_cache_key(env: &Env) -> Symbol { Symbol::new(env, "price_cache_map") }
+    fn price_cache_ttl_key(env: &Env) -> Symbol { Symbol::new(env, "price_cache_ttl") }
 
     pub fn get_params_map(env: &Env) -> Map<Address, AssetParams> {
         env.storage().instance().get(&Self::params_key(env)).unwrap_or_else(|| Map::new(env))
@@ -528,6 +530,15 @@ impl AssetRegistryStorage {
     pub fn put_correlations(env: &Env, map: &Map<PairKey, i128>) {
         env.storage().instance().set(&Self::corr_key(env), map);
     }
+
+    pub fn get_price_cache(env: &Env) -> Map<Address, (i128, u64)> {
+        env.storage().instance().get(&Self::price_cache_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+    pub fn put_price_cache(env: &Env, map: &Map<Address, (i128, u64)>) {
+        env.storage().instance().set(&Self::price_cache_key(env), map);
+    }
+    pub fn get_price_cache_ttl(env: &Env) -> u64 { env.storage().instance().get(&Self::price_cache_ttl_key(env)).unwrap_or(30) }
+    pub fn set_price_cache_ttl(env: &Env, ttl: u64) { env.storage().instance().set(&Self::price_cache_ttl_key(env), &ttl); }
 
     pub fn get_user_risk(env: &Env) -> Map<Address, UserRiskState> {
         env.storage().instance().get(&Self::user_risk_key(env)).unwrap_or_else(|| Map::new(env))
@@ -2118,6 +2129,20 @@ fn get_asset_price(env: &Env, asset: &Address) -> Result<i128, ProtocolError> {
     Ok(price)
 }
 
+fn get_asset_price_cached(env: &Env, asset: &Address) -> Result<i128, ProtocolError> {
+    // Simple TTL cache over get_asset_price
+    let ttl = AssetRegistryStorage::get_price_cache_ttl(env);
+    let ts = env.ledger().timestamp();
+    let mut cache = AssetRegistryStorage::get_price_cache(env);
+    if let Some((p, t)) = cache.get(asset.clone()) {
+        if ts - t <= ttl { return Ok(p); }
+    }
+    let p = get_asset_price(env, asset)?;
+    cache.set(asset.clone(), (p, ts));
+    AssetRegistryStorage::put_price_cache(env, &cache);
+    Ok(p)
+}
+
 fn get_asset_params(env: &Env, asset: &Address) -> Result<AssetParams, ProtocolError> {
     let params_map = AssetRegistryStorage::get_params_map(env);
     let params = params_map.get(asset.clone()).ok_or(ProtocolError::AssetNotSupported)?;
@@ -2144,7 +2169,7 @@ fn calc_cross_totals(env: &Env, pos: &CrossPosition) -> Result<(i128, i128), Pro
     }
 
     for asset in uniq.iter() {
-        let price = get_asset_price(env, &asset)?; // 1e8 scaled
+        let price = get_asset_price_cached(env, &asset)?; // 1e8 scaled
         let params = get_asset_params(env, &asset)?;
         let c = pos.collateral.get(asset.clone()).unwrap_or(0);
         let d = pos.debt.get(asset.clone()).unwrap_or(0);
@@ -2888,6 +2913,14 @@ impl Contract {
         let caller_addr = Address::from_string(&caller);
         ProtocolConfig::require_admin(&env, &caller_addr)?;
         OracleStorage::set_heartbeat_ttl(&env, ttl);
+        Ok(())
+    }
+
+    /// Admin: set price cache TTL seconds
+    pub fn set_price_cache_ttl(env: Env, caller: String, ttl: u64) -> Result<(), ProtocolError> {
+        let caller_addr = Address::from_string(&caller);
+        ProtocolConfig::require_admin(&env, &caller_addr)?;
+        AssetRegistryStorage::set_price_cache_ttl(&env, ttl);
         Ok(())
     }
 
