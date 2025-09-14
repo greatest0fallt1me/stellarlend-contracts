@@ -1645,6 +1645,65 @@ pub fn integration_call_ping(env: Env, name: String) -> Result<(), ProtocolError
     Ok(())
 }
 
+// --- Configuration Management ---
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct ConfigSnapshot {
+    pub version: u32,
+    pub params: Map<Symbol, i128>,
+    pub ts: u64,
+}
+
+pub struct ConfigStorage;
+
+impl ConfigStorage {
+    fn cur_key(env: &Env) -> Symbol { Symbol::new(env, "config_current") }
+    fn ver_map_key(env: &Env) -> Symbol { Symbol::new(env, "config_versions") }
+    pub fn get_current(env: &Env) -> ConfigSnapshot { env.storage().instance().get(&Self::cur_key(env)).unwrap_or_else(|| ConfigSnapshot { version: 1, params: Map::new(env), ts: 0 }) }
+    pub fn put_current(env: &Env, c: &ConfigSnapshot) { env.storage().instance().set(&Self::cur_key(env), c); }
+    pub fn get_versions(env: &Env) -> Map<u32, ConfigSnapshot> { env.storage().instance().get(&Self::ver_map_key(env)).unwrap_or_else(|| Map::new(env)) }
+    pub fn put_versions(env: &Env, m: &Map<u32, ConfigSnapshot>) { env.storage().instance().set(&Self::ver_map_key(env), m); }
+}
+
+pub fn config_set(env: Env, caller: String, key: Symbol, value: i128) -> Result<u32, ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    ProtocolConfig::require_admin(&env, &caller_addr)?;
+    // basic validation
+    if value < 0 { return Err(ProtocolError::InvalidInput); }
+    let mut cur = ConfigStorage::get_current(&env);
+    cur.params.set(key, value);
+    // bump version and snapshot
+    cur.version += 1;
+    cur.ts = env.ledger().timestamp();
+    let mut vers = ConfigStorage::get_versions(&env);
+    vers.set(cur.version, cur.clone());
+    ConfigStorage::put_versions(&env, &vers);
+    ConfigStorage::put_current(&env, &cur);
+    Ok(cur.version)
+}
+
+pub fn config_get(env: Env, key: Symbol) -> Option<(i128, u32)> {
+    let cur = ConfigStorage::get_current(&env);
+    cur.params.get(key).map(|v| (v, cur.version))
+}
+
+pub fn config_backup(env: Env) -> u32 {
+    let cur = ConfigStorage::get_current(&env);
+    let mut vers = ConfigStorage::get_versions(&env);
+    vers.set(cur.version, cur.clone());
+    ConfigStorage::put_versions(&env, &vers);
+    cur.version
+}
+
+pub fn config_restore(env: Env, caller: String, version: u32) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    ProtocolConfig::require_admin(&env, &caller_addr)?;
+    let vers = ConfigStorage::get_versions(&env);
+    let snap = vers.get(version).ok_or(ProtocolError::NotFound)?;
+    ConfigStorage::put_current(&env, &snap);
+    Ok(())
+}
+
 // --- Core Protocol Function Placeholders ---
 /// Deposit collateral into the protocol
 pub fn deposit_collateral(env: Env, depositor: String, amount: i128) -> Result<(), ProtocolError> {
@@ -3022,6 +3081,12 @@ impl Contract {
         register_integration(env, caller, name, addr)
     }
     pub fn integration_call_ping(env: Env, name: String) -> Result<(), ProtocolError> { integration_call_ping(env, name) }
+
+    // Configuration
+    pub fn config_set(env: Env, caller: String, key: Symbol, value: i128) -> Result<u32, ProtocolError> { config_set(env, caller, key, value) }
+    pub fn config_get(env: Env, key: Symbol) -> Option<(i128, u32)> { config_get(env, key) }
+    pub fn config_backup(env: Env) -> u32 { config_backup(env) }
+    pub fn config_restore(env: Env, caller: String, version: u32) -> Result<(), ProtocolError> { config_restore(env, caller, version) }
 
     // Social recovery entrypoints
     pub fn set_guardians(env: Env, user: String, guardians: Vec<Address>) -> Result<(), ProtocolError> {
