@@ -1607,6 +1607,47 @@ pub fn ms_execute(env: Env, id: u64) -> Result<(), ProtocolError> {
     Ok(())
 }
 
+/// Bridge configuration per external network
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct BridgeConfig {
+    pub network_id: String,
+    pub bridge: Address,
+    pub fee_bps: i128,
+    pub enabled: bool,
+}
+
+impl BridgeConfig {
+    pub fn new(network_id: String, bridge: Address, fee_bps: i128) -> Self {
+        Self { network_id, bridge, fee_bps, enabled: true }
+    }
+}
+
+/// Storage for bridge registry and helpers
+pub struct BridgeStorage;
+
+impl BridgeStorage {
+    fn bridges_key(env: &Env) -> Symbol { Symbol::new(env, "bridges_registry") }
+
+    pub fn get_registry(env: &Env) -> Map<String, BridgeConfig> {
+        env.storage().instance().get(&Self::bridges_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+
+    pub fn put_registry(env: &Env, m: &Map<String, BridgeConfig>) {
+        env.storage().instance().set(&Self::bridges_key(env), m);
+    }
+
+    pub fn get(env: &Env, id: &String) -> Option<BridgeConfig> {
+        let reg = Self::get_registry(env);
+        reg.get(id.clone())
+    }
+}
+
+fn ensure_amount_positive(amount: i128) -> Result<(), ProtocolError> {
+    if amount <= 0 { return Err(ProtocolError::InvalidAmount); }
+    Ok(())
+}
+
 /// Minimum collateral ratio required (e.g., 150%)
 const MIN_COLLATERAL_RATIO: i128 = 150;
 
