@@ -1271,6 +1271,100 @@ impl ProtocolEvent {
     }
 }
 
+/// Analytics structures
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct Metrics {
+    pub total_deposited: i128,
+    pub total_borrowed: i128,
+    pub total_withdrawn: i128,
+    pub total_repaid: i128,
+    pub active_users: i128,
+    pub last_update: u64,
+}
+
+impl Metrics { pub fn zero() -> Self { Self { total_deposited:0, total_borrowed:0, total_withdrawn:0, total_repaid:0, active_users:0, last_update:0 } } }
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct UserMetrics {
+    pub deposits: i128,
+    pub borrows: i128,
+    pub withdrawals: i128,
+    pub repayments: i128,
+    pub last_active: u64,
+}
+
+impl UserMetrics { pub fn zero() -> Self { Self { deposits:0, borrows:0, withdrawals:0, repayments:0, last_active:0 } } }
+
+pub struct AnalyticsStorage;
+
+impl AnalyticsStorage {
+    fn metrics_key(env: &Env) -> Symbol { Symbol::new(env, "metrics") }
+    fn user_metrics_key(env: &Env) -> Symbol { Symbol::new(env, "user_metrics") }
+    fn history_key(env: &Env) -> Symbol { Symbol::new(env, "metrics_history") }
+
+    pub fn get_metrics(env: &Env) -> Metrics {
+        env.storage().instance().get(&Self::metrics_key(env)).unwrap_or_else(Metrics::zero)
+    }
+    pub fn put_metrics(env: &Env, m: &Metrics) {
+        env.storage().instance().set(&Self::metrics_key(env), m);
+    }
+    pub fn get_user_map(env: &Env) -> Map<Address, UserMetrics> {
+        env.storage().instance().get(&Self::user_metrics_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+    pub fn put_user_map(env: &Env, m: &Map<Address, UserMetrics>) {
+        env.storage().instance().set(&Self::user_metrics_key(env), m);
+    }
+    pub fn get_history(env: &Env) -> Map<u64, Metrics> {
+        env.storage().instance().get(&Self::history_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+    pub fn put_history(env: &Env, m: &Map<u64, Metrics>) {
+        env.storage().instance().set(&Self::history_key(env), m);
+    }
+}
+
+fn analytics_record_action(env: &Env, user: &Address, action: &str, amount: i128) {
+    // Update global metrics
+    let mut m = AnalyticsStorage::get_metrics(env);
+    match action {
+        "deposit" => m.total_deposited += amount,
+        "borrow" => m.total_borrowed += amount,
+        "withdraw" => m.total_withdrawn += amount,
+        "repay" => m.total_repaid += amount,
+        _ => {}
+    }
+    m.last_update = env.ledger().timestamp();
+    AnalyticsStorage::put_metrics(env, &m);
+
+    // Update per-user metrics
+    let mut umap = AnalyticsStorage::get_user_map(env);
+    let mut um = umap.get(user.clone()).unwrap_or_else(UserMetrics::zero);
+    match action {
+        "deposit" => um.deposits += amount,
+        "borrow" => um.borrows += amount,
+        "withdraw" => um.withdrawals += amount,
+        "repay" => um.repayments += amount,
+        _ => {}
+    }
+    let was_inactive = um.last_active == 0;
+    um.last_active = m.last_update;
+    umap.set(user.clone(), um);
+    AnalyticsStorage::put_user_map(env, &umap);
+
+    if was_inactive {
+        let mut m2 = AnalyticsStorage::get_metrics(env);
+        m2.active_users += 1;
+        AnalyticsStorage::put_metrics(env, &m2);
+    }
+
+    // Append simple daily snapshot
+    let bucket = m.last_update / 86400;
+    let mut hist = AnalyticsStorage::get_history(env);
+    hist.set(bucket, m);
+    AnalyticsStorage::put_history(env, &hist);
+}
+
 /// Bridge configuration per external network
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
@@ -1379,6 +1473,9 @@ pub fn deposit_collateral(env: Env, depositor: String, amount: i128) -> Result<(
             collateral_ratio,
         ).emit(&env);
 
+        // Analytics
+        analytics_record_action(&env, &Address::from_string(&depositor), "deposit", amount);
+
         Ok(())
     })();
     
@@ -1446,6 +1543,9 @@ pub fn borrow(env: Env, borrower: String, amount: i128) -> Result<(), ProtocolEr
             collateral_ratio,
         ).emit(&env);
 
+        // Analytics
+        analytics_record_action(&env, &Address::from_string(&borrower), "borrow", amount);
+
         Ok(())
     })();
     
@@ -1509,6 +1609,9 @@ pub fn repay(env: Env, repayer: String, amount: i128) -> Result<(), ProtocolErro
             position.debt,
             collateral_ratio,
         ).emit(&env);
+
+        // Analytics
+        analytics_record_action(&env, &Address::from_string(&repayer), "repay", repay_amount);
 
         Ok(())
     })();
@@ -1589,6 +1692,9 @@ pub fn withdraw(env: Env, withdrawer: String, amount: i128) -> Result<(), Protoc
             position.debt,
             collateral_ratio,
         ).emit(&env);
+
+        // Analytics
+        analytics_record_action(&env, &Address::from_string(&withdrawer), "withdraw", amount);
 
         Ok(())
     })();
