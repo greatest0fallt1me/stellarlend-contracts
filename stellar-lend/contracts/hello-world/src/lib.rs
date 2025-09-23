@@ -1643,6 +1643,141 @@ pub fn ms_execute(env: Env, id: u64) -> Result<(), ProtocolError> {
     Ok(())
 }
 
+/// Analytics structures
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct Metrics {
+    pub total_deposited: i128,
+    pub total_borrowed: i128,
+    pub total_withdrawn: i128,
+    pub total_repaid: i128,
+    pub active_users: i128,
+    pub last_update: u64,
+}
+
+impl Metrics { pub fn zero() -> Self { Self { total_deposited:0, total_borrowed:0, total_withdrawn:0, total_repaid:0, active_users:0, last_update:0 } } }
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct UserMetrics {
+    pub deposits: i128,
+    pub borrows: i128,
+    pub withdrawals: i128,
+    pub repayments: i128,
+    pub last_active: u64,
+}
+
+impl UserMetrics { pub fn zero() -> Self { Self { deposits:0, borrows:0, withdrawals:0, repayments:0, last_active:0 } } }
+
+pub struct AnalyticsStorage;
+
+impl AnalyticsStorage {
+    fn metrics_key(env: &Env) -> Symbol { Symbol::new(env, "metrics") }
+    fn user_metrics_key(env: &Env) -> Symbol { Symbol::new(env, "user_metrics") }
+    fn history_key(env: &Env) -> Symbol { Symbol::new(env, "metrics_history") }
+
+    pub fn get_metrics(env: &Env) -> Metrics {
+        env.storage().instance().get(&Self::metrics_key(env)).unwrap_or_else(Metrics::zero)
+    }
+    pub fn put_metrics(env: &Env, m: &Metrics) {
+        env.storage().instance().set(&Self::metrics_key(env), m);
+    }
+    pub fn get_user_map(env: &Env) -> Map<Address, UserMetrics> {
+        env.storage().instance().get(&Self::user_metrics_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+    pub fn put_user_map(env: &Env, m: &Map<Address, UserMetrics>) {
+        env.storage().instance().set(&Self::user_metrics_key(env), m);
+    }
+    pub fn get_history(env: &Env) -> Map<u64, Metrics> {
+        env.storage().instance().get(&Self::history_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+    pub fn put_history(env: &Env, m: &Map<u64, Metrics>) {
+        env.storage().instance().set(&Self::history_key(env), m);
+    }
+}
+
+fn analytics_record_action(env: &Env, user: &Address, action: &str, amount: i128) {
+    // Update global metrics
+    let mut m = AnalyticsStorage::get_metrics(env);
+    match action {
+        "deposit" => m.total_deposited += amount,
+        "borrow" => m.total_borrowed += amount,
+        "withdraw" => m.total_withdrawn += amount,
+        "repay" => m.total_repaid += amount,
+        _ => {}
+    }
+    m.last_update = env.ledger().timestamp();
+    AnalyticsStorage::put_metrics(env, &m);
+
+    // Update per-user metrics
+    let mut umap = AnalyticsStorage::get_user_map(env);
+    let mut um = umap.get(user.clone()).unwrap_or_else(UserMetrics::zero);
+    match action {
+        "deposit" => um.deposits += amount,
+        "borrow" => um.borrows += amount,
+        "withdraw" => um.withdrawals += amount,
+        "repay" => um.repayments += amount,
+        _ => {}
+    }
+    let was_inactive = um.last_active == 0;
+    um.last_active = m.last_update;
+    umap.set(user.clone(), um);
+    AnalyticsStorage::put_user_map(env, &umap);
+
+    if was_inactive {
+        let mut m2 = AnalyticsStorage::get_metrics(env);
+        m2.active_users += 1;
+        AnalyticsStorage::put_metrics(env, &m2);
+    }
+
+    // Append simple daily snapshot
+    let bucket = m.last_update / 86400;
+    let mut hist = AnalyticsStorage::get_history(env);
+    hist.set(bucket, m);
+    AnalyticsStorage::put_history(env, &hist);
+}
+
+/// Bridge configuration per external network
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct BridgeConfig {
+    pub network_id: String,
+    pub bridge: Address,
+    pub fee_bps: i128,
+    pub enabled: bool,
+}
+
+impl BridgeConfig {
+    pub fn new(network_id: String, bridge: Address, fee_bps: i128) -> Self {
+        Self { network_id, bridge, fee_bps, enabled: true }
+    }
+}
+
+/// Storage for bridge registry and helpers
+pub struct BridgeStorage;
+
+impl BridgeStorage {
+    fn bridges_key(env: &Env) -> Symbol { Symbol::new(env, "bridges_registry") }
+
+    pub fn get_registry(env: &Env) -> Map<String, BridgeConfig> {
+        env.storage().instance().get(&Self::bridges_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+
+    pub fn put_registry(env: &Env, m: &Map<String, BridgeConfig>) {
+        env.storage().instance().set(&Self::bridges_key(env), m);
+    }
+
+    pub fn get(env: &Env, id: &String) -> Option<BridgeConfig> {
+        let reg = Self::get_registry(env);
+        reg.get(id.clone())
+    }
+}
+
+fn ensure_amount_positive(amount: i128) -> Result<(), ProtocolError> {
+    if amount <= 0 { return Err(ProtocolError::InvalidAmount); }
+    Ok(())
+}
+
 /// Minimum collateral ratio required (e.g., 150%)
 const MIN_COLLATERAL_RATIO: i128 = 150;
 
