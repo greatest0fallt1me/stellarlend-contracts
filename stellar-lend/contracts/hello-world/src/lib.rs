@@ -879,6 +879,8 @@ pub enum ProtocolEvent {
     HealthReported(String),
     PerformanceReported(i128),
     SecurityIncident(String),
+    IntegrationRegistered(String, Address),
+    IntegrationCalled(String, Symbol),
 }
 
 impl ProtocolEvent {
@@ -1289,6 +1291,18 @@ impl ProtocolEvent {
                     (Symbol::new(env, "msg"), msg.clone())
                 );
             }
+            ProtocolEvent::IntegrationRegistered(name, addr) => {
+                env.events().publish(
+                    (Symbol::new(env, "integration_registered"), Symbol::new(env, "name")),
+                    (Symbol::new(env, "name"), name.clone(), Symbol::new(env, "address"), addr.clone())
+                );
+            }
+            ProtocolEvent::IntegrationCalled(name, method) => {
+                env.events().publish(
+                    (Symbol::new(env, "integration_called"), Symbol::new(env, "name")),
+                    (Symbol::new(env, "name"), name.clone(), Symbol::new(env, "method"), method.clone())
+                );
+            }
         }
     }
 }
@@ -2203,6 +2217,141 @@ pub fn ms_execute(env: Env, id: u64) -> Result<(), ProtocolError> {
     p.executed = true;
     props.set(id, p);
     MsStorage::put_props(&env, &props);
+    Ok(())
+}
+
+/// Analytics structures
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct Metrics {
+    pub total_deposited: i128,
+    pub total_borrowed: i128,
+    pub total_withdrawn: i128,
+    pub total_repaid: i128,
+    pub active_users: i128,
+    pub last_update: u64,
+}
+
+impl Metrics { pub fn zero() -> Self { Self { total_deposited:0, total_borrowed:0, total_withdrawn:0, total_repaid:0, active_users:0, last_update:0 } } }
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct UserMetrics {
+    pub deposits: i128,
+    pub borrows: i128,
+    pub withdrawals: i128,
+    pub repayments: i128,
+    pub last_active: u64,
+}
+
+impl UserMetrics { pub fn zero() -> Self { Self { deposits:0, borrows:0, withdrawals:0, repayments:0, last_active:0 } } }
+
+pub struct AnalyticsStorage;
+
+impl AnalyticsStorage {
+    fn metrics_key(env: &Env) -> Symbol { Symbol::new(env, "metrics") }
+    fn user_metrics_key(env: &Env) -> Symbol { Symbol::new(env, "user_metrics") }
+    fn history_key(env: &Env) -> Symbol { Symbol::new(env, "metrics_history") }
+
+    pub fn get_metrics(env: &Env) -> Metrics {
+        env.storage().instance().get(&Self::metrics_key(env)).unwrap_or_else(Metrics::zero)
+    }
+    pub fn put_metrics(env: &Env, m: &Metrics) {
+        env.storage().instance().set(&Self::metrics_key(env), m);
+    }
+    pub fn get_user_map(env: &Env) -> Map<Address, UserMetrics> {
+        env.storage().instance().get(&Self::user_metrics_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+    pub fn put_user_map(env: &Env, m: &Map<Address, UserMetrics>) {
+        env.storage().instance().set(&Self::user_metrics_key(env), m);
+    }
+    pub fn get_history(env: &Env) -> Map<u64, Metrics> {
+        env.storage().instance().get(&Self::history_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+    pub fn put_history(env: &Env, m: &Map<u64, Metrics>) {
+        env.storage().instance().set(&Self::history_key(env), m);
+    }
+}
+
+fn analytics_record_action(env: &Env, user: &Address, action: &str, amount: i128) {
+    // Update global metrics
+    let mut m = AnalyticsStorage::get_metrics(env);
+    match action {
+        "deposit" => m.total_deposited += amount,
+        "borrow" => m.total_borrowed += amount,
+        "withdraw" => m.total_withdrawn += amount,
+        "repay" => m.total_repaid += amount,
+        _ => {}
+    }
+    m.last_update = env.ledger().timestamp();
+    AnalyticsStorage::put_metrics(env, &m);
+
+    // Update per-user metrics
+    let mut umap = AnalyticsStorage::get_user_map(env);
+    let mut um = umap.get(user.clone()).unwrap_or_else(UserMetrics::zero);
+    match action {
+        "deposit" => um.deposits += amount,
+        "borrow" => um.borrows += amount,
+        "withdraw" => um.withdrawals += amount,
+        "repay" => um.repayments += amount,
+        _ => {}
+    }
+    let was_inactive = um.last_active == 0;
+    um.last_active = m.last_update;
+    umap.set(user.clone(), um);
+    AnalyticsStorage::put_user_map(env, &umap);
+
+    if was_inactive {
+        let mut m2 = AnalyticsStorage::get_metrics(env);
+        m2.active_users += 1;
+        AnalyticsStorage::put_metrics(env, &m2);
+    }
+
+    // Append simple daily snapshot
+    let bucket = m.last_update / 86400;
+    let mut hist = AnalyticsStorage::get_history(env);
+    hist.set(bucket, m);
+    AnalyticsStorage::put_history(env, &hist);
+}
+
+/// Bridge configuration per external network
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct BridgeConfig {
+    pub network_id: String,
+    pub bridge: Address,
+    pub fee_bps: i128,
+    pub enabled: bool,
+}
+
+impl BridgeConfig {
+    pub fn new(network_id: String, bridge: Address, fee_bps: i128) -> Self {
+        Self { network_id, bridge, fee_bps, enabled: true }
+    }
+}
+
+/// Storage for bridge registry and helpers
+pub struct BridgeStorage;
+
+impl BridgeStorage {
+    fn bridges_key(env: &Env) -> Symbol { Symbol::new(env, "bridges_registry") }
+
+    pub fn get_registry(env: &Env) -> Map<String, BridgeConfig> {
+        env.storage().instance().get(&Self::bridges_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+
+    pub fn put_registry(env: &Env, m: &Map<String, BridgeConfig>) {
+        env.storage().instance().set(&Self::bridges_key(env), m);
+    }
+
+    pub fn get(env: &Env, id: &String) -> Option<BridgeConfig> {
+        let reg = Self::get_registry(env);
+        reg.get(id.clone())
+    }
+}
+
+fn ensure_amount_positive(amount: i128) -> Result<(), ProtocolError> {
+    if amount <= 0 { return Err(ProtocolError::InvalidAmount); }
     Ok(())
 }
 
@@ -2402,6 +2551,35 @@ pub fn monitor_report_security(env: Env, msg: String) -> Result<(), ProtocolErro
 }
 
 pub fn monitor_get(env: Env) -> MonitorMetrics { MonitorStorage::get(&env) }
+
+// --- External Integrations ---
+pub struct IntegrationStorage;
+
+impl IntegrationStorage {
+    fn key(env: &Env) -> Symbol { Symbol::new(env, "integrations") }
+    pub fn get(env: &Env) -> Map<String, Address> { env.storage().instance().get(&Self::key(env)).unwrap_or_else(|| Map::new(env)) }
+    pub fn put(env: &Env, m: &Map<String, Address>) { env.storage().instance().set(&Self::key(env), m); }
+}
+
+pub fn register_integration(env: Env, caller: String, name: String, addr: Address) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    ProtocolConfig::require_admin(&env, &caller_addr)?;
+    if name.is_empty() { return Err(ProtocolError::InvalidInput); }
+    let mut m = IntegrationStorage::get(&env);
+    m.set(name.clone(), addr.clone());
+    IntegrationStorage::put(&env, &m);
+    ProtocolEvent::IntegrationRegistered(name, addr).emit(&env);
+    Ok(())
+}
+
+pub fn integration_call_ping(env: Env, name: String) -> Result<(), ProtocolError> {
+    if name.is_empty() { return Err(ProtocolError::InvalidInput); }
+    let m = IntegrationStorage::get(&env);
+    let addr = m.get(name.clone()).ok_or(ProtocolError::NotFound)?;
+    let _: () = env.invoke_contract(&addr, &Symbol::new(&env, "ping"), Vec::new(&env));
+    ProtocolEvent::IntegrationCalled(name, Symbol::new(&env, "ping")).emit(&env);
+    Ok(())
+}
 
 // --- Core Protocol Function Placeholders ---
 /// Deposit collateral into the protocol
@@ -3930,6 +4108,12 @@ impl Contract {
     pub fn monitor_report_performance(env: Env, gas_used: i128) -> Result<(), ProtocolError> { monitor_report_performance(env, gas_used) }
     pub fn monitor_report_security(env: Env, msg: String) -> Result<(), ProtocolError> { monitor_report_security(env, msg) }
     pub fn monitor_get(env: Env) -> MonitorMetrics { monitor_get(env) }
+
+    // Integrations
+    pub fn register_integration(env: Env, caller: String, name: String, addr: Address) -> Result<(), ProtocolError> {
+        register_integration(env, caller, name, addr)
+    }
+    pub fn integration_call_ping(env: Env, name: String) -> Result<(), ProtocolError> { integration_call_ping(env, name) }
 
     // Social recovery entrypoints
     pub fn set_guardians(env: Env, user: String, guardians: Vec<Address>) -> Result<(), ProtocolError> {
