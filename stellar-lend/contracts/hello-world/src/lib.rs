@@ -875,6 +875,10 @@ pub enum ProtocolEvent {
     BridgeFeeUpdated(String, i128),          // network_id, fee_bps
     AssetBridgedIn(Address, String, Address, i128, i128),  // user, network_id, asset, amount, fee
     AssetBridgedOut(Address, String, Address, i128, i128), // user, network_id, asset, amount, fee
+    // Monitoring
+    HealthReported(String),
+    PerformanceReported(i128),
+    SecurityIncident(String),
 }
 
 impl ProtocolEvent {
@@ -1265,6 +1269,24 @@ impl ProtocolEvent {
                         Symbol::new(env, "amount"), *amount,
                         Symbol::new(env, "fee"), *fee,
                     )
+                );
+            }
+            ProtocolEvent::HealthReported(msg) => {
+                env.events().publish(
+                    (Symbol::new(env, "health_report"), Symbol::new(env, "msg")),
+                    (Symbol::new(env, "msg"), msg.clone())
+                );
+            }
+            ProtocolEvent::PerformanceReported(gas) => {
+                env.events().publish(
+                    (Symbol::new(env, "performance_report"), Symbol::new(env, "gas")),
+                    (Symbol::new(env, "gas"), *gas)
+                );
+            }
+            ProtocolEvent::SecurityIncident(msg) => {
+                env.events().publish(
+                    (Symbol::new(env, "security_incident"), Symbol::new(env, "msg")),
+                    (Symbol::new(env, "msg"), msg.clone())
                 );
             }
         }
@@ -1848,6 +1870,342 @@ pub fn ms_execute(env: Env, id: u64) -> Result<(), ProtocolError> {
     Ok(())
 }
 
+/// Analytics structures
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct Metrics {
+    pub total_deposited: i128,
+    pub total_borrowed: i128,
+    pub total_withdrawn: i128,
+    pub total_repaid: i128,
+    pub active_users: i128,
+    pub last_update: u64,
+}
+
+impl Metrics { pub fn zero() -> Self { Self { total_deposited:0, total_borrowed:0, total_withdrawn:0, total_repaid:0, active_users:0, last_update:0 } } }
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct UserMetrics {
+    pub deposits: i128,
+    pub borrows: i128,
+    pub withdrawals: i128,
+    pub repayments: i128,
+    pub last_active: u64,
+}
+
+impl UserMetrics { pub fn zero() -> Self { Self { deposits:0, borrows:0, withdrawals:0, repayments:0, last_active:0 } } }
+
+pub struct AnalyticsStorage;
+
+impl AnalyticsStorage {
+    fn metrics_key(env: &Env) -> Symbol { Symbol::new(env, "metrics") }
+    fn user_metrics_key(env: &Env) -> Symbol { Symbol::new(env, "user_metrics") }
+    fn history_key(env: &Env) -> Symbol { Symbol::new(env, "metrics_history") }
+
+    pub fn get_metrics(env: &Env) -> Metrics {
+        env.storage().instance().get(&Self::metrics_key(env)).unwrap_or_else(Metrics::zero)
+    }
+    pub fn put_metrics(env: &Env, m: &Metrics) {
+        env.storage().instance().set(&Self::metrics_key(env), m);
+    }
+    pub fn get_user_map(env: &Env) -> Map<Address, UserMetrics> {
+        env.storage().instance().get(&Self::user_metrics_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+    pub fn put_user_map(env: &Env, m: &Map<Address, UserMetrics>) {
+        env.storage().instance().set(&Self::user_metrics_key(env), m);
+    }
+    pub fn get_history(env: &Env) -> Map<u64, Metrics> {
+        env.storage().instance().get(&Self::history_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+    pub fn put_history(env: &Env, m: &Map<u64, Metrics>) {
+        env.storage().instance().set(&Self::history_key(env), m);
+    }
+}
+
+fn analytics_record_action(env: &Env, user: &Address, action: &str, amount: i128) {
+    // Update global metrics
+    let mut m = AnalyticsStorage::get_metrics(env);
+    match action {
+        "deposit" => m.total_deposited += amount,
+        "borrow" => m.total_borrowed += amount,
+        "withdraw" => m.total_withdrawn += amount,
+        "repay" => m.total_repaid += amount,
+        _ => {}
+    }
+    m.last_update = env.ledger().timestamp();
+    AnalyticsStorage::put_metrics(env, &m);
+
+    // Update per-user metrics
+    let mut umap = AnalyticsStorage::get_user_map(env);
+    let mut um = umap.get(user.clone()).unwrap_or_else(UserMetrics::zero);
+    match action {
+        "deposit" => um.deposits += amount,
+        "borrow" => um.borrows += amount,
+        "withdraw" => um.withdrawals += amount,
+        "repay" => um.repayments += amount,
+        _ => {}
+    }
+    let was_inactive = um.last_active == 0;
+    um.last_active = m.last_update;
+    umap.set(user.clone(), um);
+    AnalyticsStorage::put_user_map(env, &umap);
+
+    if was_inactive {
+        let mut m2 = AnalyticsStorage::get_metrics(env);
+        m2.active_users += 1;
+        AnalyticsStorage::put_metrics(env, &m2);
+    }
+
+    // Append simple daily snapshot
+    let bucket = m.last_update / 86400;
+    let mut hist = AnalyticsStorage::get_history(env);
+    hist.set(bucket, m);
+    AnalyticsStorage::put_history(env, &hist);
+}
+
+/// Bridge configuration per external network
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct BridgeConfig {
+    pub network_id: String,
+    pub bridge: Address,
+    pub fee_bps: i128,
+    pub enabled: bool,
+}
+
+impl BridgeConfig {
+    pub fn new(network_id: String, bridge: Address, fee_bps: i128) -> Self {
+        Self { network_id, bridge, fee_bps, enabled: true }
+    }
+}
+
+/// Storage for bridge registry and helpers
+pub struct BridgeStorage;
+
+impl BridgeStorage {
+    fn bridges_key(env: &Env) -> Symbol { Symbol::new(env, "bridges_registry") }
+
+    pub fn get_registry(env: &Env) -> Map<String, BridgeConfig> {
+        env.storage().instance().get(&Self::bridges_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+
+    pub fn put_registry(env: &Env, m: &Map<String, BridgeConfig>) {
+        env.storage().instance().set(&Self::bridges_key(env), m);
+    }
+
+    pub fn get(env: &Env, id: &String) -> Option<BridgeConfig> {
+        let reg = Self::get_registry(env);
+        reg.get(id.clone())
+    }
+}
+
+fn ensure_amount_positive(amount: i128) -> Result<(), ProtocolError> {
+    if amount <= 0 { return Err(ProtocolError::InvalidAmount); }
+    Ok(())
+}
+
+// --- Social Recovery & MultiSig ---
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct RecoveryRequest {
+    pub user: Address,
+    pub new_address: Address,
+    pub approvals: Map<Address, bool>,
+    pub created_at: u64,
+    pub delay_secs: u64,
+    pub executed: bool,
+}
+
+impl RecoveryRequest {
+    pub fn new(env: &Env, user: Address, new_address: Address, delay_secs: u64) -> Self {
+        Self { user, new_address, approvals: Map::new(env), created_at: env.ledger().timestamp(), delay_secs, executed: false }
+    }
+}
+
+pub struct RecoveryStorage;
+
+impl RecoveryStorage {
+    fn guardians_key(env: &Env) -> Symbol { Symbol::new(env, "guardians") }
+    fn requests_key(env: &Env) -> Symbol { Symbol::new(env, "recovery_requests") }
+    fn mapping_key(env: &Env) -> Symbol { Symbol::new(env, "recovered_mapping") }
+
+    pub fn get_guardians(env: &Env) -> Map<Address, Vec<Address>> {
+        env.storage().instance().get(&Self::guardians_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+    pub fn put_guardians(env: &Env, m: &Map<Address, Vec<Address>>) { env.storage().instance().set(&Self::guardians_key(env), m); }
+
+    pub fn get_requests(env: &Env) -> Map<Address, RecoveryRequest> {
+        env.storage().instance().get(&Self::requests_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+    pub fn put_requests(env: &Env, m: &Map<Address, RecoveryRequest>) { env.storage().instance().set(&Self::requests_key(env), m); }
+
+    pub fn get_mapping(env: &Env) -> Map<Address, Address> {
+        env.storage().instance().get(&Self::mapping_key(env)).unwrap_or_else(|| Map::new(env))
+    }
+    pub fn put_mapping(env: &Env, m: &Map<Address, Address>) { env.storage().instance().set(&Self::mapping_key(env), m); }
+}
+
+pub fn set_guardians(env: Env, user: String, guardians: Vec<Address>) -> Result<(), ProtocolError> {
+    if user.is_empty() { return Err(ProtocolError::InvalidAddress); }
+    let user_addr = Address::from_string(&user);
+    let mut gmap = RecoveryStorage::get_guardians(&env);
+    gmap.set(user_addr, guardians);
+    RecoveryStorage::put_guardians(&env, &gmap);
+    Ok(())
+}
+
+pub fn start_recovery(env: Env, guardian: String, user: String, new_address: Address, delay_secs: u64) -> Result<(), ProtocolError> {
+    if guardian.is_empty() || user.is_empty() { return Err(ProtocolError::InvalidAddress); }
+    let gaddr = Address::from_string(&guardian);
+    let uaddr = Address::from_string(&user);
+    let gmap = RecoveryStorage::get_guardians(&env);
+    let guardians = gmap.get(uaddr.clone()).ok_or(ProtocolError::GuardianNotFound)?;
+    let mut authorized = false;
+    for ga in guardians.iter() { if ga == gaddr { authorized = true; break; } }
+    if !authorized { return Err(ProtocolError::Unauthorized); }
+
+    let mut reqs = RecoveryStorage::get_requests(&env);
+    if reqs.contains_key(uaddr.clone()) { return Err(ProtocolError::RecoveryRequestAlreadyExists); }
+    let mut req = RecoveryRequest::new(&env, uaddr.clone(), new_address, delay_secs);
+    req.approvals.set(gaddr, true);
+    reqs.set(uaddr, req);
+    RecoveryStorage::put_requests(&env, &reqs);
+    Ok(())
+}
+
+pub fn approve_recovery(env: Env, guardian: String, user: String) -> Result<(), ProtocolError> {
+    if guardian.is_empty() || user.is_empty() { return Err(ProtocolError::InvalidAddress); }
+    let gaddr = Address::from_string(&guardian);
+    let uaddr = Address::from_string(&user);
+    let gmap = RecoveryStorage::get_guardians(&env);
+    let guardians = gmap.get(uaddr.clone()).ok_or(ProtocolError::GuardianNotFound)?;
+    let mut authorized = false;
+    for ga in guardians.iter() { if ga == gaddr { authorized = true; break; } }
+    if !authorized { return Err(ProtocolError::Unauthorized); }
+
+    let mut reqs = RecoveryStorage::get_requests(&env);
+    let mut req = reqs.get(uaddr.clone()).ok_or(ProtocolError::RecoveryRequestNotFound)?;
+    req.approvals.set(gaddr, true);
+    reqs.set(uaddr, req);
+    RecoveryStorage::put_requests(&env, &reqs);
+    Ok(())
+}
+
+pub fn execute_recovery(env: Env, user: String, min_approvals: i128) -> Result<Address, ProtocolError> {
+    if user.is_empty() { return Err(ProtocolError::InvalidAddress); }
+    let uaddr = Address::from_string(&user);
+    let mut reqs = RecoveryStorage::get_requests(&env);
+    let mut req = reqs.get(uaddr.clone()).ok_or(ProtocolError::RecoveryRequestNotFound)?;
+    if req.executed { return Err(ProtocolError::RecoveryFailed); }
+    // check approvals
+    let mut count: i128 = 0;
+    for (_, v) in req.approvals.iter() { if v { count += 1; } }
+    if count < min_approvals { return Err(ProtocolError::MultiSigNotReady); }
+    // timelock
+    if env.ledger().timestamp() < req.created_at + req.delay_secs { return Err(ProtocolError::RecoveryNotReady); }
+    req.executed = true;
+    reqs.set(uaddr.clone(), req);
+    RecoveryStorage::put_requests(&env, &reqs);
+
+    let mut map = RecoveryStorage::get_mapping(&env);
+    map.set(uaddr.clone(), reqs.get(uaddr.clone()).unwrap().new_address);
+    RecoveryStorage::put_mapping(&env, &map);
+    Ok(map.get(uaddr).unwrap())
+}
+
+// Simple MultiSig for admin operations
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub enum MsActionKind { SetMinCR(i128) }
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct MsProposal {
+    pub id: u64,
+    pub action: MsActionKind,
+    pub approvals: Map<Address, bool>,
+    pub executed: bool,
+}
+
+pub struct MsStorage;
+
+impl MsStorage {
+    fn admins_key(env: &Env) -> Symbol { Symbol::new(env, "ms_admins") }
+    fn threshold_key(env: &Env) -> Symbol { Symbol::new(env, "ms_threshold") }
+    fn counter_key(env: &Env) -> Symbol { Symbol::new(env, "ms_counter") }
+    fn props_key(env: &Env) -> Symbol { Symbol::new(env, "ms_props") }
+
+    pub fn get_admins(env: &Env) -> Vec<Address> { env.storage().instance().get(&Self::admins_key(env)).unwrap_or_else(|| Vec::new(env)) }
+    pub fn set_admins(env: &Env, v: &Vec<Address>) { env.storage().instance().set(&Self::admins_key(env), v); }
+    pub fn get_threshold(env: &Env) -> i128 { env.storage().instance().get(&Self::threshold_key(env)).unwrap_or(2) }
+    pub fn set_threshold(env: &Env, t: i128) { env.storage().instance().set(&Self::threshold_key(env), &t); }
+    pub fn next_id(env: &Env) -> u64 { let mut c: u64 = env.storage().instance().get(&Self::counter_key(env)).unwrap_or(0u64); c+=1; env.storage().instance().set(&Self::counter_key(env), &c); c }
+    pub fn get_props(env: &Env) -> Map<u64, MsProposal> { env.storage().instance().get(&Self::props_key(env)).unwrap_or_else(|| Map::new(env)) }
+    pub fn put_props(env: &Env, m: &Map<u64, MsProposal>) { env.storage().instance().set(&Self::props_key(env), m); }
+}
+
+fn ms_require_admin(env: &Env, caller: &Address) -> Result<(), ProtocolError> {
+    let admins = MsStorage::get_admins(env);
+    for a in admins.iter() { if a == *caller { return Ok(()); } }
+    Err(ProtocolError::Unauthorized)
+}
+
+pub fn ms_set_admins(env: Env, caller: String, admins: Vec<Address>, threshold: i128) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    ProtocolConfig::require_admin(&env, &caller_addr)?;
+    if threshold <= 0 { return Err(ProtocolError::InvalidInput); }
+    MsStorage::set_admins(&env, &admins);
+    MsStorage::set_threshold(&env, threshold);
+    Ok(())
+}
+
+pub fn ms_propose_set_min_cr(env: Env, caller: String, ratio: i128) -> Result<u64, ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    ms_require_admin(&env, &caller_addr)?;
+    if ratio <= 0 { return Err(ProtocolError::InvalidInput); }
+    let id = MsStorage::next_id(&env);
+    let mut props = MsStorage::get_props(&env);
+    let mut approvals = Map::new(&env);
+    approvals.set(caller_addr, true);
+    let prop = MsProposal { id, action: MsActionKind::SetMinCR(ratio), approvals, executed: false };
+    props.set(id, prop);
+    MsStorage::put_props(&env, &props);
+    Ok(id)
+}
+
+pub fn ms_approve(env: Env, caller: String, id: u64) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    ms_require_admin(&env, &caller_addr)?;
+    let mut props = MsStorage::get_props(&env);
+    let mut p = props.get(id).ok_or(ProtocolError::MultiSigProposalNotFound)?;
+    p.approvals.set(caller_addr, true);
+    props.set(id, p);
+    MsStorage::put_props(&env, &props);
+    Ok(())
+}
+
+pub fn ms_execute(env: Env, id: u64) -> Result<(), ProtocolError> {
+    let mut props = MsStorage::get_props(&env);
+    let mut p = props.get(id).ok_or(ProtocolError::MultiSigProposalNotFound)?;
+    if p.executed { return Err(ProtocolError::InvalidOperation); }
+    // count approvals
+    let mut cnt: i128 = 0;
+    for (_, v) in p.approvals.iter() { if v { cnt += 1; } }
+    if cnt < MsStorage::get_threshold(&env) { return Err(ProtocolError::MultiSigNotReady); }
+    // execute action
+    match p.action.clone() {
+        MsActionKind::SetMinCR(ratio) => {
+            let admin = ProtocolConfig::get_admin(&env).ok_or(ProtocolError::Unauthorized)?;
+            ProtocolConfig::set_min_collateral_ratio(&env, &admin, ratio)?;
+        }
+    }
+    p.executed = true;
+    props.set(id, p);
+    MsStorage::put_props(&env, &props);
+    Ok(())
+}
+
 /// Minimum collateral ratio required (e.g., 150%)
 const MIN_COLLATERAL_RATIO: i128 = 150;
 
@@ -1994,6 +2352,56 @@ pub fn data_migrate_bump_version(env: Env, name: Symbol, new_version: u32) -> Re
     DataStorage::save(&env, &name, &b);
     Ok(())
 }
+
+// --- Monitoring & Alerting ---
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct MonitorMetrics {
+    pub last_health: String,
+    pub perf_gas: i128,
+    pub security_incidents: i128,
+    pub last_update: u64,
+}
+
+impl MonitorMetrics { pub fn zero(env: &Env) -> Self { Self { last_health: String::from_str(env, ""), perf_gas: 0, security_incidents: 0, last_update: 0 } } }
+
+pub struct MonitorStorage;
+
+impl MonitorStorage {
+    fn key(env: &Env) -> Symbol { Symbol::new(env, "monitor_metrics") }
+    pub fn get(env: &Env) -> MonitorMetrics { env.storage().instance().get(&Self::key(env)).unwrap_or_else(|| MonitorMetrics::zero(env)) }
+    pub fn put(env: &Env, m: &MonitorMetrics) { env.storage().instance().set(&Self::key(env), m); }
+}
+
+pub fn monitor_report_health(env: Env, msg: String) -> Result<(), ProtocolError> {
+    let mut m = MonitorStorage::get(&env);
+    m.last_health = msg.clone();
+    m.last_update = env.ledger().timestamp();
+    MonitorStorage::put(&env, &m);
+    ProtocolEvent::HealthReported(msg).emit(&env);
+    Ok(())
+}
+
+pub fn monitor_report_performance(env: Env, gas_used: i128) -> Result<(), ProtocolError> {
+    if gas_used < 0 { return Err(ProtocolError::InvalidInput); }
+    let mut m = MonitorStorage::get(&env);
+    m.perf_gas = gas_used;
+    m.last_update = env.ledger().timestamp();
+    MonitorStorage::put(&env, &m);
+    ProtocolEvent::PerformanceReported(gas_used).emit(&env);
+    Ok(())
+}
+
+pub fn monitor_report_security(env: Env, msg: String) -> Result<(), ProtocolError> {
+    let mut m = MonitorStorage::get(&env);
+    m.security_incidents += 1;
+    m.last_update = env.ledger().timestamp();
+    MonitorStorage::put(&env, &m);
+    ProtocolEvent::SecurityIncident(msg).emit(&env);
+    Ok(())
+}
+
+pub fn monitor_get(env: Env) -> MonitorMetrics { MonitorStorage::get(&env) }
 
 // --- Core Protocol Function Placeholders ---
 /// Deposit collateral into the protocol
@@ -3516,6 +3924,12 @@ impl Contract {
     pub fn data_backup(env: Env, name: Symbol) -> Result<(), ProtocolError> { data_backup(env, name) }
     pub fn data_restore(env: Env, name: Symbol) -> Result<(), ProtocolError> { data_restore(env, name) }
     pub fn data_migrate_bump_version(env: Env, name: Symbol, new_version: u32) -> Result<(), ProtocolError> { data_migrate_bump_version(env, name, new_version) }
+
+    // Monitoring
+    pub fn monitor_report_health(env: Env, msg: String) -> Result<(), ProtocolError> { monitor_report_health(env, msg) }
+    pub fn monitor_report_performance(env: Env, gas_used: i128) -> Result<(), ProtocolError> { monitor_report_performance(env, gas_used) }
+    pub fn monitor_report_security(env: Env, msg: String) -> Result<(), ProtocolError> { monitor_report_security(env, msg) }
+    pub fn monitor_get(env: Env) -> MonitorMetrics { monitor_get(env) }
 
     // Social recovery entrypoints
     pub fn set_guardians(env: Env, user: String, guardians: Vec<Address>) -> Result<(), ProtocolError> {
