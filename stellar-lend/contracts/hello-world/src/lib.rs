@@ -8,7 +8,7 @@ extern crate alloc;
 
 use alloc::format;
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, vec, Address, Env,
+    contract, contracterror, contractimpl, contracttype, vec, Address, Bytes, Env,
     IntoVal, Map, String, Symbol, Vec,
 };
 use soroban_sdk::token::TokenClient;
@@ -1930,6 +1930,71 @@ pub fn upgrade_status(env: Env) -> (u32, u32, u32, String, bool, u64) {
     (i.current_version, i.previous_version, i.pending_version, i.pending_hash, i.approved, i.last_update)
 }
 
+// --- Data Management & Storage Optimization ---
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct DataBlob {
+    pub version: u32,
+    pub compressed: bool,
+    pub data: Bytes,
+}
+
+pub struct DataStorage;
+
+impl DataStorage {
+    fn prefix(env: &Env) -> Symbol { Symbol::new(env, "data_store") }
+    fn backup_prefix(env: &Env) -> Symbol { Symbol::new(env, "data_store_backup") }
+
+    fn key_for(env: &Env, name: &Symbol) -> (Symbol, Symbol) { (Self::prefix(env), name.clone()) }
+    fn bkey_for(env: &Env, name: &Symbol) -> (Symbol, Symbol) { (Self::backup_prefix(env), name.clone()) }
+
+    pub fn save(env: &Env, name: &Symbol, blob: &DataBlob) {
+        env.storage().persistent().set(&Self::key_for(env, name), blob);
+    }
+    pub fn load(env: &Env, name: &Symbol) -> Option<DataBlob> {
+        env.storage().persistent().get(&Self::key_for(env, name))
+    }
+    pub fn backup(env: &Env, name: &Symbol) -> Result<(), ProtocolError> {
+        let blob = Self::load(env, name).ok_or(ProtocolError::NotFound)?;
+        env.storage().persistent().set(&Self::bkey_for(env, name), &blob);
+        Ok(())
+    }
+    pub fn restore(env: &Env, name: &Symbol) -> Result<(), ProtocolError> {
+        let blob: DataBlob = env.storage().persistent().get(&Self::bkey_for(env, name)).ok_or(ProtocolError::NotFound)?;
+        env.storage().persistent().set(&Self::key_for(env, name), &blob);
+        Ok(())
+    }
+}
+
+fn compress_identity(_env: &Env, data: &Bytes) -> Bytes { data.clone() }
+fn decompress_identity(_env: &Env, data: &Bytes) -> Bytes { data.clone() }
+
+pub fn data_save(env: Env, name: Symbol, version: u32, data: Bytes, compress: bool) -> Result<(), ProtocolError> {
+    if version == 0 { return Err(ProtocolError::InvalidInput); }
+    let d = if compress { compress_identity(&env, &data) } else { data };
+    let blob = DataBlob { version, compressed: compress, data: d };
+    DataStorage::save(&env, &name, &blob);
+    Ok(())
+}
+
+pub fn data_load(env: Env, name: Symbol) -> Result<(u32, Bytes), ProtocolError> {
+    let b = DataStorage::load(&env, &name).ok_or(ProtocolError::NotFound)?;
+    let d = if b.compressed { decompress_identity(&env, &b.data) } else { b.data };
+    Ok((b.version, d))
+}
+
+pub fn data_backup(env: Env, name: Symbol) -> Result<(), ProtocolError> { DataStorage::backup(&env, &name) }
+pub fn data_restore(env: Env, name: Symbol) -> Result<(), ProtocolError> { DataStorage::restore(&env, &name) }
+
+pub fn data_migrate_bump_version(env: Env, name: Symbol, new_version: u32) -> Result<(), ProtocolError> {
+    if new_version == 0 { return Err(ProtocolError::InvalidInput); }
+    let mut b = DataStorage::load(&env, &name).ok_or(ProtocolError::NotFound)?;
+    if new_version <= b.version { return Err(ProtocolError::InvalidOperation); }
+    b.version = new_version;
+    DataStorage::save(&env, &name, &b);
+    Ok(())
+}
+
 // --- Core Protocol Function Placeholders ---
 /// Deposit collateral into the protocol
 pub fn deposit_collateral(env: Env, depositor: String, amount: i128) -> Result<(), ProtocolError> {
@@ -3442,6 +3507,15 @@ impl Contract {
     pub fn upgrade_status(env: Env) -> (u32, u32, u32, String, bool, u64) {
         upgrade_status(env)
     }
+
+    // Data management entrypoints
+    pub fn data_save(env: Env, name: Symbol, version: u32, data: Bytes, compress: bool) -> Result<(), ProtocolError> {
+        data_save(env, name, version, data, compress)
+    }
+    pub fn data_load(env: Env, name: Symbol) -> Result<(u32, Bytes), ProtocolError> { data_load(env, name) }
+    pub fn data_backup(env: Env, name: Symbol) -> Result<(), ProtocolError> { data_backup(env, name) }
+    pub fn data_restore(env: Env, name: Symbol) -> Result<(), ProtocolError> { data_restore(env, name) }
+    pub fn data_migrate_bump_version(env: Env, name: Symbol, new_version: u32) -> Result<(), ProtocolError> { data_migrate_bump_version(env, name, new_version) }
 
     // Social recovery entrypoints
     pub fn set_guardians(env: Env, user: String, guardians: Vec<Address>) -> Result<(), ProtocolError> {
