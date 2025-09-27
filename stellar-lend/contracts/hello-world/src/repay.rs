@@ -3,7 +3,8 @@
 
 use soroban_sdk::{contracterror, contracttype, Address, Env, String, Symbol, Vec, Map};
 use crate::{ProtocolError, Position, StateHelper, InterestRateStorage, InterestRateManager, 
-            ProtocolEvent, analytics_record_action, ReentrancyGuard};
+            ProtocolEvent, ReentrancyGuard};
+use crate::analytics::AnalyticsModule;
 
 /// Repay-specific errors
 #[contracterror]
@@ -134,7 +135,7 @@ impl RepayModule {
             ).emit(env);
 
             // Analytics
-            analytics_record_action(env, &repayer_addr, "repay", repay_amount);
+            AnalyticsModule::record_activity(env, &repayer_addr, "repay", repay_amount, None)?;
 
             Ok(())
         })();
@@ -236,7 +237,7 @@ impl RepayModule {
             ).emit(env);
 
             // Analytics
-            analytics_record_action(env, &repayer_addr, "repay", total_debt);
+            AnalyticsModule::record_activity(env, &repayer_addr, "repay", total_debt, None)?;
 
             Ok(total_debt)
         })();

@@ -4,6 +4,7 @@
 use soroban_sdk::{contracterror, contracttype, Address, Env, String, Symbol, Vec, Map};
 use crate::{ProtocolError, Position, StateHelper, InterestRateStorage, InterestRateManager, 
             ProtocolEvent, ReentrancyGuard, RiskConfigStorage, ProtocolConfig};
+use crate::analytics::AnalyticsModule;
 
 /// Liquidation-specific errors
 #[contracterror]
@@ -157,6 +158,9 @@ impl LiquidationModule {
                 collateral_seized,
                 liquidation_amount,
             ).emit(env);
+
+            // Analytics
+            AnalyticsModule::record_activity(env, &liquidator_addr, "liquidate", liquidation_amount, None)?;
 
             Ok(result)
         })();

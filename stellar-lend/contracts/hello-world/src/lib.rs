@@ -32,6 +32,7 @@ mod borrow;
 mod repay;
 mod withdraw;
 mod liquidate;
+mod analytics;
 
 /// Reentrancy guard for security
 pub struct ReentrancyGuard;
@@ -453,6 +454,54 @@ pub enum ProtocolEvent {
     // Flash loan events
     FlashLoanInitiated(Address, Address, i128, i128), // initiator, asset, amount, fee
     FlashLoanCompleted(Address, Address, i128, i128), // initiator, asset, amount, fee
+    // Dynamic collateral factor
+    DynamicCFUpdated(Address, i128), // asset, new_collateral_factor
+    // AMM
+    AMMSwap(Address, Address, Address, i128, i128), // user, asset_in, asset_out, amount_in, amount_out
+    AMMLiquidityAdded(Address, Address, Address, i128, i128), // user, asset_a, asset_b, amt_a, amt_b
+    AMMLiquidityRemoved(Address, Address, i128), // user, pool, lp_amount
+    // Risk scoring
+    RiskParamsSet(i128, i128, i128, i128), // base_limit, factor, min_rate_bps, max_rate_bps
+    UserRiskUpdated(Address, i128, i128), // user, score, credit_limit_value
+    // Liquidation advanced
+    AuctionStarted(Address, Address, i128), // user, asset, debt_portion
+    AuctionBidPlaced(Address, Address, i128), // bidder, user, bid_amount
+    AuctionSettled(Address, Address, i128, i128), // winner, user, seized_collateral, repaid_debt
+    // Risk monitoring
+    RiskAlert(Address, i128), // user, risk_score
+    // Performance & Ops
+    PerfMetric(Symbol, i128), // metric_name, value
+    CacheUpdated(Symbol, Symbol), // cache_key, op (set/evict)
+    // Compliance
+    ComplianceKycUpdated(Address, bool),
+    ComplianceAlert(Address, Symbol),
+    // Market making
+    MMParamsUpdated(i128, i128), // spread_bps, inventory_cap
+    MMIncentiveAccrued(Address, i128), // user, amount
+    // Integration/API
+    WebhookRegistered(Address, Symbol), // target, topic
+    // Security
+    BugReportLogged(Address, Symbol), // reporter, code
+    AuditTrail(Symbol, Symbol), // action, ref
+    // Fees
+    FeesUpdated(i128, i128), // base_bps, tier1_bps
+    // Insurance
+    InsuranceParamsUpdated(i128, i128), // premium_bps, coverage_cap
+    CircuitBreaker(bool),
+    ClaimFiled(Address, i128, Symbol), // user, amount, reason
+    // Bridge
+    BridgeRegistered(String, Address, i128), // network_id, bridge, fee_bps
+    BridgeFeeUpdated(String, i128),          // network_id, fee_bps
+    AssetBridgedIn(Address, String, Address, i128, i128),  // user, network_id, asset, amount, fee
+    AssetBridgedOut(Address, String, Address, i128, i128), // user, network_id, asset, amount, fee
+    // Monitoring
+    HealthReported(String),
+    PerformanceReported(i128),
+    SecurityIncident(String),
+    IntegrationRegistered(String, Address),
+    IntegrationCalled(String, Symbol),
+    // Analytics
+    AnalyticsUpdated(Address, String, i128, u64), // user, activity_type, amount, timestamp
 }
 
 impl ProtocolEvent {
@@ -569,6 +618,194 @@ impl ProtocolEvent {
                         Symbol::new(env, "asset"), asset.clone(),
                         Symbol::new(env, "amount"), *amount,
                         Symbol::new(env, "fee"), *fee,
+                    )
+                );
+            }
+            ProtocolEvent::DynamicCFUpdated(asset, new_cf) => {
+                env.events().publish(
+                    (Symbol::new(env, "dynamic_cf_updated"), Symbol::new(env, "asset")),
+                    (
+                        Symbol::new(env, "asset"), asset.clone(),
+                        Symbol::new(env, "new_cf"), *new_cf,
+                    )
+                );
+            }
+            ProtocolEvent::AMMSwap(user, asset_in, asset_out, amount_in, amount_out) => {
+                env.events().publish(
+                    (Symbol::new(env, "amm_swap"), Symbol::new(env, "user")),
+                    (
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "asset_in"), asset_in.clone(),
+                        Symbol::new(env, "asset_out"), asset_out.clone(),
+                        Symbol::new(env, "amount_in"), *amount_in,
+                        Symbol::new(env, "amount_out"), *amount_out,
+                    )
+                );
+            }
+            ProtocolEvent::AMMLiquidityAdded(user, asset_a, asset_b, amt_a, amt_b) => {
+                env.events().publish(
+                    (Symbol::new(env, "amm_liquidity_added"), Symbol::new(env, "user")),
+                    (
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "asset_a"), asset_a.clone(),
+                        Symbol::new(env, "asset_b"), asset_b.clone(),
+                        Symbol::new(env, "amount_a"), *amt_a,
+                        Symbol::new(env, "amount_b"), *amt_b,
+                    )
+                );
+            }
+            ProtocolEvent::AMMLiquidityRemoved(user, pool, lp_amount) => {
+                env.events().publish(
+                    (Symbol::new(env, "amm_liquidity_removed"), Symbol::new(env, "user")),
+                    (
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "pool"), pool.clone(),
+                        Symbol::new(env, "lp_amount"), *lp_amount,
+                    )
+                );
+            }
+            ProtocolEvent::RiskParamsSet(base_limit, factor, min_rate_bps, max_rate_bps) => {
+                env.events().publish(
+                    (Symbol::new(env, "risk_params_set"), Symbol::new(env, "base_limit")),
+                    (
+                        Symbol::new(env, "base_limit"), *base_limit,
+                        Symbol::new(env, "factor"), *factor,
+                        Symbol::new(env, "min_rate_bps"), *min_rate_bps,
+                        Symbol::new(env, "max_rate_bps"), *max_rate_bps,
+                    )
+                );
+            }
+            ProtocolEvent::UserRiskUpdated(user, score, limit) => {
+                env.events().publish(
+                    (Symbol::new(env, "user_risk_updated"), Symbol::new(env, "user")),
+                    (
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "score"), *score,
+                        Symbol::new(env, "credit_limit"), *limit,
+                    )
+                );
+            }
+            ProtocolEvent::AuctionStarted(user, asset, debt_portion) => {
+                env.events().publish(
+                    (Symbol::new(env, "auction_started"), Symbol::new(env, "user")),
+                    (
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "asset"), asset.clone(),
+                        Symbol::new(env, "debt_portion"), *debt_portion,
+                    )
+                );
+            }
+            ProtocolEvent::AuctionBidPlaced(bidder, user, bid_amount) => {
+                env.events().publish(
+                    (Symbol::new(env, "auction_bid"), Symbol::new(env, "bidder")),
+                    (
+                        Symbol::new(env, "bidder"), bidder.clone(),
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "bid_amount"), *bid_amount,
+                    )
+                );
+            }
+            ProtocolEvent::AuctionSettled(winner, user, seized, repaid) => {
+                env.events().publish(
+                    (Symbol::new(env, "auction_settled"), Symbol::new(env, "winner")),
+                    (
+                        Symbol::new(env, "winner"), winner.clone(),
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "seized_collateral"), *seized,
+                        Symbol::new(env, "repaid_debt"), *repaid,
+                    )
+                );
+            }
+            ProtocolEvent::RiskAlert(user, score) => {
+                env.events().publish(
+                    (Symbol::new(env, "risk_alert"), Symbol::new(env, "user")),
+                    (
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "score"), *score,
+                    )
+                );
+            }
+            ProtocolEvent::BridgeRegistered(network_id, bridge, fee_bps) => {
+                env.events().publish(
+                    (Symbol::new(env, "bridge_registered"), Symbol::new(env, "network")),
+                    (
+                        Symbol::new(env, "network"), network_id.clone(),
+                        Symbol::new(env, "bridge"), bridge.clone(),
+                        Symbol::new(env, "fee_bps"), *fee_bps,
+                    )
+                );
+            }
+            ProtocolEvent::BridgeFeeUpdated(network_id, fee_bps) => {
+                env.events().publish(
+                    (Symbol::new(env, "bridge_fee_updated"), Symbol::new(env, "network")),
+                    (
+                        Symbol::new(env, "network"), network_id.clone(),
+                        Symbol::new(env, "fee_bps"), *fee_bps,
+                    )
+                );
+            }
+            ProtocolEvent::AssetBridgedIn(user, network_id, asset, amount, fee) => {
+                env.events().publish(
+                    (Symbol::new(env, "asset_bridged_in"), Symbol::new(env, "user")),
+                    (
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "network"), network_id.clone(),
+                        Symbol::new(env, "asset"), asset.clone(),
+                        Symbol::new(env, "amount"), *amount,
+                        Symbol::new(env, "fee"), *fee,
+                    )
+                );
+            }
+            ProtocolEvent::AssetBridgedOut(user, network_id, asset, amount, fee) => {
+                env.events().publish(
+                    (Symbol::new(env, "asset_bridged_out"), Symbol::new(env, "user")),
+                    (
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "network"), network_id.clone(),
+                        Symbol::new(env, "asset"), asset.clone(),
+                        Symbol::new(env, "amount"), *amount,
+                        Symbol::new(env, "fee"), *fee,
+                    )
+                );
+            }
+            ProtocolEvent::HealthReported(msg) => {
+                env.events().publish(
+                    (Symbol::new(env, "health_report"), Symbol::new(env, "msg")),
+                    (Symbol::new(env, "msg"), msg.clone())
+                );
+            }
+            ProtocolEvent::PerformanceReported(gas) => {
+                env.events().publish(
+                    (Symbol::new(env, "performance_report"), Symbol::new(env, "gas")),
+                    (Symbol::new(env, "gas"), *gas)
+                );
+            }
+            ProtocolEvent::SecurityIncident(msg) => {
+                env.events().publish(
+                    (Symbol::new(env, "security_incident"), Symbol::new(env, "msg")),
+                    (Symbol::new(env, "msg"), msg.clone())
+                );
+            }
+            ProtocolEvent::IntegrationRegistered(name, addr) => {
+                env.events().publish(
+                    (Symbol::new(env, "integration_registered"), Symbol::new(env, "name")),
+                    (Symbol::new(env, "name"), name.clone(), Symbol::new(env, "address"), addr.clone())
+                );
+            }
+            ProtocolEvent::IntegrationCalled(name, method) => {
+                env.events().publish(
+                    (Symbol::new(env, "integration_called"), Symbol::new(env, "name")),
+                    (Symbol::new(env, "name"), name.clone(), Symbol::new(env, "method"), method.clone())
+                );
+            }
+            ProtocolEvent::AnalyticsUpdated(user, activity_type, amount, timestamp) => {
+                env.events().publish(
+                    (Symbol::new(env, "analytics_updated"), Symbol::new(env, "user")),
+                    (
+                        Symbol::new(env, "user"), user.clone(),
+                        Symbol::new(env, "activity_type"), activity_type.clone(),
+                        Symbol::new(env, "amount"), *amount,
+                        Symbol::new(env, "timestamp"), *timestamp,
                     )
                 );
             }
@@ -782,5 +1019,32 @@ impl Contract {
     /// Get system stats
     pub fn get_system_stats(env: Env) -> Result<(i128, i128, i128, i128), ProtocolError> {
         get_system_stats(env)
+    }
+
+    // Analytics and Reporting Functions
+    pub fn get_protocol_report(env: Env) -> Result<analytics::ProtocolReport, ProtocolError> {
+        analytics::AnalyticsModule::get_protocol_report(&env)
+    }
+
+    pub fn get_user_report(env: Env, user: String) -> Result<analytics::UserReport, ProtocolError> {
+        let user_addr = Address::from_string(&env, &user);
+        analytics::AnalyticsModule::get_user_report(&env, &user_addr)
+    }
+
+    pub fn get_asset_report(env: Env, asset: Address) -> Result<analytics::AssetReport, ProtocolError> {
+        analytics::AnalyticsModule::get_asset_report(&env, &asset)
+    }
+
+    pub fn calculate_risk_analytics(env: Env) -> Result<analytics::RiskAnalytics, ProtocolError> {
+        analytics::AnalyticsModule::calculate_risk_analytics(&env)
+    }
+
+    pub fn update_performance_metrics(env: Env, processing_time: i128, success: bool) -> Result<(), ProtocolError> {
+        analytics::AnalyticsModule::update_performance_metrics(&env, processing_time, success)
+    }
+
+    pub fn record_activity(env: Env, user: String, activity_type: String, amount: i128, asset: Option<Address>) -> Result<(), ProtocolError> {
+        let user_addr = Address::from_string(&env, &user);
+        analytics::AnalyticsModule::record_activity(&env, &user_addr, &activity_type.to_string(), amount, asset)
     }
 }
