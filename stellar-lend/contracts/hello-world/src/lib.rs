@@ -26,12 +26,12 @@ static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 #[cfg(test)]
 mod test;
 
-// Module placeholders for future expansion
-// mod deposit;
-// mod borrow;
-// mod repay;
-// mod withdraw;
-// mod liquidate;
+// Core protocol modules
+mod deposit;
+mod borrow;
+mod repay;
+mod withdraw;
+mod liquidate;
 
 /// Reentrancy guard for security
 pub struct ReentrancyGuard;
@@ -1024,170 +1024,6 @@ impl ProtocolEvent {
                         Symbol::new(env, "user"), user.clone(),
                         Symbol::new(env, "score"), *score,
                     )
-                );
-            }
-            ProtocolEvent::BridgeRegistered(network_id, bridge, fee_bps) => {
-                env.events().publish(
-                    (Symbol::new(env, "bridge_registered"), Symbol::new(env, "network")),
-                    (
-                        Symbol::new(env, "network"), network_id.clone(),
-                        Symbol::new(env, "bridge"), bridge.clone(),
-                env.events().publish(
-                    (Symbol::new(env, "bridge_registered"), Symbol::new(env, "network")),
-                    (
-                        Symbol::new(env, "network"), network_id.clone(),
-                        Symbol::new(env, "bridge"), bridge.clone(),
-                env.events().publish(
-                    (Symbol::new(env, "bridge_registered"), Symbol::new(env, "network")),
-                    (
-                        Symbol::new(env, "network"), network_id.clone(),
-                        Symbol::new(env, "bridge"), bridge.clone(),
-                        Symbol::new(env, "fee_bps"), *fee_bps,
-                    )
-                );
-            }
-            ProtocolEvent::BridgeFeeUpdated(network_id, fee_bps) => {
-                env.events().publish(
-                    (Symbol::new(env, "bridge_fee_updated"), Symbol::new(env, "network")),
-                    (
-                        Symbol::new(env, "network"), network_id.clone(),
-                        Symbol::new(env, "fee_bps"), *fee_bps,
-                    )
-                );
-            }
-            ProtocolEvent::BridgeFeeUpdated(network_id, fee_bps) => {
-                env.events().publish(
-                    (Symbol::new(env, "bridge_fee_updated"), Symbol::new(env, "network")),
-                    (
-                        Symbol::new(env, "network"), network_id.clone(),
-                        Symbol::new(env, "fee_bps"), *fee_bps,
-                    )
-                );
-            }
-            ProtocolEvent::AssetBridgedIn(user, network_id, asset, amount, fee) => {
-                env.events().publish(
-                    (Symbol::new(env, "asset_bridged_in"), Symbol::new(env, "user")),
-            ProtocolEvent::AssetBridgedIn(user, network_id, asset, amount, fee) => {
-                env.events().publish(
-                    (Symbol::new(env, "asset_bridged_in"), Symbol::new(env, "user")),
-                    (
-                        Symbol::new(env, "user"), user.clone(),
-                        Symbol::new(env, "network"), network_id.clone(),
-                        Symbol::new(env, "asset"), asset.clone(),
-                        Symbol::new(env, "amount"), *amount,
-                        Symbol::new(env, "fee"), *fee,
-                    )
-                );
-            }
-            ProtocolEvent::AssetBridgedOut(user, network_id, asset, amount, fee) => {
-                env.events().publish(
-                    (Symbol::new(env, "asset_bridged_out"), Symbol::new(env, "user")),
-                    (
-                        Symbol::new(env, "user"), user.clone(),
-                        Symbol::new(env, "network"), network_id.clone(),
-                        Symbol::new(env, "asset"), asset.clone(),
-                        Symbol::new(env, "amount"), *amount,
-                        Symbol::new(env, "fee"), *fee,
-                    )
-                );
-            }
-            ProtocolEvent::AssetBridgedOut(user, network_id, asset, amount, fee) => {
-                env.events().publish(
-                    (Symbol::new(env, "asset_bridged_out"), Symbol::new(env, "user")),
-                    (
-                        Symbol::new(env, "user"), user.clone(),
-                        Symbol::new(env, "network"), network_id.clone(),
-                        Symbol::new(env, "asset"), asset.clone(),
-                        Symbol::new(env, "amount"), *amount,
-                        Symbol::new(env, "fee"), *fee,
-                    )
-                );
-            }
-            ProtocolEvent::HealthReported(msg) => {
-                env.events().publish(
-                    (Symbol::new(env, "health_report"), Symbol::new(env, "msg")),
-                    (Symbol::new(env, "msg"), msg.clone())
-                );
-            }
-            ProtocolEvent::PerformanceReported(gas) => {
-                env.events().publish(
-                    (Symbol::new(env, "performance_report"), Symbol::new(env, "gas")),
-                    (Symbol::new(env, "gas"), *gas)
-                );
-            }
-            ProtocolEvent::SecurityIncident(msg) => {
-                env.events().publish(
-                    (Symbol::new(env, "security_incident"), Symbol::new(env, "msg")),
-                    (Symbol::new(env, "msg"), msg.clone())
-                );
-            }
-            ProtocolEvent::IntegrationRegistered(name, addr) => {
-                env.events().publish(
-                    (Symbol::new(env, "integration_registered"), Symbol::new(env, "name")),
-                    (Symbol::new(env, "name"), name.clone(), Symbol::new(env, "address"), addr.clone())
-                );
-            }
-            ProtocolEvent::IntegrationCalled(name, method) => {
-                env.events().publish(
-                    (Symbol::new(env, "integration_called"), Symbol::new(env, "name")),
-                    (Symbol::new(env, "name"), name.clone(), Symbol::new(env, "method"), method.clone())
-                env.events().publish(
-                    (Symbol::new(env, "health_report"), Symbol::new(env, "msg")),
-                    (Symbol::new(env, "msg"), msg.clone())
-                );
-            }
-            ProtocolEvent::PerformanceReported(gas) => {
-                env.events().publish(
-                    (Symbol::new(env, "performance_report"), Symbol::new(env, "gas")),
-                    (Symbol::new(env, "gas"), *gas)
-                );
-            }
-            ProtocolEvent::SecurityIncident(msg) => {
-                env.events().publish(
-                    (Symbol::new(env, "security_incident"), Symbol::new(env, "msg")),
-                    (Symbol::new(env, "msg"), msg.clone())
-                );
-            }
-            ProtocolEvent::IntegrationRegistered(name, addr) => {
-                env.events().publish(
-                    (Symbol::new(env, "integration_registered"), Symbol::new(env, "name")),
-                    (Symbol::new(env, "name"), name.clone(), Symbol::new(env, "address"), addr.clone())
-                );
-            }
-            ProtocolEvent::IntegrationCalled(name, method) => {
-                env.events().publish(
-                    (Symbol::new(env, "integration_called"), Symbol::new(env, "name")),
-                    (Symbol::new(env, "name"), name.clone(), Symbol::new(env, "method"), method.clone())
-                );
-            }
-            ProtocolEvent::HealthReported(msg) => {
-                env.events().publish(
-                    (Symbol::new(env, "health_report"), Symbol::new(env, "msg")),
-                    (Symbol::new(env, "msg"), msg.clone())
-                );
-            }
-            ProtocolEvent::PerformanceReported(gas) => {
-                env.events().publish(
-                    (Symbol::new(env, "performance_report"), Symbol::new(env, "gas")),
-                    (Symbol::new(env, "gas"), *gas)
-                );
-            }
-            ProtocolEvent::SecurityIncident(msg) => {
-                env.events().publish(
-                    (Symbol::new(env, "security_incident"), Symbol::new(env, "msg")),
-                    (Symbol::new(env, "msg"), msg.clone())
-                );
-            }
-            ProtocolEvent::IntegrationRegistered(name, addr) => {
-                env.events().publish(
-                    (Symbol::new(env, "integration_registered"), Symbol::new(env, "name")),
-                    (Symbol::new(env, "name"), name.clone(), Symbol::new(env, "address"), addr.clone())
-                );
-            }
-            ProtocolEvent::IntegrationCalled(name, method) => {
-                env.events().publish(
-                    (Symbol::new(env, "integration_called"), Symbol::new(env, "name")),
-                    (Symbol::new(env, "name"), name.clone(), Symbol::new(env, "method"), method.clone())
                 );
             }
             ProtocolEvent::BridgeRegistered(network_id, bridge, fee_bps) => {
@@ -3895,365 +3731,28 @@ pub fn config_restore(env: Env, caller: String, version: u32) -> Result<(), Prot
 // --- Core Protocol Function Placeholders ---
 /// Deposit collateral into the protocol
 pub fn deposit_collateral(env: Env, depositor: String, amount: i128) -> Result<(), ProtocolError> {
-    ReentrancyGuard::enter(&env)?;
-    let result = (|| {
-        // Input validation
-        if depositor.is_empty() {
-            return Err(ProtocolError::InvalidAddress);
-        }
-        if amount <= 0 {
-            return Err(ProtocolError::InvalidAmount);
-        }
-
-        // Check if deposit is paused
-        let risk_config = RiskConfigStorage::get(&env);
-        if risk_config.pause_deposit {
-            return Err(ProtocolError::ProtocolPaused);
-        }
-
-        let depositor_addr = Address::from_string(&depositor);
-        
-        // Load user position with error handling
-        let mut position = match StateHelper::get_position(&env, &depositor_addr) {
-            Some(pos) => pos,
-            None => Position::new(depositor_addr.clone(), 0, 0),
-        };
-
-        // If token transfers enforced, perform transferFrom depositor -> this contract for configured base asset (single-asset path)
-        if AssetRegistryStorage::get_enforce_transfers(&env) {
-            if let Some(token_addr) = AssetRegistryStorage::get_base_token(&env) {
-                let client = TokenClient::new(&env, &token_addr);
-                client.transfer_from(&depositor_addr, &env.current_contract_address(), &depositor_addr, &amount);
-            }
-        }
-
-        // Accrue interest before updating position
-        let state = InterestRateStorage::update_state(&env);
-        InterestRateManager::accrue_interest_for_position(
-            &env,
-            &mut position,
-            state.current_borrow_rate,
-            state.current_supply_rate,
-        );
-
-        // Update position
-        position.collateral += amount;
-        
-        // Save position
-        StateHelper::save_position(&env, &position);
-
-        // Emit event
-        let collateral_ratio = if position.debt > 0 {
-            (position.collateral * 100) / position.debt
-        } else {
-            0
-        };
-
-        ProtocolEvent::PositionUpdated(
-            depositor_addr,
-            position.collateral,
-            position.debt,
-            collateral_ratio,
-        ).emit(&env);
-
-        // Analytics
-        analytics_record_action(&env, &Address::from_string(&depositor), "deposit", amount);
-
-        Ok(())
-    })();
-    
-    ReentrancyGuard::exit(&env);
-    result
+    deposit::DepositModule::deposit_collateral(&env, &depositor, amount)
 }
 
 /// Borrow assets from the protocol
 pub fn borrow(env: Env, borrower: String, amount: i128) -> Result<(), ProtocolError> {
-    ReentrancyGuard::enter(&env)?;
-    let result = (|| {
-        // Input validation
-        if borrower.is_empty() {
-            return Err(ProtocolError::InvalidAddress);
-        }
-        if amount <= 0 {
-            return Err(ProtocolError::InvalidAmount);
-        }
-
-        // Check if borrow is paused
-        let risk_config = RiskConfigStorage::get(&env);
-        if risk_config.pause_borrow {
-            return Err(ProtocolError::ProtocolPaused);
-        }
-
-        let borrower_addr = Address::from_string(&borrower);
-        
-        // Load user position
-        let mut position = match StateHelper::get_position(&env, &borrower_addr) {
-            Some(pos) => pos,
-            None => return Err(ProtocolError::PositionNotFound),
-        };
-
-        // Accrue interest
-        let state = InterestRateStorage::update_state(&env);
-        InterestRateManager::accrue_interest_for_position(
-            &env,
-            &mut position,
-            state.current_borrow_rate,
-            state.current_supply_rate,
-        );
-
-        // Check collateral ratio
-        let min_ratio = ProtocolConfig::get_min_collateral_ratio(&env);
-        let new_debt = position.debt + amount;
-        let collateral_ratio = if new_debt > 0 {
-            (position.collateral * 100) / new_debt
-        } else {
-            0
-        };
-
-        if collateral_ratio < min_ratio {
-            return Err(ProtocolError::InsufficientCollateralRatio);
-        }
-
-        // Update position
-        position.debt = new_debt;
-        StateHelper::save_position(&env, &position);
-
-        // Emit event
-        ProtocolEvent::PositionUpdated(
-            borrower_addr,
-            position.collateral,
-            position.debt,
-            collateral_ratio,
-        ).emit(&env);
-
-        // Analytics
-        analytics_record_action(&env, &Address::from_string(&borrower), "borrow", amount);
-
-        Ok(())
-    })();
-    
-    ReentrancyGuard::exit(&env);
-    result
+    borrow::BorrowModule::borrow(&env, &borrower, amount)
 }
 
 /// Repay borrowed assets
 pub fn repay(env: Env, repayer: String, amount: i128) -> Result<(), ProtocolError> {
-    ReentrancyGuard::enter(&env)?;
-    let result = (|| {
-        // Input validation
-        if repayer.is_empty() {
-            return Err(ProtocolError::InvalidAddress);
-        }
-        if amount <= 0 {
-            return Err(ProtocolError::InvalidAmount);
-        }
-
-        let repayer_addr = Address::from_string(&repayer);
-        
-        // Load user position
-        let mut position = match StateHelper::get_position(&env, &repayer_addr) {
-            Some(pos) => pos,
-            None => return Err(ProtocolError::PositionNotFound),
-        };
-
-        // Accrue interest
-        let state = InterestRateStorage::update_state(&env);
-        InterestRateManager::accrue_interest_for_position(
-            &env,
-            &mut position,
-            state.current_borrow_rate,
-            state.current_supply_rate,
-        );
-
-        // Check if user has debt to repay
-        if position.debt == 0 {
-            return Err(ProtocolError::InvalidOperation);
-        }
-
-        // Update position
-        let repay_amount = if amount > position.debt {
-            position.debt
-        } else {
-            amount
-        };
-        position.debt -= repay_amount;
-        StateHelper::save_position(&env, &position);
-
-        // Emit event
-        let collateral_ratio = if position.debt > 0 {
-            (position.collateral * 100) / position.debt
-        } else {
-            0
-        };
-
-        ProtocolEvent::PositionUpdated(
-            repayer_addr,
-            position.collateral,
-            position.debt,
-            collateral_ratio,
-        ).emit(&env);
-
-        // Analytics
-        analytics_record_action(&env, &Address::from_string(&repayer), "repay", repay_amount);
-
-        Ok(())
-    })();
-    
-    ReentrancyGuard::exit(&env);
-    result
+    repay::RepayModule::repay(&env, &repayer, amount)
 }
 
 /// Withdraw collateral from the protocol
 pub fn withdraw(env: Env, withdrawer: String, amount: i128) -> Result<(), ProtocolError> {
-    ReentrancyGuard::enter(&env)?;
-    let result = (|| {
-        // Input validation
-        if withdrawer.is_empty() {
-            return Err(ProtocolError::InvalidAddress);
-        }
-        if amount <= 0 {
-            return Err(ProtocolError::InvalidAmount);
-        }
-
-        // Check if withdraw is paused
-        let risk_config = RiskConfigStorage::get(&env);
-        if risk_config.pause_withdraw {
-            return Err(ProtocolError::ProtocolPaused);
-        }
-
-        let withdrawer_addr = Address::from_string(&withdrawer);
-        
-        // Load user position
-        let mut position = match StateHelper::get_position(&env, &withdrawer_addr) {
-            Some(pos) => pos,
-            None => return Err(ProtocolError::PositionNotFound),
-        };
-
-        // Check if user has enough collateral
-        if position.collateral < amount {
-            return Err(ProtocolError::InsufficientCollateral);
-        }
-
-        // Accrue interest
-        let state = InterestRateStorage::update_state(&env);
-        InterestRateManager::accrue_interest_for_position(
-            &env,
-            &mut position,
-            state.current_borrow_rate,
-            state.current_supply_rate,
-        );
-
-        // Check collateral ratio after withdrawal (only if there's debt)
-        let new_collateral = position.collateral - amount;
-        let collateral_ratio = if position.debt > 0 {
-            let min_ratio = ProtocolConfig::get_min_collateral_ratio(&env);
-            let ratio = (new_collateral * 100) / position.debt;
-            if ratio < min_ratio {
-                return Err(ProtocolError::InsufficientCollateralRatio);
-            }
-            ratio
-        } else {
-            0
-        };
-
-        // Update position
-        position.collateral = new_collateral;
-        StateHelper::save_position(&env, &position);
-
-        // If token transfers enforced, perform transfer to withdrawer for configured base asset (single-asset path)
-        if AssetRegistryStorage::get_enforce_transfers(&env) {
-            if let Some(token_addr) = AssetRegistryStorage::get_base_token(&env) {
-                let client = TokenClient::new(&env, &token_addr);
-                client.transfer(&env.current_contract_address(), &withdrawer_addr, &amount);
-            }
-        }
-
-        // Emit event
-        ProtocolEvent::PositionUpdated(
-            withdrawer_addr,
-            position.collateral,
-            position.debt,
-            collateral_ratio,
-        ).emit(&env);
-
-        // Analytics
-        analytics_record_action(&env, &Address::from_string(&withdrawer), "withdraw", amount);
-
-        Ok(())
-    })();
-    
-    ReentrancyGuard::exit(&env);
-    result
+    withdraw::WithdrawModule::withdraw(&env, &withdrawer, amount)
 }
 
 /// Liquidate an undercollateralized position
 pub fn liquidate(env: Env, liquidator: String, user: String, amount: i128) -> Result<(), ProtocolError> {
-    ReentrancyGuard::enter(&env)?;
-    let result = (|| {
-        // Input validation
-        if liquidator.is_empty() || user.is_empty() {
-            return Err(ProtocolError::InvalidAddress);
-        }
-        if amount <= 0 {
-            return Err(ProtocolError::InvalidAmount);
-        }
-
-        // Check if liquidation is paused
-        let risk_config = RiskConfigStorage::get(&env);
-        if risk_config.pause_liquidate {
-            return Err(ProtocolError::ProtocolPaused);
-        }
-
-        let liquidator_addr = Address::from_string(&liquidator);
-        let user_addr = Address::from_string(&user);
-        
-        // Load user position
-        let mut position = match StateHelper::get_position(&env, &user_addr) {
-            Some(pos) => pos,
-            None => return Err(ProtocolError::PositionNotFound),
-        };
-
-        // Check if position is eligible for liquidation
-        let min_ratio = ProtocolConfig::get_min_collateral_ratio(&env);
-        let collateral_ratio = if position.debt > 0 {
-            (position.collateral * 100) / position.debt
-        } else {
-            0
-        };
-
-        if collateral_ratio >= min_ratio {
-            return Err(ProtocolError::NotEligibleForLiquidation);
-        }
-
-        // Calculate liquidation amount
-        let max_liquidation = (position.debt * risk_config.close_factor) / 100000000;
-        let liquidation_amount = if amount > max_liquidation {
-            max_liquidation
-        } else {
-            amount
-        };
-
-        // Calculate collateral to seize
-        let collateral_seized = (liquidation_amount * (100000000 + risk_config.liquidation_incentive)) / 100000000;
-
-        // Update position
-        position.debt -= liquidation_amount;
-        position.collateral -= collateral_seized;
-        StateHelper::save_position(&env, &position);
-
-        // Emit liquidation event
-        ProtocolEvent::LiquidationExecuted(
-            liquidator_addr,
-            user_addr,
-            collateral_seized,
-            liquidation_amount,
-        ).emit(&env);
-
+    let _result = liquidate::LiquidationModule::liquidate(&env, &liquidator, &user, amount)?;
         Ok(())
-    })();
-    
-    ReentrancyGuard::exit(&env);
-    result
 }
 
 /// Get user position
@@ -4431,101 +3930,22 @@ fn calc_cross_totals(env: &Env, pos: &CrossPosition) -> Result<(i128, i128), Pro
 
 /// Deposit collateral for a specific asset (cross-asset)
 pub fn deposit_collateral_asset(env: Env, user: String, asset: Address, amount: i128) -> Result<(), ProtocolError> {
-    ReentrancyGuard::enter(&env)?;
-    let result = (|| {
-        if user.is_empty() { return Err(ProtocolError::InvalidAddress); }
-        if amount <= 0 { return Err(ProtocolError::InvalidAmount); }
-        let params = get_asset_params(&env, &asset)?;
-        if !params.cross_enabled || !params.deposit_enabled { return Err(ProtocolError::CrossAssetDisabled); }
-
-        let user_addr = Address::from_string(&user);
-        let mut x = CrossStateHelper::get_or_init_position(&env, &user_addr);
-        let bal = x.collateral.get(asset.clone()).unwrap_or(0) + amount;
-        x.collateral.set(asset.clone(), bal);
-        CrossStateHelper::save_position(&env, &x);
-        ProtocolEvent::CrossDeposit(user_addr, asset, amount).emit(&env);
-        Ok(())
-    })();
-    ReentrancyGuard::exit(&env);
-    result
+    deposit::DepositModule::deposit_collateral_asset(&env, &user, &asset, amount)
 }
 
 /// Borrow a specific asset against total cross-asset collateral
 pub fn borrow_asset(env: Env, user: String, asset: Address, amount: i128) -> Result<(), ProtocolError> {
-    ReentrancyGuard::enter(&env)?;
-    let result = (|| {
-        if user.is_empty() { return Err(ProtocolError::InvalidAddress); }
-        if amount <= 0 { return Err(ProtocolError::InvalidAmount); }
-        let params = get_asset_params(&env, &asset)?;
-        if !params.cross_enabled || !params.borrow_enabled { return Err(ProtocolError::CrossAssetDisabled); }
-
-        let user_addr = Address::from_string(&user);
-        let mut x = CrossStateHelper::get_or_init_position(&env, &user_addr);
-
-        if x.last_accrual_time == 0 { x.last_accrual_time = env.ledger().timestamp(); }
-
-        let prev = x.debt.get(asset.clone()).unwrap_or(0);
-        x.debt.set(asset.clone(), prev + amount);
-        let (total_collateral, total_debt) = calc_cross_totals(&env, &x)?;
-        let min_ratio = ProtocolConfig::get_min_collateral_ratio(&env); // percent
-        let ratio = if total_debt > 0 { (total_collateral * 100) / total_debt } else { 0 };
-        if ratio < min_ratio { return Err(ProtocolError::InsufficientCollateralRatio); }
-
-        CrossStateHelper::save_position(&env, &x);
-        ProtocolEvent::CrossBorrow(user_addr, asset, amount).emit(&env);
-        Ok(())
-    })();
-    ReentrancyGuard::exit(&env);
-    result
+    borrow::BorrowModule::borrow_asset(&env, &user, &asset, amount)
 }
 
 /// Repay debt for a specific asset
 pub fn repay_asset(env: Env, user: String, asset: Address, amount: i128) -> Result<(), ProtocolError> {
-    ReentrancyGuard::enter(&env)?;
-    let result = (|| {
-        if user.is_empty() { return Err(ProtocolError::InvalidAddress); }
-        if amount <= 0 { return Err(ProtocolError::InvalidAmount); }
-        let _ = get_asset_params(&env, &asset)?; // ensure asset exists
-        let user_addr = Address::from_string(&user);
-        let mut x = CrossStateHelper::get_or_init_position(&env, &user_addr);
-        let prev = x.debt.get(asset.clone()).unwrap_or(0);
-        if prev == 0 { return Err(ProtocolError::InvalidOperation); }
-        let new_debt = if amount > prev { 0 } else { prev - amount };
-        x.debt.set(asset.clone(), new_debt);
-        CrossStateHelper::save_position(&env, &x);
-        ProtocolEvent::CrossRepay(user_addr, asset, amount).emit(&env);
-        Ok(())
-    })();
-    ReentrancyGuard::exit(&env);
-    result
+    repay::RepayModule::repay_asset(&env, &user, &asset, amount)
 }
 
 /// Withdraw collateral for a specific asset (checks cross-asset ratio)
 pub fn withdraw_asset(env: Env, user: String, asset: Address, amount: i128) -> Result<(), ProtocolError> {
-    ReentrancyGuard::enter(&env)?;
-    let result = (|| {
-        if user.is_empty() { return Err(ProtocolError::InvalidAddress); }
-        if amount <= 0 { return Err(ProtocolError::InvalidAmount); }
-        let params = get_asset_params(&env, &asset)?;
-        if !params.cross_enabled || !params.deposit_enabled { return Err(ProtocolError::CrossAssetDisabled); }
-        let user_addr = Address::from_string(&user);
-        let mut x = CrossStateHelper::get_or_init_position(&env, &user_addr);
-        let prev = x.collateral.get(asset.clone()).unwrap_or(0);
-        if amount > prev { return Err(ProtocolError::InsufficientCollateral); }
-        x.collateral.set(asset.clone(), prev - amount);
-
-        // Check ratio after withdrawal
-        let (tc, td) = calc_cross_totals(&env, &x)?;
-        let min_ratio = ProtocolConfig::get_min_collateral_ratio(&env);
-        let ratio = if td > 0 { (tc * 100) / td } else { 0 };
-        if td > 0 && ratio < min_ratio { return Err(ProtocolError::InsufficientCollateralRatio); }
-
-        CrossStateHelper::save_position(&env, &x);
-        ProtocolEvent::CrossWithdraw(user_addr, asset, amount).emit(&env);
-        Ok(())
-    })();
-    ReentrancyGuard::exit(&env);
-    result
+    withdraw::WithdrawModule::withdraw_asset(&env, &user, &asset, amount)
 }
 
 /// Get cross-asset position summary (total weighted collateral, total debt, ratio)
