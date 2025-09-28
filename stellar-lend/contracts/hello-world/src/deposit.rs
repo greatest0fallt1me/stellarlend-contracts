@@ -1,10 +1,12 @@
 //! Deposit module for StellarLend protocol
 //! Handles collateral deposits and related functionality
 
-use soroban_sdk::{contracterror, contracttype, Address, Env, String, Symbol, Vec, Map};
-use crate::{ProtocolError, Position, StateHelper, InterestRateStorage, InterestRateManager, 
-            ProtocolEvent, ReentrancyGuard, RiskConfigStorage};
 use crate::analytics::AnalyticsModule;
+use crate::{
+    InterestRateManager, InterestRateStorage, Position, ProtocolError, ProtocolEvent,
+    ReentrancyGuard, RiskConfigStorage, StateHelper,
+};
+use soroban_sdk::{contracterror, contracttype, Address, Env, String};
 
 /// Deposit-specific errors
 #[contracterror]
@@ -82,7 +84,7 @@ impl DepositModule {
             }
 
             let depositor_addr = Address::from_string(depositor);
-            
+
             // Load user position with error handling
             let mut position = match StateHelper::get_position(env, &depositor_addr) {
                 Some(pos) => pos,
@@ -100,7 +102,7 @@ impl DepositModule {
 
             // Update position
             position.collateral += amount;
-            
+
             // Save position
             StateHelper::save_position(env, &position);
 
@@ -116,20 +118,21 @@ impl DepositModule {
                 position.collateral,
                 position.debt,
                 collateral_ratio,
-            ).emit(env);
+            )
+            .emit(env);
 
             // Analytics
             AnalyticsModule::record_activity(env, &depositor_addr, "deposit", amount, None)?;
 
             Ok(())
         })();
-        
+
         ReentrancyGuard::exit(env);
         result
     }
 
     /// Deposit collateral for a specific asset (cross-asset)
-    pub fn deposit_collateral_asset(
+    pub fn _deposit_collateral_asset(
         env: &Env,
         user: &String,
         asset: &Address,
@@ -145,7 +148,7 @@ impl DepositModule {
             }
 
             let user_addr = Address::from_string(user);
-            
+
             // For cross-asset deposits, we would need to implement cross-asset position handling
             // This is a simplified version for the modular structure
             let mut position = match StateHelper::get_position(env, &user_addr) {
@@ -162,13 +165,13 @@ impl DepositModule {
 
             Ok(())
         })();
-        
+
         ReentrancyGuard::exit(env);
         result
     }
 
     /// Validate deposit parameters
-    pub fn validate_deposit_params(params: &DepositParams) -> Result<(), DepositError> {
+    pub fn _validate_deposit_params(params: &DepositParams) -> Result<(), DepositError> {
         if params.amount <= 0 {
             return Err(DepositError::InvalidAmount);
         }
@@ -176,7 +179,7 @@ impl DepositModule {
     }
 
     /// Calculate deposit impact on collateral ratio
-    pub fn calculate_collateral_ratio_impact(
+    pub fn _calculate_collateral_ratio_impact(
         current_collateral: i128,
         current_debt: i128,
         deposit_amount: i128,

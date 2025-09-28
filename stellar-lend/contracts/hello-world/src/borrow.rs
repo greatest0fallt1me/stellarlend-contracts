@@ -1,10 +1,12 @@
 //! Borrow module for StellarLend protocol
 //! Handles borrowing functionality and related operations
 
-use soroban_sdk::{contracterror, contracttype, Address, Env, String, Symbol, Vec, Map};
-use crate::{ProtocolError, Position, StateHelper, InterestRateStorage, InterestRateManager, 
-            ProtocolEvent, ReentrancyGuard, RiskConfigStorage, ProtocolConfig};
 use crate::analytics::AnalyticsModule;
+use crate::{
+    InterestRateManager, InterestRateStorage, ProtocolConfig, ProtocolError, ProtocolEvent,
+    ReentrancyGuard, RiskConfigStorage, StateHelper,
+};
+use soroban_sdk::{contracterror, contracttype, Address, Env, String};
 
 /// Borrow-specific errors
 #[contracterror]
@@ -67,11 +69,7 @@ pub struct BorrowModule;
 
 impl BorrowModule {
     /// Borrow assets from the protocol
-    pub fn borrow(
-        env: &Env,
-        borrower: &String,
-        amount: i128,
-    ) -> Result<(), ProtocolError> {
+    pub fn borrow(env: &Env, borrower: &String, amount: i128) -> Result<(), ProtocolError> {
         ReentrancyGuard::enter(env)?;
         let result = (|| -> Result<(), ProtocolError> {
             // Input validation
@@ -89,7 +87,7 @@ impl BorrowModule {
             }
 
             let borrower_addr = Address::from_string(borrower);
-            
+
             // Load user position
             let mut position = match StateHelper::get_position(env, &borrower_addr) {
                 Some(pos) => pos,
@@ -128,20 +126,21 @@ impl BorrowModule {
                 position.collateral,
                 position.debt,
                 collateral_ratio,
-            ).emit(env);
+            )
+            .emit(env);
 
             // Analytics
             AnalyticsModule::record_activity(env, &borrower_addr, "borrow", amount, None)?;
 
             Ok(())
         })();
-        
+
         ReentrancyGuard::exit(env);
         result
     }
 
     /// Borrow a specific asset against total cross-asset collateral
-    pub fn borrow_asset(
+    pub fn _borrow_asset(
         env: &Env,
         user: &String,
         asset: &Address,
@@ -157,7 +156,7 @@ impl BorrowModule {
             }
 
             let user_addr = Address::from_string(user);
-            
+
             // For cross-asset borrowing, we would need to implement cross-asset position handling
             // This is a simplified version for the modular structure
             let mut position = match StateHelper::get_position(env, &user_addr) {
@@ -187,13 +186,13 @@ impl BorrowModule {
 
             Ok(())
         })();
-        
+
         ReentrancyGuard::exit(env);
         result
     }
 
     /// Validate borrow parameters
-    pub fn validate_borrow_params(params: &BorrowParams) -> Result<(), BorrowError> {
+    pub fn _validate_borrow_params(params: &BorrowParams) -> Result<(), BorrowError> {
         if params.amount <= 0 {
             return Err(BorrowError::InvalidAmount);
         }
@@ -201,7 +200,7 @@ impl BorrowModule {
     }
 
     /// Calculate maximum borrowable amount based on collateral
-    pub fn calculate_max_borrowable(
+    pub fn _calculate_max_borrowable(
         collateral: i128,
         current_debt: i128,
         min_collateral_ratio: i128,
@@ -209,7 +208,7 @@ impl BorrowModule {
         if min_collateral_ratio <= 0 {
             return 0;
         }
-        
+
         let max_debt = (collateral * 100) / min_collateral_ratio;
         if max_debt > current_debt {
             max_debt - current_debt
@@ -219,7 +218,7 @@ impl BorrowModule {
     }
 
     /// Check if borrow is allowed based on collateral ratio
-    pub fn is_borrow_allowed(
+    pub fn _is_borrow_allowed(
         collateral: i128,
         current_debt: i128,
         borrow_amount: i128,
@@ -229,7 +228,7 @@ impl BorrowModule {
         if new_debt == 0 {
             return true;
         }
-        
+
         let collateral_ratio = (collateral * 100) / new_debt;
         collateral_ratio >= min_collateral_ratio
     }

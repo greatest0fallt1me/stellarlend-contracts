@@ -1,10 +1,12 @@
 //! Withdraw module for StellarLend protocol
 //! Handles collateral withdrawal functionality and related operations
 
-use soroban_sdk::{contracterror, contracttype, Address, Env, String, Symbol, Vec, Map};
-use crate::{ProtocolError, Position, StateHelper, InterestRateStorage, InterestRateManager, 
-            ProtocolEvent, ReentrancyGuard, RiskConfigStorage, ProtocolConfig};
 use crate::analytics::AnalyticsModule;
+use crate::{
+    InterestRateManager, InterestRateStorage, ProtocolConfig, ProtocolError, ProtocolEvent,
+    ReentrancyGuard, RiskConfigStorage, StateHelper,
+};
+use soroban_sdk::{contracterror, contracttype, Address, Env, String};
 
 /// Withdraw-specific errors
 #[contracterror]
@@ -27,7 +29,9 @@ impl From<WithdrawError> for ProtocolError {
             WithdrawError::ProtocolPaused => ProtocolError::ProtocolPaused,
             WithdrawError::PositionNotFound => ProtocolError::PositionNotFound,
             WithdrawError::InsufficientCollateral => ProtocolError::InsufficientCollateral,
-            WithdrawError::InsufficientCollateralRatio => ProtocolError::InsufficientCollateralRatio,
+            WithdrawError::InsufficientCollateralRatio => {
+                ProtocolError::InsufficientCollateralRatio
+            }
         }
     }
 }
@@ -67,11 +71,7 @@ pub struct WithdrawModule;
 
 impl WithdrawModule {
     /// Withdraw collateral from the protocol
-    pub fn withdraw(
-        env: &Env,
-        withdrawer: &String,
-        amount: i128,
-    ) -> Result<(), ProtocolError> {
+    pub fn withdraw(env: &Env, withdrawer: &String, amount: i128) -> Result<(), ProtocolError> {
         ReentrancyGuard::enter(env)?;
         let result = (|| -> Result<(), ProtocolError> {
             // Input validation
@@ -89,7 +89,7 @@ impl WithdrawModule {
             }
 
             let withdrawer_addr = Address::from_string(withdrawer);
-            
+
             // Load user position
             let mut position = match StateHelper::get_position(env, &withdrawer_addr) {
                 Some(pos) => pos,
@@ -133,20 +133,21 @@ impl WithdrawModule {
                 position.collateral,
                 position.debt,
                 collateral_ratio,
-            ).emit(env);
+            )
+            .emit(env);
 
             // Analytics
             AnalyticsModule::record_activity(env, &withdrawer_addr, "withdraw", amount, None)?;
 
             Ok(())
         })();
-        
+
         ReentrancyGuard::exit(env);
         result
     }
 
     /// Withdraw collateral for a specific asset (checks cross-asset ratio)
-    pub fn withdraw_asset(
+    pub fn _withdraw_asset(
         env: &Env,
         user: &String,
         asset: &Address,
@@ -162,7 +163,7 @@ impl WithdrawModule {
             }
 
             let user_addr = Address::from_string(user);
-            
+
             // For cross-asset withdrawal, we would need to implement cross-asset position handling
             // This is a simplified version for the modular structure
             let mut position = match StateHelper::get_position(env, &user_addr) {
@@ -196,16 +197,13 @@ impl WithdrawModule {
 
             Ok(())
         })();
-        
+
         ReentrancyGuard::exit(env);
         result
     }
 
     /// Calculate maximum withdrawable amount
-    pub fn calculate_max_withdrawable(
-        env: &Env,
-        user: &Address,
-    ) -> Result<i128, ProtocolError> {
+    pub fn _calculate_max_withdrawable(env: &Env, user: &Address) -> Result<i128, ProtocolError> {
         let position = match StateHelper::get_position(env, user) {
             Some(pos) => pos,
             None => return Err(WithdrawError::PositionNotFound.into()),
@@ -217,7 +215,7 @@ impl WithdrawModule {
 
         let min_ratio = ProtocolConfig::get_min_collateral_ratio(env);
         let required_collateral = (position.debt * min_ratio) / 100;
-        
+
         if position.collateral > required_collateral {
             Ok(position.collateral - required_collateral)
         } else {
@@ -226,7 +224,7 @@ impl WithdrawModule {
     }
 
     /// Validate withdraw parameters
-    pub fn validate_withdraw_params(params: &WithdrawParams) -> Result<(), WithdrawError> {
+    pub fn _validate_withdraw_params(params: &WithdrawParams) -> Result<(), WithdrawError> {
         if params.amount <= 0 {
             return Err(WithdrawError::InvalidAmount);
         }
@@ -234,7 +232,7 @@ impl WithdrawModule {
     }
 
     /// Check if withdrawal is allowed based on collateral ratio
-    pub fn is_withdrawal_allowed(
+    pub fn _is_withdrawal_allowed(
         current_collateral: i128,
         current_debt: i128,
         withdraw_amount: i128,
@@ -254,7 +252,7 @@ impl WithdrawModule {
     }
 
     /// Calculate collateral ratio after withdrawal
-    pub fn calculate_collateral_ratio_after_withdrawal(
+    pub fn _calculate_collateral_ratio_after_withdrawal(
         current_collateral: i128,
         current_debt: i128,
         withdraw_amount: i128,

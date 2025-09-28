@@ -1,14 +1,12 @@
-#![cfg(test)]
-
 use super::*;
-use soroban_sdk::{Address, Env, String, testutils::Address as TestAddress};
+use soroban_sdk::{Address, Env, String};
 
 /// Test utilities for creating test environments and addresses
 pub struct TestUtils;
 
 impl TestUtils {
     /// Create a test environment
-    pub fn create_test_env() -> Env {
+    pub fn _create_test_env() -> Env {
         let env = Env::default();
         env.mock_all_auths();
         env
@@ -50,7 +48,7 @@ impl TestUtils {
     }
 
     /// Initialize the contract with test admin
-    pub fn initialize_contract(env: &Env) -> Address {
+    pub fn _initialize_contract(env: &Env) -> Address {
         let admin = Self::create_admin_address(env);
         let contract_id = env.register(Contract, ());
         env.as_contract(&contract_id, || {
@@ -114,7 +112,7 @@ fn test_deposit_collateral() {
         // Verify position
         let position = Contract::get_position(env.clone(), user.to_string()).unwrap();
         assert_eq!(position.0, 1000); // collateral
-        assert_eq!(position.1, 0);    // debt
+        assert_eq!(position.1, 0); // debt
     });
 }
 
@@ -208,7 +206,10 @@ fn test_borrow_insufficient_collateral_ratio() {
         // Try to borrow too much (should fail due to insufficient collateral ratio)
         let result = Contract::borrow(env.clone(), user.to_string(), 1000);
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), ProtocolError::InsufficientCollateralRatio);
+        assert_eq!(
+            result.unwrap_err(),
+            ProtocolError::InsufficientCollateralRatio
+        );
     });
 }
 
@@ -236,7 +237,7 @@ fn test_repay_success() {
         // Verify position
         let position = Contract::get_position(env.clone(), user.to_string()).unwrap();
         assert_eq!(position.0, 2000); // collateral
-        assert_eq!(position.1, 500);  // debt
+        assert_eq!(position.1, 500); // debt
     });
 }
 
@@ -264,7 +265,7 @@ fn test_repay_full_amount() {
         // Verify position
         let position = Contract::get_position(env.clone(), user.to_string()).unwrap();
         assert_eq!(position.0, 2000); // collateral
-        assert_eq!(position.1, 0);    // debt
+        assert_eq!(position.1, 0); // debt
     });
 }
 
@@ -291,7 +292,7 @@ fn test_withdraw_success() {
         // Verify position
         let position = Contract::get_position(env.clone(), user.to_string()).unwrap();
         assert_eq!(position.0, 1000); // collateral
-        assert_eq!(position.1, 0);    // debt
+        assert_eq!(position.1, 0); // debt
     });
 }
 
@@ -338,7 +339,10 @@ fn test_withdraw_insufficient_collateral_ratio() {
         // Try to withdraw too much (would make collateral ratio too low)
         let result = Contract::withdraw(env.clone(), user.to_string(), 1500);
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), ProtocolError::InsufficientCollateralRatio);
+        assert_eq!(
+            result.unwrap_err(),
+            ProtocolError::InsufficientCollateralRatio
+        );
     });
 }
 
@@ -367,7 +371,8 @@ fn test_liquidate_success() {
         Contract::set_min_collateral_ratio(env.clone(), admin.to_string(), 150).unwrap();
 
         // Test successful liquidation
-        let result = Contract::liquidate(env.clone(), liquidator.to_string(), user.to_string(), 500);
+        let result =
+            Contract::liquidate(env.clone(), liquidator.to_string(), user.to_string(), 500);
         assert!(result.is_ok());
     });
 }
@@ -391,9 +396,13 @@ fn test_liquidate_not_eligible() {
         Contract::borrow(env.clone(), user.to_string(), 1000).unwrap();
 
         // Try to liquidate (should fail)
-        let result = Contract::liquidate(env.clone(), liquidator.to_string(), user.to_string(), 500);
+        let result =
+            Contract::liquidate(env.clone(), liquidator.to_string(), user.to_string(), 500);
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), ProtocolError::NotEligibleForLiquidation);
+        assert_eq!(
+            result.unwrap_err(),
+            ProtocolError::NotEligibleForLiquidation
+        );
     });
 }
 
@@ -415,8 +424,8 @@ fn test_set_risk_params() {
 
         // Verify the parameters were set
         let risk_config = Contract::get_risk_config(env.clone()).unwrap();
-        assert_eq!(risk_config.0, 60000000);  // close_factor
-        assert_eq!(risk_config.1, 15000000);  // liquidation_incentive
+        assert_eq!(risk_config.0, 60000000); // close_factor
+        assert_eq!(risk_config.1, 15000000); // liquidation_incentive
     });
 }
 
@@ -454,21 +463,21 @@ fn test_set_pause_switches() {
 
         // Test setting pause switches
         let result = Contract::set_pause_switches(
-            env.clone(), 
-            admin.to_string(), 
-            true,   // pause_borrow
-            false,  // pause_deposit
-            true,   // pause_withdraw
-            false   // pause_liquidate
+            env.clone(),
+            admin.to_string(),
+            true,  // pause_borrow
+            false, // pause_deposit
+            true,  // pause_withdraw
+            false, // pause_liquidate
         );
         assert!(result.is_ok());
 
         // Verify the switches were set
         let risk_config = Contract::get_risk_config(env.clone()).unwrap();
-        assert_eq!(risk_config.2, true);   // pause_borrow
-        assert_eq!(risk_config.3, false);  // pause_deposit
-        assert_eq!(risk_config.4, true);   // pause_withdraw
-        assert_eq!(risk_config.5, false);  // pause_liquidate
+        assert!(risk_config.2); // pause_borrow
+        assert!(!risk_config.3); // pause_deposit
+        assert!(risk_config.4); // pause_withdraw
+        assert!(!risk_config.5); // pause_liquidate
     });
 }
 
@@ -486,12 +495,12 @@ fn test_get_protocol_params() {
 
         // Test getting protocol parameters
         let params = Contract::get_protocol_params(env.clone()).unwrap();
-        assert_eq!(params.0, 2000000);   // base_rate
-        assert_eq!(params.1, 80000000);  // kink_utilization
-        assert_eq!(params.2, 10000000);  // multiplier
-        assert_eq!(params.3, 10000000);  // reserve_factor
-        assert_eq!(params.4, 50000000);  // close_factor
-        assert_eq!(params.5, 10000000);  // liquidation_incentive
+        assert_eq!(params.0, 2000000); // base_rate
+        assert_eq!(params.1, 80000000); // kink_utilization
+        assert_eq!(params.2, 10000000); // multiplier
+        assert_eq!(params.3, 10000000); // reserve_factor
+        assert_eq!(params.4, 50000000); // close_factor
+        assert_eq!(params.5, 10000000); // liquidation_incentive
     });
 }
 
@@ -509,10 +518,10 @@ fn test_get_system_stats() {
 
         // Test getting system stats
         let stats = Contract::get_system_stats(env.clone()).unwrap();
-        assert_eq!(stats.0, 0);  // total_supplied
-        assert_eq!(stats.1, 0);  // total_borrowed
-        assert_eq!(stats.2, 0);  // current_borrow_rate
-        assert_eq!(stats.3, 0);  // current_supply_rate
+        assert_eq!(stats.0, 0); // total_supplied
+        assert_eq!(stats.1, 0); // total_borrowed
+        assert_eq!(stats.2, 0); // current_borrow_rate
+        assert_eq!(stats.3, 0); // current_supply_rate
     });
 }
 
