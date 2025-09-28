@@ -42,10 +42,326 @@
                     "storage": [
                       {
                         "key": {
+                          "symbol": "activity_log"
+                        },
+                        "val": {
+                          "vec": [
+                            {
+                              "map": [
+                                {
+                                  "key": {
+                                    "symbol": "activity_type"
+                                  },
+                                  "val": {
+                                    "string": "deposit"
+                                  }
+                                },
+                                {
+                                  "key": {
+                                    "symbol": "amount"
+                                  },
+                                  "val": {
+                                    "i128": {
+                                      "hi": 0,
+                                      "lo": 2000
+                                    }
+                                  }
+                                },
+                                {
+                                  "key": {
+                                    "symbol": "asset"
+                                  },
+                                  "val": "void"
+                                },
+                                {
+                                  "key": {
+                                    "symbol": "metadata"
+                                  },
+                                  "val": {
+                                    "map": [
+                                      {
+                                        "key": {
+                                          "string": "timestamp"
+                                        },
+                                        "val": {
+                                          "string": "0"
+                                        }
+                                      }
+                                    ]
+                                  }
+                                },
+                                {
+                                  "key": {
+                                    "symbol": "timestamp"
+                                  },
+                                  "val": {
+                                    "u64": 0
+                                  }
+                                },
+                                {
+                                  "key": {
+                                    "symbol": "user"
+                                  },
+                                  "val": {
+                                    "address": "GCXOTMMXRS24MYZI5FJPUCOEOFNWSR4XX7UXIK3NDGGE6A5QMJ5FF2FS"
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "map": [
+                                {
+                                  "key": {
+                                    "symbol": "activity_type"
+                                  },
+                                  "val": {
+                                    "string": "withdraw"
+                                  }
+                                },
+                                {
+                                  "key": {
+                                    "symbol": "amount"
+                                  },
+                                  "val": {
+                                    "i128": {
+                                      "hi": 0,
+                                      "lo": 1000
+                                    }
+                                  }
+                                },
+                                {
+                                  "key": {
+                                    "symbol": "asset"
+                                  },
+                                  "val": "void"
+                                },
+                                {
+                                  "key": {
+                                    "symbol": "metadata"
+                                  },
+                                  "val": {
+                                    "map": [
+                                      {
+                                        "key": {
+                                          "string": "timestamp"
+                                        },
+                                        "val": {
+                                          "string": "0"
+                                        }
+                                      }
+                                    ]
+                                  }
+                                },
+                                {
+                                  "key": {
+                                    "symbol": "timestamp"
+                                  },
+                                  "val": {
+                                    "u64": 0
+                                  }
+                                },
+                                {
+                                  "key": {
+                                    "symbol": "user"
+                                  },
+                                  "val": {
+                                    "address": "GCXOTMMXRS24MYZI5FJPUCOEOFNWSR4XX7UXIK3NDGGE6A5QMJ5FF2FS"
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
                           "symbol": "admin"
                         },
                         "val": {
                           "address": "GCAZYE3EB54VKP3UQBX3H73VQO3SIWTZNR7NJQKJFZZ6XLADWA4C3SOC"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "historical_data"
+                        },
+                        "val": {
+                          "map": [
+                            {
+                              "key": {
+                                "u64": 0
+                              },
+                              "val": {
+                                "map": [
+                                  {
+                                    "key": {
+                                      "symbol": "asset_data"
+                                    },
+                                    "val": {
+                                      "map": []
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "metrics"
+                                    },
+                                    "val": {
+                                      "map": [
+                                        {
+                                          "key": {
+                                            "symbol": "active_users"
+                                          },
+                                          "val": {
+                                            "i128": {
+                                              "hi": 0,
+                                              "lo": 0
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "key": {
+                                            "symbol": "avg_utilization_rate"
+                                          },
+                                          "val": {
+                                            "i128": {
+                                              "hi": 0,
+                                              "lo": 0
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "key": {
+                                            "symbol": "health_score"
+                                          },
+                                          "val": {
+                                            "i128": {
+                                              "hi": 0,
+                                              "lo": 100
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "key": {
+                                            "symbol": "last_update"
+                                          },
+                                          "val": {
+                                            "u64": 0
+                                          }
+                                        },
+                                        {
+                                          "key": {
+                                            "symbol": "total_borrows"
+                                          },
+                                          "val": {
+                                            "i128": {
+                                              "hi": 0,
+                                              "lo": 0
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "key": {
+                                            "symbol": "total_deposits"
+                                          },
+                                          "val": {
+                                            "i128": {
+                                              "hi": 0,
+                                              "lo": 2000
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "key": {
+                                            "symbol": "total_fees_collected"
+                                          },
+                                          "val": {
+                                            "i128": {
+                                              "hi": 0,
+                                              "lo": 0
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "key": {
+                                            "symbol": "total_liquidations"
+                                          },
+                                          "val": {
+                                            "i128": {
+                                              "hi": 0,
+                                              "lo": 0
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "key": {
+                                            "symbol": "total_repayments"
+                                          },
+                                          "val": {
+                                            "i128": {
+                                              "hi": 0,
+                                              "lo": 0
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "key": {
+                                            "symbol": "total_users"
+                                          },
+                                          "val": {
+                                            "i128": {
+                                              "hi": 0,
+                                              "lo": 0
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "key": {
+                                            "symbol": "total_value_locked"
+                                          },
+                                          "val": {
+                                            "i128": {
+                                              "hi": 0,
+                                              "lo": 1000
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "key": {
+                                            "symbol": "total_volume"
+                                          },
+                                          "val": {
+                                            "i128": {
+                                              "hi": 0,
+                                              "lo": 2000
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "key": {
+                                            "symbol": "total_withdrawals"
+                                          },
+                                          "val": {
+                                            "i128": {
+                                              "hi": 0,
+                                              "lo": 1000
+                                            }
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "timestamp"
+                                    },
+                                    "val": {
+                                      "u64": 0
+                                    }
+                                  }
+                                ]
+                              }
+                            }
+                          ]
                         }
                       },
                       {
@@ -307,6 +623,155 @@
                       },
                       {
                         "key": {
+                          "symbol": "protocol_metrics"
+                        },
+                        "val": {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "active_users"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 0
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "avg_utilization_rate"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 0
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "health_score"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 100
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "last_update"
+                              },
+                              "val": {
+                                "u64": 0
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "total_borrows"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 0
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "total_deposits"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 2000
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "total_fees_collected"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 0
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "total_liquidations"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 0
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "total_repayments"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 0
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "total_users"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 0
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "total_value_locked"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 1000
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "total_volume"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 2000
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "total_withdrawals"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 1000
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
                           "symbol": "reentrancy"
                         },
                         "val": {
@@ -379,6 +844,161 @@
                               },
                               "val": {
                                 "bool": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "user_analytics"
+                        },
+                        "val": {
+                          "map": [
+                            {
+                              "key": {
+                                "address": "GCXOTMMXRS24MYZI5FJPUCOEOFNWSR4XX7UXIK3NDGGE6A5QMJ5FF2FS"
+                              },
+                              "val": {
+                                "map": [
+                                  {
+                                    "key": {
+                                      "symbol": "activity_score"
+                                    },
+                                    "val": {
+                                      "i128": {
+                                        "hi": 0,
+                                        "lo": 22
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "collateral_value"
+                                    },
+                                    "val": {
+                                      "i128": {
+                                        "hi": 0,
+                                        "lo": 0
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "collateralization_ratio"
+                                    },
+                                    "val": {
+                                      "i128": {
+                                        "hi": 0,
+                                        "lo": 0
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "debt_value"
+                                    },
+                                    "val": {
+                                      "i128": {
+                                        "hi": 0,
+                                        "lo": 0
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "first_interaction"
+                                    },
+                                    "val": {
+                                      "u64": 0
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "last_activity"
+                                    },
+                                    "val": {
+                                      "u64": 0
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "loyalty_tier"
+                                    },
+                                    "val": {
+                                      "i128": {
+                                        "hi": 0,
+                                        "lo": 1
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "risk_level"
+                                    },
+                                    "val": {
+                                      "i128": {
+                                        "hi": 0,
+                                        "lo": 0
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "total_borrows"
+                                    },
+                                    "val": {
+                                      "i128": {
+                                        "hi": 0,
+                                        "lo": 0
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "total_deposits"
+                                    },
+                                    "val": {
+                                      "i128": {
+                                        "hi": 0,
+                                        "lo": 2000
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "total_repayments"
+                                    },
+                                    "val": {
+                                      "i128": {
+                                        "hi": 0,
+                                        "lo": 0
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "total_withdrawals"
+                                    },
+                                    "val": {
+                                      "i128": {
+                                        "hi": 0,
+                                        "lo": 1000
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "transaction_count"
+                                    },
+                                    "val": {
+                                      "i128": {
+                                        "hi": 0,
+                                        "lo": 2
+                                      }
+                                    }
+                                  }
+                                ]
                               }
                             }
                           ]
@@ -484,7 +1104,7 @@
           "v0": {
             "topics": [
               {
-                "symbol": "interest_accrued"
+                "symbol": "analytics_updated"
               },
               {
                 "symbol": "user"
@@ -499,7 +1119,13 @@
                   "address": "GCXOTMMXRS24MYZI5FJPUCOEOFNWSR4XX7UXIK3NDGGE6A5QMJ5FF2FS"
                 },
                 {
-                  "symbol": "borrow_interest"
+                  "symbol": "activity_type"
+                },
+                {
+                  "string": "deposit"
+                },
+                {
+                  "symbol": "amount"
                 },
                 {
                   "i128": {
@@ -508,13 +1134,10 @@
                   }
                 },
                 {
-                  "symbol": "supply_interest"
+                  "symbol": "timestamp"
                 },
                 {
-                  "i128": {
-                    "hi": 0,
-                    "lo": 0
-                  }
+                  "u64": 0
                 }
               ]
             }
@@ -589,7 +1212,7 @@
           "v0": {
             "topics": [
               {
-                "symbol": "interest_accrued"
+                "symbol": "analytics_updated"
               },
               {
                 "symbol": "user"
@@ -604,7 +1227,13 @@
                   "address": "GCXOTMMXRS24MYZI5FJPUCOEOFNWSR4XX7UXIK3NDGGE6A5QMJ5FF2FS"
                 },
                 {
-                  "symbol": "borrow_interest"
+                  "symbol": "activity_type"
+                },
+                {
+                  "string": "withdraw"
+                },
+                {
+                  "symbol": "amount"
                 },
                 {
                   "i128": {
@@ -613,13 +1242,10 @@
                   }
                 },
                 {
-                  "symbol": "supply_interest"
+                  "symbol": "timestamp"
                 },
                 {
-                  "i128": {
-                    "hi": 0,
-                    "lo": 0
-                  }
+                  "u64": 0
                 }
               ]
             }

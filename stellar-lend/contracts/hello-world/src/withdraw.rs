@@ -3,7 +3,8 @@
 
 use soroban_sdk::{contracterror, contracttype, Address, Env, String, Symbol, Vec, Map};
 use crate::{ProtocolError, Position, StateHelper, InterestRateStorage, InterestRateManager, 
-            ProtocolEvent, analytics_record_action, ReentrancyGuard, RiskConfigStorage, ProtocolConfig};
+            ProtocolEvent, ReentrancyGuard, RiskConfigStorage, ProtocolConfig};
+use crate::analytics::AnalyticsModule;
 
 /// Withdraw-specific errors
 #[contracterror]
@@ -135,7 +136,7 @@ impl WithdrawModule {
             ).emit(env);
 
             // Analytics
-            analytics_record_action(env, &withdrawer_addr, "withdraw", amount);
+            AnalyticsModule::record_activity(env, &withdrawer_addr, "withdraw", amount, None)?;
 
             Ok(())
         })();

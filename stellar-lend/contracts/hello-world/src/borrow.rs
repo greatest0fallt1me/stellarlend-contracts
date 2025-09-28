@@ -3,7 +3,8 @@
 
 use soroban_sdk::{contracterror, contracttype, Address, Env, String, Symbol, Vec, Map};
 use crate::{ProtocolError, Position, StateHelper, InterestRateStorage, InterestRateManager, 
-            ProtocolEvent, analytics_record_action, ReentrancyGuard, RiskConfigStorage, ProtocolConfig};
+            ProtocolEvent, ReentrancyGuard, RiskConfigStorage, ProtocolConfig};
+use crate::analytics::AnalyticsModule;
 
 /// Borrow-specific errors
 #[contracterror]
@@ -130,7 +131,7 @@ impl BorrowModule {
             ).emit(env);
 
             // Analytics
-            analytics_record_action(env, &borrower_addr, "borrow", amount);
+            AnalyticsModule::record_activity(env, &borrower_addr, "borrow", amount, None)?;
 
             Ok(())
         })();
