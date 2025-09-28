@@ -153,7 +153,7 @@ impl LiquidationModule {
 
             // Emit liquidation event
             ProtocolEvent::LiquidationExecuted(
-                liquidator_addr,
+                liquidator_addr.clone(),
                 user_addr,
                 collateral_seized,
                 liquidation_amount,

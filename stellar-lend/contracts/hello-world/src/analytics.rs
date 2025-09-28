@@ -11,6 +11,7 @@
 use soroban_sdk::{
     contracterror, contracttype, vec, Address, Env, Map, String, Symbol, Vec,
 };
+use alloc::string::ToString;
 
 use crate::{ProtocolError, ProtocolEvent};
 
@@ -443,12 +444,12 @@ impl AnalyticsModule {
         Self::update_protocol_metrics(env, activity_type, amount)?;
 
         // Emit analytics event
-        ProtocolEvent::emit(env, &ProtocolEvent::AnalyticsUpdated {
-            user: user.clone(),
-            activity_type: String::from_str(env, activity_type),
+        ProtocolEvent::AnalyticsUpdated(
+            user.clone(),
+            String::from_str(env, activity_type),
             amount,
             timestamp,
-        });
+        ).emit(env);
 
         Ok(())
     }
@@ -606,9 +607,12 @@ impl AnalyticsModule {
         let activity_log = AnalyticsStorage::get_activity_log(env);
         
         // Filter user's activities
-        let user_activities = activity_log.iter()
-            .filter(|entry| entry.user == *user)
-            .collect::<Vec<_>>();
+        let mut user_activities = Vec::new(env);
+        for entry in activity_log.iter() {
+            if entry.user == *user {
+                user_activities.push_back(entry);
+            }
+        }
 
         Ok(UserReport {
             user: user.clone(),
