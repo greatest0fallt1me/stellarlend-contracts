@@ -1,7 +1,7 @@
 //! Repay module for StellarLend protocol
 //! Handles debt repayment functionality and related operations
 
-use soroban_sdk::{contracterror, contracttype, Address, Env, Symbol, Vec, Map};
+use soroban_sdk::{contracterror, contracttype, Address, Env, String, Symbol, Vec, Map};
 use crate::{ProtocolError, Position, StateHelper, InterestRateStorage, InterestRateManager, 
             ProtocolEvent, analytics_record_action, ReentrancyGuard};
 

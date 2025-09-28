@@ -1,7 +1,7 @@
 //! Liquidation module for StellarLend protocol
 //! Handles liquidation functionality and related operations
 
-use soroban_sdk::{contracterror, contracttype, Address, Env, Symbol, Vec, Map};
+use soroban_sdk::{contracterror, contracttype, Address, Env, String, Symbol, Vec, Map};
 use crate::{ProtocolError, Position, StateHelper, InterestRateStorage, InterestRateManager, 
             ProtocolEvent, ReentrancyGuard, RiskConfigStorage, ProtocolConfig};
 
