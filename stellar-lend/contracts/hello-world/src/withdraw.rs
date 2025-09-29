@@ -1,10 +1,12 @@
 //! Withdraw module for StellarLend protocol
 //! Handles collateral withdrawal functionality and related operations
 
-use soroban_sdk::{contracterror, contracttype, Address, Env, String, Symbol, Vec, Map};
-use crate::{ProtocolError, Position, StateHelper, InterestRateStorage, InterestRateManager, 
-            ProtocolEvent, ReentrancyGuard, RiskConfigStorage, ProtocolConfig};
 use crate::analytics::AnalyticsModule;
+use crate::{
+    EmergencyManager, InterestRateManager, InterestRateStorage, OperationKind, ProtocolConfig,
+    ProtocolError, ProtocolEvent, ReentrancyGuard, RiskConfigStorage, StateHelper,
+};
+use soroban_sdk::{contracterror, contracttype, Address, Env, String};
 
 /// Withdraw-specific errors
 #[contracterror]
@@ -27,7 +29,9 @@ impl From<WithdrawError> for ProtocolError {
             WithdrawError::ProtocolPaused => ProtocolError::ProtocolPaused,
             WithdrawError::PositionNotFound => ProtocolError::PositionNotFound,
             WithdrawError::InsufficientCollateral => ProtocolError::InsufficientCollateral,
-            WithdrawError::InsufficientCollateralRatio => ProtocolError::InsufficientCollateralRatio,
+            WithdrawError::InsufficientCollateralRatio => {
+                ProtocolError::InsufficientCollateralRatio
+            }
         }
     }
 }
@@ -67,11 +71,7 @@ pub struct WithdrawModule;
 
 impl WithdrawModule {
     /// Withdraw collateral from the protocol
-    pub fn withdraw(
-        env: &Env,
-        withdrawer: &String,
-        amount: i128,
-    ) -> Result<(), ProtocolError> {
+    pub fn withdraw(env: &Env, withdrawer: &String, amount: i128) -> Result<(), ProtocolError> {
         ReentrancyGuard::enter(env)?;
         let result = (|| -> Result<(), ProtocolError> {
             // Input validation
@@ -82,6 +82,8 @@ impl WithdrawModule {
                 return Err(WithdrawError::InvalidAmount.into());
             }
 
+            EmergencyManager::ensure_operation_allowed(env, OperationKind::Withdraw)?;
+
             // Check if withdraw is paused
             let risk_config = RiskConfigStorage::get(env);
             if risk_config.pause_withdraw {
@@ -89,7 +91,7 @@ impl WithdrawModule {
             }
 
             let withdrawer_addr = Address::from_string(withdrawer);
-            
+
             // Load user position
             let mut position = match StateHelper::get_position(env, &withdrawer_addr) {
                 Some(pos) => pos,
@@ -133,14 +135,15 @@ impl WithdrawModule {
                 position.collateral,
                 position.debt,
                 collateral_ratio,
-            ).emit(env);
+            )
+            .emit(env);
 
             // Analytics
             AnalyticsModule::record_activity(env, &withdrawer_addr, "withdraw", amount, None)?;
 
             Ok(())
         })();
-        
+
         ReentrancyGuard::exit(env);
         result
     }
@@ -161,8 +164,10 @@ impl WithdrawModule {
                 return Err(WithdrawError::InvalidAmount.into());
             }
 
+            EmergencyManager::ensure_operation_allowed(env, OperationKind::Withdraw)?;
+
             let user_addr = Address::from_string(user);
-            
+
             // For cross-asset withdrawal, we would need to implement cross-asset position handling
             // This is a simplified version for the modular structure
             let mut position = match StateHelper::get_position(env, &user_addr) {
@@ -196,16 +201,13 @@ impl WithdrawModule {
 
             Ok(())
         })();
-        
+
         ReentrancyGuard::exit(env);
         result
     }
 
     /// Calculate maximum withdrawable amount
-    pub fn calculate_max_withdrawable(
-        env: &Env,
-        user: &Address,
-    ) -> Result<i128, ProtocolError> {
+    pub fn calculate_max_withdrawable(env: &Env, user: &Address) -> Result<i128, ProtocolError> {
         let position = match StateHelper::get_position(env, user) {
             Some(pos) => pos,
             None => return Err(WithdrawError::PositionNotFound.into()),
@@ -217,7 +219,7 @@ impl WithdrawModule {
 
         let min_ratio = ProtocolConfig::get_min_collateral_ratio(env);
         let required_collateral = (position.debt * min_ratio) / 100;
-        
+
         if position.collateral > required_collateral {
             Ok(position.collateral - required_collateral)
         } else {

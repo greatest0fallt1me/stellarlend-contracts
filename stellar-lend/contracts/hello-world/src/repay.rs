@@ -1,10 +1,12 @@
 //! Repay module for StellarLend protocol
 //! Handles debt repayment functionality and related operations
 
-use soroban_sdk::{contracterror, contracttype, Address, Env, String, Symbol, Vec, Map};
-use crate::{ProtocolError, Position, StateHelper, InterestRateStorage, InterestRateManager, 
-            ProtocolEvent, ReentrancyGuard};
 use crate::analytics::AnalyticsModule;
+use crate::{
+    EmergencyManager, InterestRateManager, InterestRateStorage, OperationKind, ProtocolError,
+    ProtocolEvent, ReentrancyGuard, StateHelper,
+};
+use soroban_sdk::{contracterror, contracttype, Address, Env, String};
 
 /// Repay-specific errors
 #[contracterror]
@@ -74,11 +76,7 @@ pub struct RepayModule;
 
 impl RepayModule {
     /// Repay borrowed assets
-    pub fn repay(
-        env: &Env,
-        repayer: &String,
-        amount: i128,
-    ) -> Result<(), ProtocolError> {
+    pub fn repay(env: &Env, repayer: &String, amount: i128) -> Result<(), ProtocolError> {
         ReentrancyGuard::enter(env)?;
         let result = (|| -> Result<(), ProtocolError> {
             // Input validation
@@ -89,8 +87,10 @@ impl RepayModule {
                 return Err(RepayError::InvalidAmount.into());
             }
 
+            EmergencyManager::ensure_operation_allowed(env, OperationKind::Repay)?;
+
             let repayer_addr = Address::from_string(repayer);
-            
+
             // Load user position
             let mut position = match StateHelper::get_position(env, &repayer_addr) {
                 Some(pos) => pos,
@@ -132,14 +132,15 @@ impl RepayModule {
                 position.collateral,
                 position.debt,
                 collateral_ratio,
-            ).emit(env);
+            )
+            .emit(env);
 
             // Analytics
             AnalyticsModule::record_activity(env, &repayer_addr, "repay", repay_amount, None)?;
 
             Ok(())
         })();
-        
+
         ReentrancyGuard::exit(env);
         result
     }
@@ -160,8 +161,10 @@ impl RepayModule {
                 return Err(RepayError::InvalidAmount.into());
             }
 
+            EmergencyManager::ensure_operation_allowed(env, OperationKind::Repay)?;
+
             let user_addr = Address::from_string(user);
-            
+
             // For cross-asset repayment, we would need to implement cross-asset position handling
             // This is a simplified version for the modular structure
             let mut position = match StateHelper::get_position(env, &user_addr) {
@@ -186,16 +189,13 @@ impl RepayModule {
 
             Ok(())
         })();
-        
+
         ReentrancyGuard::exit(env);
         result
     }
 
     /// Full repayment of all debt
-    pub fn full_repay(
-        env: &Env,
-        repayer: &String,
-    ) -> Result<i128, ProtocolError> {
+    pub fn full_repay(env: &Env, repayer: &String) -> Result<i128, ProtocolError> {
         ReentrancyGuard::enter(env)?;
         let result = (|| -> Result<i128, ProtocolError> {
             if repayer.is_empty() {
@@ -203,7 +203,7 @@ impl RepayModule {
             }
 
             let repayer_addr = Address::from_string(repayer);
-            
+
             // Load user position
             let mut position = match StateHelper::get_position(env, &repayer_addr) {
                 Some(pos) => pos,
@@ -234,14 +234,15 @@ impl RepayModule {
                 position.collateral,
                 position.debt,
                 0, // No debt means no ratio
-            ).emit(env);
+            )
+            .emit(env);
 
             // Analytics
             AnalyticsModule::record_activity(env, &repayer_addr, "repay", total_debt, None)?;
 
             Ok(total_debt)
         })();
-        
+
         ReentrancyGuard::exit(env);
         result
     }
@@ -275,10 +276,7 @@ impl RepayModule {
     }
 
     /// Calculate remaining debt after repayment
-    pub fn calculate_remaining_debt(
-        current_debt: i128,
-        repay_amount: i128,
-    ) -> i128 {
+    pub fn calculate_remaining_debt(current_debt: i128, repay_amount: i128) -> i128 {
         if repay_amount >= current_debt {
             0
         } else {

@@ -1,10 +1,12 @@
 //! Deposit module for StellarLend protocol
 //! Handles collateral deposits and related functionality
 
-use soroban_sdk::{contracterror, contracttype, Address, Env, String, Symbol, Vec, Map};
-use crate::{ProtocolError, Position, StateHelper, InterestRateStorage, InterestRateManager, 
-            ProtocolEvent, ReentrancyGuard, RiskConfigStorage};
 use crate::analytics::AnalyticsModule;
+use crate::{
+    EmergencyManager, InterestRateManager, InterestRateStorage, OperationKind, Position,
+    ProtocolError, ProtocolEvent, ReentrancyGuard, RiskConfigStorage, StateHelper,
+};
+use soroban_sdk::{contracterror, contracttype, Address, Env, String};
 
 /// Deposit-specific errors
 #[contracterror]
@@ -75,6 +77,8 @@ impl DepositModule {
                 return Err(DepositError::InvalidAmount.into());
             }
 
+            EmergencyManager::ensure_operation_allowed(env, OperationKind::Deposit)?;
+
             // Check if deposit is paused
             let risk_config = RiskConfigStorage::get(env);
             if risk_config.pause_deposit {
@@ -82,7 +86,7 @@ impl DepositModule {
             }
 
             let depositor_addr = Address::from_string(depositor);
-            
+
             // Load user position with error handling
             let mut position = match StateHelper::get_position(env, &depositor_addr) {
                 Some(pos) => pos,
@@ -100,7 +104,7 @@ impl DepositModule {
 
             // Update position
             position.collateral += amount;
-            
+
             // Save position
             StateHelper::save_position(env, &position);
 
@@ -116,14 +120,15 @@ impl DepositModule {
                 position.collateral,
                 position.debt,
                 collateral_ratio,
-            ).emit(env);
+            )
+            .emit(env);
 
             // Analytics
             AnalyticsModule::record_activity(env, &depositor_addr, "deposit", amount, None)?;
 
             Ok(())
         })();
-        
+
         ReentrancyGuard::exit(env);
         result
     }
@@ -144,8 +149,10 @@ impl DepositModule {
                 return Err(DepositError::InvalidAmount.into());
             }
 
+            EmergencyManager::ensure_operation_allowed(env, OperationKind::Deposit)?;
+
             let user_addr = Address::from_string(user);
-            
+
             // For cross-asset deposits, we would need to implement cross-asset position handling
             // This is a simplified version for the modular structure
             let mut position = match StateHelper::get_position(env, &user_addr) {
@@ -162,7 +169,7 @@ impl DepositModule {
 
             Ok(())
         })();
-        
+
         ReentrancyGuard::exit(env);
         result
     }
