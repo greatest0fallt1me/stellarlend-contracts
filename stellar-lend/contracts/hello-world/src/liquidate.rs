@@ -1,10 +1,12 @@
 //! Liquidation module for StellarLend protocol
 //! Handles liquidation functionality and related operations
 
-use soroban_sdk::{contracterror, contracttype, Address, Env, String, Symbol, Vec, Map};
-use crate::{ProtocolError, Position, StateHelper, InterestRateStorage, InterestRateManager, 
-            ProtocolEvent, ReentrancyGuard, RiskConfigStorage, ProtocolConfig};
 use crate::analytics::AnalyticsModule;
+use crate::{
+    EmergencyManager, InterestRateManager, InterestRateStorage, OperationKind, ProtocolConfig,
+    ProtocolError, ProtocolEvent, ReentrancyGuard, RiskConfigStorage, StateHelper,
+};
+use soroban_sdk::{contracterror, contracttype, Address, Env, String};
 
 /// Liquidation-specific errors
 #[contracterror]
@@ -102,6 +104,8 @@ impl LiquidationModule {
                 return Err(LiquidationError::InvalidAmount.into());
             }
 
+            EmergencyManager::ensure_operation_allowed(env, OperationKind::Liquidate)?;
+
             // Check if liquidation is paused
             let risk_config = RiskConfigStorage::get(env);
             if risk_config.pause_liquidate {
@@ -110,7 +114,7 @@ impl LiquidationModule {
 
             let liquidator_addr = Address::from_string(liquidator);
             let user_addr = Address::from_string(user);
-            
+
             // Load user position
             let mut position = match StateHelper::get_position(env, &user_addr) {
                 Some(pos) => pos,
@@ -138,7 +142,8 @@ impl LiquidationModule {
             };
 
             // Calculate collateral to seize
-            let collateral_seized = (liquidation_amount * (100000000 + risk_config.liquidation_incentive)) / 100000000;
+            let collateral_seized =
+                (liquidation_amount * (100000000 + risk_config.liquidation_incentive)) / 100000000;
 
             // Update position
             position.debt -= liquidation_amount;
@@ -157,23 +162,27 @@ impl LiquidationModule {
                 user_addr,
                 collateral_seized,
                 liquidation_amount,
-            ).emit(env);
+            )
+            .emit(env);
 
             // Analytics
-            AnalyticsModule::record_activity(env, &liquidator_addr, "liquidate", liquidation_amount, None)?;
+            AnalyticsModule::record_activity(
+                env,
+                &liquidator_addr,
+                "liquidate",
+                liquidation_amount,
+                None,
+            )?;
 
             Ok(result)
         })();
-        
+
         ReentrancyGuard::exit(env);
         result
     }
 
     /// Check if a position is eligible for liquidation
-    pub fn is_eligible_for_liquidation(
-        env: &Env,
-        user: &Address,
-    ) -> Result<bool, ProtocolError> {
+    pub fn is_eligible_for_liquidation(env: &Env, user: &Address) -> Result<bool, ProtocolError> {
         let position = match StateHelper::get_position(env, user) {
             Some(pos) => pos,
             None => return Err(LiquidationError::PositionNotFound.into()),
@@ -201,7 +210,7 @@ impl LiquidationModule {
 
         let risk_config = RiskConfigStorage::get(env);
         let max_liquidation = (position.debt * risk_config.close_factor) / 100000000;
-        
+
         Ok(max_liquidation)
     }
 
@@ -211,8 +220,9 @@ impl LiquidationModule {
         liquidation_amount: i128,
     ) -> Result<i128, ProtocolError> {
         let risk_config = RiskConfigStorage::get(env);
-        let collateral_seized = (liquidation_amount * (100000000 + risk_config.liquidation_incentive)) / 100000000;
-        
+        let collateral_seized =
+            (liquidation_amount * (100000000 + risk_config.liquidation_incentive)) / 100000000;
+
         Ok(collateral_seized)
     }
 
@@ -225,19 +235,13 @@ impl LiquidationModule {
     }
 
     /// Calculate liquidation incentive
-    pub fn calculate_liquidation_incentive(
-        env: &Env,
-        liquidation_amount: i128,
-    ) -> i128 {
+    pub fn calculate_liquidation_incentive(env: &Env, liquidation_amount: i128) -> i128 {
         let risk_config = RiskConfigStorage::get(env);
         (liquidation_amount * risk_config.liquidation_incentive) / 100000000
     }
 
     /// Get liquidation health factor
-    pub fn get_health_factor(
-        env: &Env,
-        user: &Address,
-    ) -> Result<i128, ProtocolError> {
+    pub fn get_health_factor(env: &Env, user: &Address) -> Result<i128, ProtocolError> {
         let position = match StateHelper::get_position(env, user) {
             Some(pos) => pos,
             None => return Err(LiquidationError::PositionNotFound.into()),

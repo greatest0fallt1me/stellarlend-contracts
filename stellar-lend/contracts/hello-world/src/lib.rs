@@ -8,15 +8,15 @@ extern crate alloc;
 
 use alloc::format;
 use alloc::string::ToString;
-use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, vec, Address, Bytes, Env,
-    IntoVal, Map, String, Symbol, Vec,
-};
 use soroban_sdk::token::TokenClient;
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, vec, Address, Bytes, Env, IntoVal, Map,
+    String, Symbol, Vec,
+};
 mod oracle;
 use oracle::{Oracle, OracleSource, OracleStorage};
 mod governance;
-use governance::{Governance, GovStorage, Proposal};
+use governance::{GovStorage, Governance, Proposal};
 mod flash_loan;
 use flash_loan::FlashLoan;
 
@@ -28,20 +28,408 @@ static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 mod test;
 
 // Core protocol modules
-mod deposit;
+mod analytics;
 mod borrow;
+mod deposit;
+mod liquidate;
 mod repay;
 mod withdraw;
-mod liquidate;
-mod analytics;
+
+/// Supported emergency lifecycle states for the protocol
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub enum EmergencyStatus {
+    Operational,
+    Paused,
+    Recovery,
+}
+
+/// A queued update that should be applied while the protocol is in emergency handling
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct EmergencyParamUpdate {
+    pub key: Symbol,
+    pub value: i128,
+    pub queued_by: Address,
+    pub queued_at: u64,
+}
+
+impl EmergencyParamUpdate {
+    pub fn new(env: &Env, key: Symbol, value: i128, queued_by: Address) -> Self {
+        Self {
+            key,
+            value,
+            queued_by,
+            queued_at: env.ledger().timestamp(),
+        }
+    }
+}
+
+/// Tracking structure for protocol emergency funds
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct EmergencyFund {
+    pub balance: i128,
+    pub reserved: i128,
+    pub token: Option<Address>,
+    pub last_update: u64,
+}
+
+impl EmergencyFund {
+    pub fn initial(env: &Env) -> Self {
+        Self {
+            balance: 0,
+            reserved: 0,
+            token: None,
+            last_update: env.ledger().timestamp(),
+        }
+    }
+}
+
+/// Comprehensive emergency state tracked on-chain
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct EmergencyState {
+    pub status: EmergencyStatus,
+    pub paused_by: Option<Address>,
+    pub paused_at: u64,
+    pub reason: Option<String>,
+    pub recovery_plan: Option<String>,
+    pub recovery_steps: Vec<String>,
+    pub last_recovery_update: u64,
+    pub emergency_managers: Vec<Address>,
+    pub pending_param_updates: Vec<EmergencyParamUpdate>,
+    pub fund: EmergencyFund,
+}
+
+impl EmergencyState {
+    pub fn default(env: &Env) -> Self {
+        Self {
+            status: EmergencyStatus::Operational,
+            paused_by: None,
+            paused_at: 0,
+            reason: None,
+            recovery_plan: None,
+            recovery_steps: Vec::new(env),
+            last_recovery_update: 0,
+            emergency_managers: Vec::new(env),
+            pending_param_updates: Vec::new(env),
+            fund: EmergencyFund::initial(env),
+        }
+    }
+}
+
+/// Storage helper for persisting emergency state
+pub struct EmergencyStorage;
+
+impl EmergencyStorage {
+    fn key(env: &Env) -> Symbol {
+        Symbol::new(env, "emergency_state")
+    }
+
+    pub fn save(env: &Env, state: &EmergencyState) {
+        env.storage().instance().set(&Self::key(env), state);
+    }
+
+    pub fn get(env: &Env) -> EmergencyState {
+        env.storage()
+            .instance()
+            .get::<Symbol, EmergencyState>(&Self::key(env))
+            .unwrap_or_else(|| EmergencyState::default(env))
+    }
+}
+
+/// Operation categories used when checking emergency restrictions
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum OperationKind {
+    Deposit,
+    Borrow,
+    Repay,
+    Withdraw,
+    Liquidate,
+    FlashLoan,
+    Governance,
+    Admin,
+}
+
+/// Emergency management helper with authorization and flow controls
+pub struct EmergencyManager;
+
+impl EmergencyManager {
+    fn is_authorized(env: &Env, caller: &Address) -> bool {
+        if let Some(admin) = ProtocolConfig::get_admin(env) {
+            if admin == *caller {
+                return true;
+            }
+        }
+
+        let state = EmergencyStorage::get(env);
+        let managers = state.emergency_managers;
+        let len = managers.len();
+        for idx in 0..len {
+            if let Some(manager) = managers.get(idx) {
+                if manager == *caller {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn ensure_authorized(env: &Env, caller: &Address) -> Result<(), ProtocolError> {
+        if Self::is_authorized(env, caller) {
+            Ok(())
+        } else {
+            Err(ProtocolError::Unauthorized)
+        }
+    }
+
+    pub fn ensure_operation_allowed(
+        env: &Env,
+        operation: OperationKind,
+    ) -> Result<(), ProtocolError> {
+        let state = EmergencyStorage::get(env);
+        match state.status {
+            EmergencyStatus::Operational => Ok(()),
+            EmergencyStatus::Paused => match operation {
+                OperationKind::Admin | OperationKind::Governance => Ok(()),
+                _ => Err(ProtocolError::ProtocolPaused),
+            },
+            EmergencyStatus::Recovery => match operation {
+                OperationKind::Repay
+                | OperationKind::Deposit
+                | OperationKind::Governance
+                | OperationKind::Admin => Ok(()),
+                _ => Err(ProtocolError::RecoveryModeRestricted),
+            },
+        }
+    }
+
+    pub fn set_manager(
+        env: &Env,
+        caller: &Address,
+        manager: &Address,
+        enabled: bool,
+    ) -> Result<(), ProtocolError> {
+        ProtocolConfig::require_admin(env, caller)?;
+        let mut state = EmergencyStorage::get(env);
+        let mut updated = Vec::new(env);
+        let mut exists = false;
+
+        let managers = state.emergency_managers;
+        let len = managers.len();
+        for idx in 0..len {
+            if let Some(entry) = managers.get(idx) {
+                if entry == *manager {
+                    exists = true;
+                    if enabled {
+                        updated.push_back(entry);
+                    }
+                } else {
+                    updated.push_back(entry);
+                }
+            }
+        }
+
+        if enabled && !exists {
+            updated.push_back(manager.clone());
+        }
+
+        state.emergency_managers = updated;
+        EmergencyStorage::save(env, &state);
+
+        ProtocolEvent::EmergencyManagerUpdated(manager.clone(), enabled).emit(env);
+        Ok(())
+    }
+
+    pub fn pause(env: &Env, caller: &Address, reason: Option<String>) -> Result<(), ProtocolError> {
+        Self::ensure_authorized(env, caller)?;
+        let mut state = EmergencyStorage::get(env);
+        state.status = EmergencyStatus::Paused;
+        state.paused_by = Some(caller.clone());
+        state.paused_at = env.ledger().timestamp();
+        state.reason = reason.clone();
+        EmergencyStorage::save(env, &state);
+
+        ProtocolEvent::EmergencyStatusChanged(Symbol::new(env, "paused"), reason).emit(env);
+        Ok(())
+    }
+
+    pub fn enter_recovery(
+        env: &Env,
+        caller: &Address,
+        plan: Option<String>,
+    ) -> Result<(), ProtocolError> {
+        Self::ensure_authorized(env, caller)?;
+        let mut state = EmergencyStorage::get(env);
+        state.status = EmergencyStatus::Recovery;
+        state.recovery_plan = plan.clone();
+        state.last_recovery_update = env.ledger().timestamp();
+        EmergencyStorage::save(env, &state);
+
+        ProtocolEvent::EmergencyStatusChanged(Symbol::new(env, "recovery"), plan).emit(env);
+        Ok(())
+    }
+
+    pub fn resume(env: &Env, caller: &Address) -> Result<(), ProtocolError> {
+        Self::ensure_authorized(env, caller)?;
+        let mut state = EmergencyStorage::get(env);
+        state.status = EmergencyStatus::Operational;
+        state.reason = None;
+        state.recovery_plan = None;
+        state.last_recovery_update = env.ledger().timestamp();
+        EmergencyStorage::save(env, &state);
+
+        ProtocolEvent::EmergencyStatusChanged(Symbol::new(env, "operational"), None).emit(env);
+        Ok(())
+    }
+
+    pub fn record_recovery_step(
+        env: &Env,
+        caller: &Address,
+        step: String,
+    ) -> Result<(), ProtocolError> {
+        Self::ensure_authorized(env, caller)?;
+        let mut state = EmergencyStorage::get(env);
+        let mut steps = state.recovery_steps;
+        steps.push_back(step.clone());
+        state.recovery_steps = steps;
+        state.last_recovery_update = env.ledger().timestamp();
+        EmergencyStorage::save(env, &state);
+
+        ProtocolEvent::EmergencyRecoveryStep(step).emit(env);
+        Ok(())
+    }
+
+    pub fn queue_param_update(
+        env: &Env,
+        caller: &Address,
+        key: Symbol,
+        value: i128,
+    ) -> Result<(), ProtocolError> {
+        Self::ensure_authorized(env, caller)?;
+        let mut state = EmergencyStorage::get(env);
+        let mut updates = state.pending_param_updates;
+        updates.push_back(EmergencyParamUpdate::new(
+            env,
+            key.clone(),
+            value,
+            caller.clone(),
+        ));
+        state.pending_param_updates = updates;
+        EmergencyStorage::save(env, &state);
+
+        ProtocolEvent::EmergencyParamUpdateQueued(key.clone(), value).emit(env);
+        Ok(())
+    }
+
+    pub fn apply_param_updates(env: &Env, caller: &Address) -> Result<(), ProtocolError> {
+        Self::ensure_authorized(env, caller)?;
+        let mut state = EmergencyStorage::get(env);
+        let updates = state.pending_param_updates;
+        let len = updates.len();
+
+        for idx in 0..len {
+            if let Some(update) = updates.get(idx) {
+                Self::apply_single_update(env, &update)?;
+                ProtocolEvent::EmergencyParamUpdateApplied(update.key.clone(), update.value)
+                    .emit(env);
+            }
+        }
+
+        state.pending_param_updates = Vec::new(env);
+        EmergencyStorage::save(env, &state);
+        Ok(())
+    }
+
+    fn apply_single_update(env: &Env, update: &EmergencyParamUpdate) -> Result<(), ProtocolError> {
+        let key_min_collateral = Symbol::new(env, "min_collateral_ratio");
+        let key_reserve_factor = Symbol::new(env, "reserve_factor");
+        let key_base_rate = Symbol::new(env, "base_rate");
+        let key_kink_util = Symbol::new(env, "kink_utilization");
+        let key_multiplier = Symbol::new(env, "multiplier");
+        let key_rate_ceiling = Symbol::new(env, "rate_ceiling");
+        let key_rate_floor = Symbol::new(env, "rate_floor");
+        let key_flash_fee = Symbol::new(env, "flash_fee_bps");
+
+        if update.key == key_min_collateral {
+            let admin = ProtocolConfig::get_admin(env).ok_or(ProtocolError::ConfigurationError)?;
+            ProtocolConfig::set_min_collateral_ratio(env, &admin, update.value)?;
+            return Ok(());
+        }
+
+        let mut config = InterestRateStorage::get_config(env);
+        if update.key == key_reserve_factor {
+            config.reserve_factor = update.value;
+        } else if update.key == key_base_rate {
+            config.base_rate = update.value;
+        } else if update.key == key_kink_util {
+            config.kink_utilization = update.value;
+        } else if update.key == key_multiplier {
+            config.multiplier = update.value;
+        } else if update.key == key_rate_ceiling {
+            config.rate_ceiling = update.value;
+        } else if update.key == key_rate_floor {
+            config.rate_floor = update.value;
+        } else if update.key == key_flash_fee {
+            let admin = ProtocolConfig::get_admin(env).ok_or(ProtocolError::ConfigurationError)?;
+            ProtocolConfig::set_flash_loan_fee_bps(env, &admin, update.value)?;
+            return Ok(());
+        } else {
+            return Err(ProtocolError::InvalidParameters);
+        }
+
+        InterestRateStorage::save_config(env, &config);
+        Ok(())
+    }
+
+    pub fn adjust_fund(
+        env: &Env,
+        caller: &Address,
+        token: Option<Address>,
+        delta: i128,
+        reserve_delta: i128,
+    ) -> Result<(), ProtocolError> {
+        Self::ensure_authorized(env, caller)?;
+        let mut state = EmergencyStorage::get(env);
+        let mut fund = state.fund;
+        let new_balance = fund.balance + delta;
+        if new_balance < 0 {
+            return Err(ProtocolError::EmergencyFundInsufficient);
+        }
+        let new_reserved = fund.reserved + reserve_delta;
+        if new_reserved < 0 || new_reserved > new_balance {
+            return Err(ProtocolError::EmergencyFundInsufficient);
+        }
+
+        if token.is_some() {
+            fund.token = token;
+        }
+
+        fund.balance = new_balance;
+        fund.reserved = new_reserved;
+        fund.last_update = env.ledger().timestamp();
+        state.fund = fund;
+        EmergencyStorage::save(env, &state);
+
+        ProtocolEvent::EmergencyFundUpdated(caller.clone(), delta, reserve_delta).emit(env);
+        Ok(())
+    }
+}
 
 /// Reentrancy guard for security
 pub struct ReentrancyGuard;
 
 impl ReentrancyGuard {
-    fn key(env: &Env) -> Symbol { Symbol::new(env, "reentrancy") }
+    fn key(env: &Env) -> Symbol {
+        Symbol::new(env, "reentrancy")
+    }
     pub fn enter(env: &Env) -> Result<(), ProtocolError> {
-        let entered = env.storage().instance().get::<Symbol, bool>(&Self::key(env)).unwrap_or(false);
+        let entered = env
+            .storage()
+            .instance()
+            .get::<Symbol, bool>(&Self::key(env))
+            .unwrap_or(false);
         if entered {
             let error = ProtocolError::ReentrancyDetected;
             return Err(error);
@@ -125,8 +513,8 @@ impl InterestRateConfig {
             rate_ceiling: 50000000,     // 50%
             rate_floor: 100000,         // 0.1%
             last_update: 0,
-            smoothing_bps: 2000,        // 20% smoothing by default
-            util_sensitivity_bps: 100,  // 1% per 1% util change
+            smoothing_bps: 2000,       // 20% smoothing by default
+            util_sensitivity_bps: 100, // 1% per 1% util change
         }
     }
 }
@@ -210,7 +598,10 @@ impl RiskConfigStorage {
     }
 
     pub fn get(env: &Env) -> RiskConfig {
-        env.storage().instance().get(&Self::key(env)).unwrap_or_else(RiskConfig::default)
+        env.storage()
+            .instance()
+            .get(&Self::key(env))
+            .unwrap_or_else(RiskConfig::default)
     }
 }
 
@@ -231,7 +622,10 @@ impl InterestRateStorage {
     }
 
     pub fn get_config(env: &Env) -> InterestRateConfig {
-        env.storage().instance().get(&Self::config_key(env)).unwrap_or_else(InterestRateConfig::default)
+        env.storage()
+            .instance()
+            .get(&Self::config_key(env))
+            .unwrap_or_else(InterestRateConfig::default)
     }
 
     pub fn save_state(env: &Env, state: &InterestRateState) {
@@ -239,13 +633,16 @@ impl InterestRateStorage {
     }
 
     pub fn get_state(env: &Env) -> InterestRateState {
-        env.storage().instance().get(&Self::state_key(env)).unwrap_or_else(InterestRateState::initial)
+        env.storage()
+            .instance()
+            .get(&Self::state_key(env))
+            .unwrap_or_else(InterestRateState::initial)
     }
 
     pub fn update_state(env: &Env) -> InterestRateState {
         let mut state = Self::get_state(env);
         let config = Self::get_config(env);
-        
+
         // Simple interest rate calculation based on utilization
         if state.total_supplied > 0 {
             state.utilization_rate = (state.total_borrowed * 100000000) / state.total_supplied;
@@ -255,14 +652,14 @@ impl InterestRateStorage {
 
         // Calculate borrow rate based on utilization
         if state.utilization_rate <= config.kink_utilization {
-            state.current_borrow_rate = config.base_rate + 
-                (state.utilization_rate * config.multiplier) / 100000000;
+            state.current_borrow_rate =
+                config.base_rate + (state.utilization_rate * config.multiplier) / 100000000;
         } else {
-            let kink_rate = config.base_rate + 
-                (config.kink_utilization * config.multiplier) / 100000000;
+            let kink_rate =
+                config.base_rate + (config.kink_utilization * config.multiplier) / 100000000;
             let excess_utilization = state.utilization_rate - config.kink_utilization;
-            state.current_borrow_rate = kink_rate + 
-                (excess_utilization * config.multiplier * 2) / 100000000;
+            state.current_borrow_rate =
+                kink_rate + (excess_utilization * config.multiplier * 2) / 100000000;
         }
 
         // Apply rate limits
@@ -280,7 +677,8 @@ impl InterestRateStorage {
         state.smoothed_borrow_rate = (old * s_bps + cur * (10000 - s_bps)) / 10000;
 
         // Calculate supply rate from smoothed borrow rate
-        state.current_supply_rate = state.smoothed_borrow_rate * (100000000 - config.reserve_factor) / 100000000;
+        state.current_supply_rate =
+            state.smoothed_borrow_rate * (100000000 - config.reserve_factor) / 100000000;
 
         state.last_accrual_time = env.ledger().timestamp();
         Self::save_state(env, &state);
@@ -311,13 +709,15 @@ impl InterestRateManager {
 
         // Accrue borrow interest
         if position.debt > 0 {
-            let interest = (position.debt * borrow_rate * time_delta as i128) / (365 * 24 * 60 * 60 * 100000000);
+            let interest = (position.debt * borrow_rate * time_delta as i128)
+                / (365 * 24 * 60 * 60 * 100000000);
             position.borrow_interest += interest;
         }
 
         // Accrue supply interest
         if position.collateral > 0 {
-            let interest = (position.collateral * supply_rate * time_delta as i128) / (365 * 24 * 60 * 60 * 100000000);
+            let interest = (position.collateral * supply_rate * time_delta as i128)
+                / (365 * 24 * 60 * 60 * 100000000);
             position.supply_interest += interest;
         }
 
@@ -369,7 +769,9 @@ impl ProtocolConfig {
     }
 
     pub fn get_admin(env: &Env) -> Option<Address> {
-        env.storage().instance().get::<Symbol, Address>(&Self::admin_key(env))
+        env.storage()
+            .instance()
+            .get::<Symbol, Address>(&Self::admin_key(env))
     }
 
     pub fn require_admin(env: &Env, caller: &Address) -> Result<(), ProtocolError> {
@@ -386,28 +788,48 @@ impl ProtocolConfig {
         Ok(())
     }
 
-    pub fn set_min_collateral_ratio(env: &Env, caller: &Address, ratio: i128) -> Result<(), ProtocolError> {
+    pub fn set_min_collateral_ratio(
+        env: &Env,
+        caller: &Address,
+        ratio: i128,
+    ) -> Result<(), ProtocolError> {
         Self::require_admin(env, caller)?;
         if ratio <= 0 {
             return Err(ProtocolError::InvalidInput);
         }
-        env.storage().instance().set(&Self::min_collateral_ratio_key(env), &ratio);
+        env.storage()
+            .instance()
+            .set(&Self::min_collateral_ratio_key(env), &ratio);
         Ok(())
     }
 
     pub fn get_min_collateral_ratio(env: &Env) -> i128 {
-        env.storage().instance().get::<Symbol, i128>(&Self::min_collateral_ratio_key(env)).unwrap_or(150)
+        env.storage()
+            .instance()
+            .get::<Symbol, i128>(&Self::min_collateral_ratio_key(env))
+            .unwrap_or(150)
     }
 
-    pub fn set_flash_loan_fee_bps(env: &Env, caller: &Address, bps: i128) -> Result<(), ProtocolError> {
+    pub fn set_flash_loan_fee_bps(
+        env: &Env,
+        caller: &Address,
+        bps: i128,
+    ) -> Result<(), ProtocolError> {
         Self::require_admin(env, caller)?;
-        if bps < 0 || bps > 10000 { return Err(ProtocolError::InvalidInput); }
-        env.storage().instance().set(&Self::flash_fee_bps_key(env), &bps);
+        if bps < 0 || bps > 10000 {
+            return Err(ProtocolError::InvalidInput);
+        }
+        env.storage()
+            .instance()
+            .set(&Self::flash_fee_bps_key(env), &bps);
         Ok(())
     }
 
     pub fn get_flash_loan_fee_bps(env: &Env) -> i128 {
-        env.storage().instance().get::<Symbol, i128>(&Self::flash_fee_bps_key(env)).unwrap_or(5) // 0.05%
+        env.storage()
+            .instance()
+            .get::<Symbol, i128>(&Self::flash_fee_bps_key(env))
+            .unwrap_or(5) // 0.05%
     }
 }
 
@@ -438,6 +860,8 @@ pub enum ProtocolError {
     RecoveryFailed = 20,
     InvalidParameters = 21,
     StorageLimitExceeded = 22,
+    RecoveryModeRestricted = 23,
+    EmergencyFundInsufficient = 24,
 }
 
 /// Protocol events
@@ -445,14 +869,14 @@ pub enum ProtocolError {
 #[contracttype]
 pub enum ProtocolEvent {
     PositionUpdated(Address, i128, i128, i128), // user, collateral, debt, collateral_ratio
-    InterestAccrued(Address, i128, i128), // user, borrow_interest, supply_interest
+    InterestAccrued(Address, i128, i128),       // user, borrow_interest, supply_interest
     LiquidationExecuted(Address, Address, i128, i128), // liquidator, user, collateral_seized, debt_repaid
-    RiskParamsUpdated(i128, i128), // close_factor, liquidation_incentive
+    RiskParamsUpdated(i128, i128),                     // close_factor, liquidation_incentive
     PauseSwitchesUpdated(bool, bool, bool, bool), // pause_borrow, pause_deposit, pause_withdraw, pause_liquidate
     // Cross-asset events
-    CrossDeposit(Address, Address, i128), // user, asset, amount
-    CrossBorrow(Address, Address, i128), // user, asset, amount
-    CrossRepay(Address, Address, i128), // user, asset, amount
+    CrossDeposit(Address, Address, i128),  // user, asset, amount
+    CrossBorrow(Address, Address, i128),   // user, asset, amount
+    CrossRepay(Address, Address, i128),    // user, asset, amount
     CrossWithdraw(Address, Address, i128), // user, asset, amount
     // Flash loan events
     FlashLoanInitiated(Address, Address, i128, i128), // initiator, asset, amount, fee
@@ -462,10 +886,10 @@ pub enum ProtocolEvent {
     // AMM
     AMMSwap(Address, Address, Address, i128, i128), // user, asset_in, asset_out, amount_in, amount_out
     AMMLiquidityAdded(Address, Address, Address, i128, i128), // user, asset_a, asset_b, amt_a, amt_b
-    AMMLiquidityRemoved(Address, Address, i128), // user, pool, lp_amount
+    AMMLiquidityRemoved(Address, Address, i128),              // user, pool, lp_amount
     // Risk scoring
     RiskParamsSet(i128, i128, i128, i128), // base_limit, factor, min_rate_bps, max_rate_bps
-    UserRiskUpdated(Address, i128, i128), // user, score, credit_limit_value
+    UserRiskUpdated(Address, i128, i128),  // user, score, credit_limit_value
     // Liquidation advanced
     AuctionStarted(Address, Address, i128), // user, asset, debt_portion
     AuctionBidPlaced(Address, Address, i128), // bidder, user, bid_amount
@@ -473,19 +897,19 @@ pub enum ProtocolEvent {
     // Risk monitoring
     RiskAlert(Address, i128), // user, risk_score
     // Performance & Ops
-    PerfMetric(Symbol, i128), // metric_name, value
+    PerfMetric(Symbol, i128),     // metric_name, value
     CacheUpdated(Symbol, Symbol), // cache_key, op (set/evict)
     // Compliance
     ComplianceKycUpdated(Address, bool),
     ComplianceAlert(Address, Symbol),
     // Market making
-    MMParamsUpdated(i128, i128), // spread_bps, inventory_cap
+    MMParamsUpdated(i128, i128),       // spread_bps, inventory_cap
     MMIncentiveAccrued(Address, i128), // user, amount
     // Integration/API
     WebhookRegistered(Address, Symbol), // target, topic
     // Security
     BugReportLogged(Address, Symbol), // reporter, code
-    AuditTrail(Symbol, Symbol), // action, ref
+    AuditTrail(Symbol, Symbol),       // action, ref
     // Fees
     FeesUpdated(i128, i128), // base_bps, tier1_bps
     // Insurance
@@ -495,7 +919,7 @@ pub enum ProtocolEvent {
     // Bridge
     BridgeRegistered(String, Address, i128), // network_id, bridge, fee_bps
     BridgeFeeUpdated(String, i128),          // network_id, fee_bps
-    AssetBridgedIn(Address, String, Address, i128, i128),  // user, network_id, asset, amount, fee
+    AssetBridgedIn(Address, String, Address, i128, i128), // user, network_id, asset, amount, fee
     AssetBridgedOut(Address, String, Address, i128, i128), // user, network_id, asset, amount, fee
     // Monitoring
     HealthReported(String),
@@ -505,6 +929,13 @@ pub enum ProtocolEvent {
     IntegrationCalled(String, Symbol),
     // Analytics
     AnalyticsUpdated(Address, String, i128, u64), // user, activity_type, amount, timestamp
+    // Emergency controls
+    EmergencyStatusChanged(Symbol, Option<String>),
+    EmergencyRecoveryStep(String),
+    EmergencyParamUpdateQueued(Symbol, i128),
+    EmergencyParamUpdateApplied(Symbol, i128),
+    EmergencyFundUpdated(Address, i128, i128),
+    EmergencyManagerUpdated(Address, bool),
 }
 
 impl ProtocolEvent {
@@ -512,304 +943,555 @@ impl ProtocolEvent {
         match self {
             ProtocolEvent::PositionUpdated(user, collateral, debt, collateral_ratio) => {
                 env.events().publish(
-                    (Symbol::new(env, "position_updated"), Symbol::new(env, "user")),
                     (
-                        Symbol::new(env, "user"), user.clone(),
-                        Symbol::new(env, "collateral"), *collateral,
-                        Symbol::new(env, "debt"), *debt,
-                        Symbol::new(env, "collateral_ratio"), *collateral_ratio,
-                    )
+                        Symbol::new(env, "position_updated"),
+                        Symbol::new(env, "user"),
+                    ),
+                    (
+                        Symbol::new(env, "user"),
+                        user.clone(),
+                        Symbol::new(env, "collateral"),
+                        *collateral,
+                        Symbol::new(env, "debt"),
+                        *debt,
+                        Symbol::new(env, "collateral_ratio"),
+                        *collateral_ratio,
+                    ),
                 );
             }
             ProtocolEvent::InterestAccrued(user, borrow_interest, supply_interest) => {
                 env.events().publish(
-                    (Symbol::new(env, "interest_accrued"), Symbol::new(env, "user")),
                     (
-                        Symbol::new(env, "user"), user.clone(),
-                        Symbol::new(env, "borrow_interest"), *borrow_interest,
-                        Symbol::new(env, "supply_interest"), *supply_interest,
-                    )
+                        Symbol::new(env, "interest_accrued"),
+                        Symbol::new(env, "user"),
+                    ),
+                    (
+                        Symbol::new(env, "user"),
+                        user.clone(),
+                        Symbol::new(env, "borrow_interest"),
+                        *borrow_interest,
+                        Symbol::new(env, "supply_interest"),
+                        *supply_interest,
+                    ),
                 );
             }
-            ProtocolEvent::LiquidationExecuted(liquidator, user, collateral_seized, debt_repaid) => {
+            ProtocolEvent::LiquidationExecuted(
+                liquidator,
+                user,
+                collateral_seized,
+                debt_repaid,
+            ) => {
                 env.events().publish(
-                    (Symbol::new(env, "liquidation_executed"), Symbol::new(env, "liquidator")),
                     (
-                        Symbol::new(env, "liquidator"), liquidator.clone(),
-                        Symbol::new(env, "user"), user.clone(),
-                        Symbol::new(env, "collateral_seized"), *collateral_seized,
-                        Symbol::new(env, "debt_repaid"), *debt_repaid,
-                    )
+                        Symbol::new(env, "liquidation_executed"),
+                        Symbol::new(env, "liquidator"),
+                    ),
+                    (
+                        Symbol::new(env, "liquidator"),
+                        liquidator.clone(),
+                        Symbol::new(env, "user"),
+                        user.clone(),
+                        Symbol::new(env, "collateral_seized"),
+                        *collateral_seized,
+                        Symbol::new(env, "debt_repaid"),
+                        *debt_repaid,
+                    ),
                 );
             }
             ProtocolEvent::RiskParamsUpdated(close_factor, liquidation_incentive) => {
                 env.events().publish(
-                    (Symbol::new(env, "risk_params_updated"), Symbol::new(env, "close_factor")),
                     (
-                        Symbol::new(env, "close_factor"), *close_factor,
-                        Symbol::new(env, "liquidation_incentive"), *liquidation_incentive,
-                    )
+                        Symbol::new(env, "risk_params_updated"),
+                        Symbol::new(env, "close_factor"),
+                    ),
+                    (
+                        Symbol::new(env, "close_factor"),
+                        *close_factor,
+                        Symbol::new(env, "liquidation_incentive"),
+                        *liquidation_incentive,
+                    ),
                 );
             }
-            ProtocolEvent::PauseSwitchesUpdated(pause_borrow, pause_deposit, pause_withdraw, pause_liquidate) => {
+            ProtocolEvent::PauseSwitchesUpdated(
+                pause_borrow,
+                pause_deposit,
+                pause_withdraw,
+                pause_liquidate,
+            ) => {
                 env.events().publish(
-                    (Symbol::new(env, "pause_switches_updated"), Symbol::new(env, "pause_borrow")),
                     (
-                        Symbol::new(env, "pause_borrow"), *pause_borrow,
-                        Symbol::new(env, "pause_deposit"), *pause_deposit,
-                        Symbol::new(env, "pause_withdraw"), *pause_withdraw,
-                        Symbol::new(env, "pause_liquidate"), *pause_liquidate,
-                    )
+                        Symbol::new(env, "pause_switches_updated"),
+                        Symbol::new(env, "pause_borrow"),
+                    ),
+                    (
+                        Symbol::new(env, "pause_borrow"),
+                        *pause_borrow,
+                        Symbol::new(env, "pause_deposit"),
+                        *pause_deposit,
+                        Symbol::new(env, "pause_withdraw"),
+                        *pause_withdraw,
+                        Symbol::new(env, "pause_liquidate"),
+                        *pause_liquidate,
+                    ),
                 );
             }
             ProtocolEvent::CrossDeposit(user, asset, amount) => {
                 env.events().publish(
                     (Symbol::new(env, "cross_deposit"), Symbol::new(env, "user")),
                     (
-                        Symbol::new(env, "user"), user.clone(),
-                        Symbol::new(env, "asset"), asset.clone(),
-                        Symbol::new(env, "amount"), *amount,
-                    )
+                        Symbol::new(env, "user"),
+                        user.clone(),
+                        Symbol::new(env, "asset"),
+                        asset.clone(),
+                        Symbol::new(env, "amount"),
+                        *amount,
+                    ),
                 );
             }
             ProtocolEvent::CrossBorrow(user, asset, amount) => {
                 env.events().publish(
                     (Symbol::new(env, "cross_borrow"), Symbol::new(env, "user")),
                     (
-                        Symbol::new(env, "user"), user.clone(),
-                        Symbol::new(env, "asset"), asset.clone(),
-                        Symbol::new(env, "amount"), *amount,
-                    )
+                        Symbol::new(env, "user"),
+                        user.clone(),
+                        Symbol::new(env, "asset"),
+                        asset.clone(),
+                        Symbol::new(env, "amount"),
+                        *amount,
+                    ),
                 );
             }
             ProtocolEvent::CrossRepay(user, asset, amount) => {
                 env.events().publish(
                     (Symbol::new(env, "cross_repay"), Symbol::new(env, "user")),
                     (
-                        Symbol::new(env, "user"), user.clone(),
-                        Symbol::new(env, "asset"), asset.clone(),
-                        Symbol::new(env, "amount"), *amount,
-                    )
+                        Symbol::new(env, "user"),
+                        user.clone(),
+                        Symbol::new(env, "asset"),
+                        asset.clone(),
+                        Symbol::new(env, "amount"),
+                        *amount,
+                    ),
                 );
             }
             ProtocolEvent::CrossWithdraw(user, asset, amount) => {
                 env.events().publish(
                     (Symbol::new(env, "cross_withdraw"), Symbol::new(env, "user")),
                     (
-                        Symbol::new(env, "user"), user.clone(),
-                        Symbol::new(env, "asset"), asset.clone(),
-                        Symbol::new(env, "amount"), *amount,
-                    )
+                        Symbol::new(env, "user"),
+                        user.clone(),
+                        Symbol::new(env, "asset"),
+                        asset.clone(),
+                        Symbol::new(env, "amount"),
+                        *amount,
+                    ),
+                );
+            }
+            ProtocolEvent::EmergencyStatusChanged(status, reason) => {
+                env.events().publish(
+                    (Symbol::new(env, "emergency_status"), status.clone()),
+                    (
+                        Symbol::new(env, "status"),
+                        status.clone(),
+                        Symbol::new(env, "reason"),
+                        reason.clone(),
+                    ),
+                );
+            }
+            ProtocolEvent::EmergencyRecoveryStep(step) => {
+                env.events().publish(
+                    (
+                        Symbol::new(env, "emergency_recovery_step"),
+                        Symbol::new(env, "step"),
+                    ),
+                    (Symbol::new(env, "step"), step.clone()),
+                );
+            }
+            ProtocolEvent::EmergencyParamUpdateQueued(key, value) => {
+                env.events().publish(
+                    (
+                        Symbol::new(env, "emergency_param_update_queued"),
+                        key.clone(),
+                    ),
+                    (
+                        Symbol::new(env, "parameter"),
+                        key.clone(),
+                        Symbol::new(env, "value"),
+                        *value,
+                    ),
+                );
+            }
+            ProtocolEvent::EmergencyParamUpdateApplied(key, value) => {
+                env.events().publish(
+                    (
+                        Symbol::new(env, "emergency_param_update_applied"),
+                        key.clone(),
+                    ),
+                    (
+                        Symbol::new(env, "parameter"),
+                        key.clone(),
+                        Symbol::new(env, "value"),
+                        *value,
+                    ),
+                );
+            }
+            ProtocolEvent::EmergencyFundUpdated(actor, delta, reserve_delta) => {
+                env.events().publish(
+                    (Symbol::new(env, "emergency_fund"), actor.clone()),
+                    (
+                        Symbol::new(env, "actor"),
+                        actor.clone(),
+                        Symbol::new(env, "delta"),
+                        *delta,
+                        Symbol::new(env, "reserve_delta"),
+                        *reserve_delta,
+                    ),
+                );
+            }
+            ProtocolEvent::EmergencyManagerUpdated(manager, enabled) => {
+                env.events().publish(
+                    (Symbol::new(env, "emergency_manager"), manager.clone()),
+                    (
+                        Symbol::new(env, "manager"),
+                        manager.clone(),
+                        Symbol::new(env, "enabled"),
+                        *enabled,
+                    ),
                 );
             }
             ProtocolEvent::FlashLoanInitiated(initiator, asset, amount, fee) => {
                 env.events().publish(
-                    (Symbol::new(env, "flash_loan_initiated"), Symbol::new(env, "user")),
                     (
-                        Symbol::new(env, "user"), initiator.clone(),
-                        Symbol::new(env, "asset"), asset.clone(),
-                        Symbol::new(env, "amount"), *amount,
-                        Symbol::new(env, "fee"), *fee,
-                    )
+                        Symbol::new(env, "flash_loan_initiated"),
+                        Symbol::new(env, "user"),
+                    ),
+                    (
+                        Symbol::new(env, "user"),
+                        initiator.clone(),
+                        Symbol::new(env, "asset"),
+                        asset.clone(),
+                        Symbol::new(env, "amount"),
+                        *amount,
+                        Symbol::new(env, "fee"),
+                        *fee,
+                    ),
                 );
             }
             ProtocolEvent::FlashLoanCompleted(initiator, asset, amount, fee) => {
                 env.events().publish(
-                    (Symbol::new(env, "flash_loan_completed"), Symbol::new(env, "user")),
                     (
-                        Symbol::new(env, "user"), initiator.clone(),
-                        Symbol::new(env, "asset"), asset.clone(),
-                        Symbol::new(env, "amount"), *amount,
-                        Symbol::new(env, "fee"), *fee,
-                    )
+                        Symbol::new(env, "flash_loan_completed"),
+                        Symbol::new(env, "user"),
+                    ),
+                    (
+                        Symbol::new(env, "user"),
+                        initiator.clone(),
+                        Symbol::new(env, "asset"),
+                        asset.clone(),
+                        Symbol::new(env, "amount"),
+                        *amount,
+                        Symbol::new(env, "fee"),
+                        *fee,
+                    ),
                 );
             }
             ProtocolEvent::DynamicCFUpdated(asset, new_cf) => {
                 env.events().publish(
-                    (Symbol::new(env, "dynamic_cf_updated"), Symbol::new(env, "asset")),
                     (
-                        Symbol::new(env, "asset"), asset.clone(),
-                        Symbol::new(env, "new_cf"), *new_cf,
-                    )
+                        Symbol::new(env, "dynamic_cf_updated"),
+                        Symbol::new(env, "asset"),
+                    ),
+                    (
+                        Symbol::new(env, "asset"),
+                        asset.clone(),
+                        Symbol::new(env, "new_cf"),
+                        *new_cf,
+                    ),
                 );
             }
             ProtocolEvent::AMMSwap(user, asset_in, asset_out, amount_in, amount_out) => {
                 env.events().publish(
                     (Symbol::new(env, "amm_swap"), Symbol::new(env, "user")),
                     (
-                        Symbol::new(env, "user"), user.clone(),
-                        Symbol::new(env, "asset_in"), asset_in.clone(),
-                        Symbol::new(env, "asset_out"), asset_out.clone(),
-                        Symbol::new(env, "amount_in"), *amount_in,
-                        Symbol::new(env, "amount_out"), *amount_out,
-                    )
+                        Symbol::new(env, "user"),
+                        user.clone(),
+                        Symbol::new(env, "asset_in"),
+                        asset_in.clone(),
+                        Symbol::new(env, "asset_out"),
+                        asset_out.clone(),
+                        Symbol::new(env, "amount_in"),
+                        *amount_in,
+                        Symbol::new(env, "amount_out"),
+                        *amount_out,
+                    ),
                 );
             }
             ProtocolEvent::AMMLiquidityAdded(user, asset_a, asset_b, amt_a, amt_b) => {
                 env.events().publish(
-                    (Symbol::new(env, "amm_liquidity_added"), Symbol::new(env, "user")),
                     (
-                        Symbol::new(env, "user"), user.clone(),
-                        Symbol::new(env, "asset_a"), asset_a.clone(),
-                        Symbol::new(env, "asset_b"), asset_b.clone(),
-                        Symbol::new(env, "amount_a"), *amt_a,
-                        Symbol::new(env, "amount_b"), *amt_b,
-                    )
+                        Symbol::new(env, "amm_liquidity_added"),
+                        Symbol::new(env, "user"),
+                    ),
+                    (
+                        Symbol::new(env, "user"),
+                        user.clone(),
+                        Symbol::new(env, "asset_a"),
+                        asset_a.clone(),
+                        Symbol::new(env, "asset_b"),
+                        asset_b.clone(),
+                        Symbol::new(env, "amount_a"),
+                        *amt_a,
+                        Symbol::new(env, "amount_b"),
+                        *amt_b,
+                    ),
                 );
             }
             ProtocolEvent::AMMLiquidityRemoved(user, pool, lp_amount) => {
                 env.events().publish(
-                    (Symbol::new(env, "amm_liquidity_removed"), Symbol::new(env, "user")),
                     (
-                        Symbol::new(env, "user"), user.clone(),
-                        Symbol::new(env, "pool"), pool.clone(),
-                        Symbol::new(env, "lp_amount"), *lp_amount,
-                    )
+                        Symbol::new(env, "amm_liquidity_removed"),
+                        Symbol::new(env, "user"),
+                    ),
+                    (
+                        Symbol::new(env, "user"),
+                        user.clone(),
+                        Symbol::new(env, "pool"),
+                        pool.clone(),
+                        Symbol::new(env, "lp_amount"),
+                        *lp_amount,
+                    ),
                 );
             }
             ProtocolEvent::RiskParamsSet(base_limit, factor, min_rate_bps, max_rate_bps) => {
                 env.events().publish(
-                    (Symbol::new(env, "risk_params_set"), Symbol::new(env, "base_limit")),
                     (
-                        Symbol::new(env, "base_limit"), *base_limit,
-                        Symbol::new(env, "factor"), *factor,
-                        Symbol::new(env, "min_rate_bps"), *min_rate_bps,
-                        Symbol::new(env, "max_rate_bps"), *max_rate_bps,
-                    )
+                        Symbol::new(env, "risk_params_set"),
+                        Symbol::new(env, "base_limit"),
+                    ),
+                    (
+                        Symbol::new(env, "base_limit"),
+                        *base_limit,
+                        Symbol::new(env, "factor"),
+                        *factor,
+                        Symbol::new(env, "min_rate_bps"),
+                        *min_rate_bps,
+                        Symbol::new(env, "max_rate_bps"),
+                        *max_rate_bps,
+                    ),
                 );
             }
             ProtocolEvent::UserRiskUpdated(user, score, limit) => {
                 env.events().publish(
-                    (Symbol::new(env, "user_risk_updated"), Symbol::new(env, "user")),
                     (
-                        Symbol::new(env, "user"), user.clone(),
-                        Symbol::new(env, "score"), *score,
-                        Symbol::new(env, "credit_limit"), *limit,
-                    )
+                        Symbol::new(env, "user_risk_updated"),
+                        Symbol::new(env, "user"),
+                    ),
+                    (
+                        Symbol::new(env, "user"),
+                        user.clone(),
+                        Symbol::new(env, "score"),
+                        *score,
+                        Symbol::new(env, "credit_limit"),
+                        *limit,
+                    ),
                 );
             }
             ProtocolEvent::AuctionStarted(user, asset, debt_portion) => {
                 env.events().publish(
-                    (Symbol::new(env, "auction_started"), Symbol::new(env, "user")),
                     (
-                        Symbol::new(env, "user"), user.clone(),
-                        Symbol::new(env, "asset"), asset.clone(),
-                        Symbol::new(env, "debt_portion"), *debt_portion,
-                    )
+                        Symbol::new(env, "auction_started"),
+                        Symbol::new(env, "user"),
+                    ),
+                    (
+                        Symbol::new(env, "user"),
+                        user.clone(),
+                        Symbol::new(env, "asset"),
+                        asset.clone(),
+                        Symbol::new(env, "debt_portion"),
+                        *debt_portion,
+                    ),
                 );
             }
             ProtocolEvent::AuctionBidPlaced(bidder, user, bid_amount) => {
                 env.events().publish(
                     (Symbol::new(env, "auction_bid"), Symbol::new(env, "bidder")),
                     (
-                        Symbol::new(env, "bidder"), bidder.clone(),
-                        Symbol::new(env, "user"), user.clone(),
-                        Symbol::new(env, "bid_amount"), *bid_amount,
-                    )
+                        Symbol::new(env, "bidder"),
+                        bidder.clone(),
+                        Symbol::new(env, "user"),
+                        user.clone(),
+                        Symbol::new(env, "bid_amount"),
+                        *bid_amount,
+                    ),
                 );
             }
             ProtocolEvent::AuctionSettled(winner, user, seized, repaid) => {
                 env.events().publish(
-                    (Symbol::new(env, "auction_settled"), Symbol::new(env, "winner")),
                     (
-                        Symbol::new(env, "winner"), winner.clone(),
-                        Symbol::new(env, "user"), user.clone(),
-                        Symbol::new(env, "seized_collateral"), *seized,
-                        Symbol::new(env, "repaid_debt"), *repaid,
-                    )
+                        Symbol::new(env, "auction_settled"),
+                        Symbol::new(env, "winner"),
+                    ),
+                    (
+                        Symbol::new(env, "winner"),
+                        winner.clone(),
+                        Symbol::new(env, "user"),
+                        user.clone(),
+                        Symbol::new(env, "seized_collateral"),
+                        *seized,
+                        Symbol::new(env, "repaid_debt"),
+                        *repaid,
+                    ),
                 );
             }
             ProtocolEvent::RiskAlert(user, score) => {
                 env.events().publish(
                     (Symbol::new(env, "risk_alert"), Symbol::new(env, "user")),
                     (
-                        Symbol::new(env, "user"), user.clone(),
-                        Symbol::new(env, "score"), *score,
-                    )
+                        Symbol::new(env, "user"),
+                        user.clone(),
+                        Symbol::new(env, "score"),
+                        *score,
+                    ),
                 );
             }
             ProtocolEvent::BridgeRegistered(network_id, bridge, fee_bps) => {
                 env.events().publish(
-                    (Symbol::new(env, "bridge_registered"), Symbol::new(env, "network")),
                     (
-                        Symbol::new(env, "network"), network_id.clone(),
-                        Symbol::new(env, "bridge"), bridge.clone(),
-                        Symbol::new(env, "fee_bps"), *fee_bps,
-                    )
+                        Symbol::new(env, "bridge_registered"),
+                        Symbol::new(env, "network"),
+                    ),
+                    (
+                        Symbol::new(env, "network"),
+                        network_id.clone(),
+                        Symbol::new(env, "bridge"),
+                        bridge.clone(),
+                        Symbol::new(env, "fee_bps"),
+                        *fee_bps,
+                    ),
                 );
             }
             ProtocolEvent::BridgeFeeUpdated(network_id, fee_bps) => {
                 env.events().publish(
-                    (Symbol::new(env, "bridge_fee_updated"), Symbol::new(env, "network")),
                     (
-                        Symbol::new(env, "network"), network_id.clone(),
-                        Symbol::new(env, "fee_bps"), *fee_bps,
-                    )
+                        Symbol::new(env, "bridge_fee_updated"),
+                        Symbol::new(env, "network"),
+                    ),
+                    (
+                        Symbol::new(env, "network"),
+                        network_id.clone(),
+                        Symbol::new(env, "fee_bps"),
+                        *fee_bps,
+                    ),
                 );
             }
             ProtocolEvent::AssetBridgedIn(user, network_id, asset, amount, fee) => {
                 env.events().publish(
-                    (Symbol::new(env, "asset_bridged_in"), Symbol::new(env, "user")),
                     (
-                        Symbol::new(env, "user"), user.clone(),
-                        Symbol::new(env, "network"), network_id.clone(),
-                        Symbol::new(env, "asset"), asset.clone(),
-                        Symbol::new(env, "amount"), *amount,
-                        Symbol::new(env, "fee"), *fee,
-                    )
+                        Symbol::new(env, "asset_bridged_in"),
+                        Symbol::new(env, "user"),
+                    ),
+                    (
+                        Symbol::new(env, "user"),
+                        user.clone(),
+                        Symbol::new(env, "network"),
+                        network_id.clone(),
+                        Symbol::new(env, "asset"),
+                        asset.clone(),
+                        Symbol::new(env, "amount"),
+                        *amount,
+                        Symbol::new(env, "fee"),
+                        *fee,
+                    ),
                 );
             }
             ProtocolEvent::AssetBridgedOut(user, network_id, asset, amount, fee) => {
                 env.events().publish(
-                    (Symbol::new(env, "asset_bridged_out"), Symbol::new(env, "user")),
                     (
-                        Symbol::new(env, "user"), user.clone(),
-                        Symbol::new(env, "network"), network_id.clone(),
-                        Symbol::new(env, "asset"), asset.clone(),
-                        Symbol::new(env, "amount"), *amount,
-                        Symbol::new(env, "fee"), *fee,
-                    )
+                        Symbol::new(env, "asset_bridged_out"),
+                        Symbol::new(env, "user"),
+                    ),
+                    (
+                        Symbol::new(env, "user"),
+                        user.clone(),
+                        Symbol::new(env, "network"),
+                        network_id.clone(),
+                        Symbol::new(env, "asset"),
+                        asset.clone(),
+                        Symbol::new(env, "amount"),
+                        *amount,
+                        Symbol::new(env, "fee"),
+                        *fee,
+                    ),
                 );
             }
             ProtocolEvent::HealthReported(msg) => {
                 env.events().publish(
                     (Symbol::new(env, "health_report"), Symbol::new(env, "msg")),
-                    (Symbol::new(env, "msg"), msg.clone())
+                    (Symbol::new(env, "msg"), msg.clone()),
                 );
             }
             ProtocolEvent::PerformanceReported(gas) => {
                 env.events().publish(
-                    (Symbol::new(env, "performance_report"), Symbol::new(env, "gas")),
-                    (Symbol::new(env, "gas"), *gas)
+                    (
+                        Symbol::new(env, "performance_report"),
+                        Symbol::new(env, "gas"),
+                    ),
+                    (Symbol::new(env, "gas"), *gas),
                 );
             }
             ProtocolEvent::SecurityIncident(msg) => {
                 env.events().publish(
-                    (Symbol::new(env, "security_incident"), Symbol::new(env, "msg")),
-                    (Symbol::new(env, "msg"), msg.clone())
+                    (
+                        Symbol::new(env, "security_incident"),
+                        Symbol::new(env, "msg"),
+                    ),
+                    (Symbol::new(env, "msg"), msg.clone()),
                 );
             }
             ProtocolEvent::IntegrationRegistered(name, addr) => {
                 env.events().publish(
-                    (Symbol::new(env, "integration_registered"), Symbol::new(env, "name")),
-                    (Symbol::new(env, "name"), name.clone(), Symbol::new(env, "address"), addr.clone())
+                    (
+                        Symbol::new(env, "integration_registered"),
+                        Symbol::new(env, "name"),
+                    ),
+                    (
+                        Symbol::new(env, "name"),
+                        name.clone(),
+                        Symbol::new(env, "address"),
+                        addr.clone(),
+                    ),
                 );
             }
             ProtocolEvent::IntegrationCalled(name, method) => {
                 env.events().publish(
-                    (Symbol::new(env, "integration_called"), Symbol::new(env, "name")),
-                    (Symbol::new(env, "name"), name.clone(), Symbol::new(env, "method"), method.clone())
+                    (
+                        Symbol::new(env, "integration_called"),
+                        Symbol::new(env, "name"),
+                    ),
+                    (
+                        Symbol::new(env, "name"),
+                        name.clone(),
+                        Symbol::new(env, "method"),
+                        method.clone(),
+                    ),
                 );
             }
             ProtocolEvent::AnalyticsUpdated(user, activity_type, amount, timestamp) => {
                 env.events().publish(
-                    (Symbol::new(env, "analytics_updated"), Symbol::new(env, "user")),
                     (
-                        Symbol::new(env, "user"), user.clone(),
-                        Symbol::new(env, "activity_type"), activity_type.clone(),
-                        Symbol::new(env, "amount"), *amount,
-                        Symbol::new(env, "timestamp"), *timestamp,
-                    )
+                        Symbol::new(env, "analytics_updated"),
+                        Symbol::new(env, "user"),
+                    ),
+                    (
+                        Symbol::new(env, "user"),
+                        user.clone(),
+                        Symbol::new(env, "activity_type"),
+                        activity_type.clone(),
+                        Symbol::new(env, "amount"),
+                        *amount,
+                        Symbol::new(env, "timestamp"),
+                        *timestamp,
+                    ),
                 );
             }
             // Add placeholder implementations for missing event variants
@@ -831,7 +1513,9 @@ pub fn analytics_record_action(env: &Env, user: &Address, action: &str, amount: 
 
 /// Helper function to ensure amount is positive
 fn ensure_amount_positive(amount: i128) -> Result<(), ProtocolError> {
-    if amount <= 0 { return Err(ProtocolError::InvalidAmount); }
+    if amount <= 0 {
+        return Err(ProtocolError::InvalidAmount);
+    }
     Ok(())
 }
 
@@ -852,7 +1536,12 @@ pub fn withdraw(env: Env, withdrawer: String, amount: i128) -> Result<(), Protoc
     withdraw::WithdrawModule::withdraw(&env, &withdrawer, amount)
 }
 
-pub fn liquidate(env: Env, liquidator: String, user: String, amount: i128) -> Result<(), ProtocolError> {
+pub fn liquidate(
+    env: Env,
+    liquidator: String,
+    user: String,
+    amount: i128,
+) -> Result<(), ProtocolError> {
     liquidate::LiquidationModule::liquidate(&env, &liquidator, &user, amount)?;
     Ok(())
 }
@@ -868,28 +1557,40 @@ pub fn get_position(env: Env, user: String) -> Result<(i128, i128, i128), Protoc
             };
             Ok((position.collateral, position.debt, collateral_ratio))
         }
-        None => Err(ProtocolError::PositionNotFound)
+        None => Err(ProtocolError::PositionNotFound),
     }
 }
 
-pub fn set_risk_params(env: Env, caller: String, close_factor: i128, liquidation_incentive: i128) -> Result<(), ProtocolError> {
+pub fn set_risk_params(
+    env: Env,
+    caller: String,
+    close_factor: i128,
+    liquidation_incentive: i128,
+) -> Result<(), ProtocolError> {
     let caller_addr = Address::from_string(&caller);
     ProtocolConfig::require_admin(&env, &caller_addr)?;
-    
+
     let mut config = RiskConfigStorage::get(&env);
     config.close_factor = close_factor;
     config.liquidation_incentive = liquidation_incentive;
     config.last_update = env.ledger().timestamp();
     RiskConfigStorage::save(&env, &config);
-    
+
     ProtocolEvent::RiskParamsUpdated(close_factor, liquidation_incentive).emit(&env);
     Ok(())
 }
 
-pub fn set_pause_switches(env: Env, caller: String, pause_borrow: bool, pause_deposit: bool, pause_withdraw: bool, pause_liquidate: bool) -> Result<(), ProtocolError> {
+pub fn set_pause_switches(
+    env: Env,
+    caller: String,
+    pause_borrow: bool,
+    pause_deposit: bool,
+    pause_withdraw: bool,
+    pause_liquidate: bool,
+) -> Result<(), ProtocolError> {
     let caller_addr = Address::from_string(&caller);
     ProtocolConfig::require_admin(&env, &caller_addr)?;
-    
+
     let mut config = RiskConfigStorage::get(&env);
     config.pause_borrow = pause_borrow;
     config.pause_deposit = pause_deposit;
@@ -897,22 +1598,30 @@ pub fn set_pause_switches(env: Env, caller: String, pause_borrow: bool, pause_de
     config.pause_liquidate = pause_liquidate;
     config.last_update = env.ledger().timestamp();
     RiskConfigStorage::save(&env, &config);
-    
-    ProtocolEvent::PauseSwitchesUpdated(pause_borrow, pause_deposit, pause_withdraw, pause_liquidate).emit(&env);
+
+    ProtocolEvent::PauseSwitchesUpdated(
+        pause_borrow,
+        pause_deposit,
+        pause_withdraw,
+        pause_liquidate,
+    )
+    .emit(&env);
     Ok(())
 }
 
-pub fn get_protocol_params(env: Env) -> Result<(i128, i128, i128, i128, i128, i128), ProtocolError> {
+pub fn get_protocol_params(
+    env: Env,
+) -> Result<(i128, i128, i128, i128, i128, i128), ProtocolError> {
     let config = InterestRateStorage::get_config(&env);
     let risk_config = RiskConfigStorage::get(&env);
-    
+
     Ok((
-        config.base_rate,         // 2000000 (2%)
-        config.kink_utilization,  // 80000000 (80%)
-        config.multiplier,        // 10000000 (10x)
-        config.reserve_factor,    // 10000000 (10%)
-        risk_config.close_factor, // 50000000 (50%)
-        risk_config.liquidation_incentive // 10000000 (10%)
+        config.base_rate,                  // 2000000 (2%)
+        config.kink_utilization,           // 80000000 (80%)
+        config.multiplier,                 // 10000000 (10x)
+        config.reserve_factor,             // 10000000 (10%)
+        risk_config.close_factor,          // 50000000 (50%)
+        risk_config.liquidation_incentive, // 10000000 (10%)
     ))
 }
 
@@ -924,19 +1633,88 @@ pub fn get_risk_config(env: Env) -> Result<(i128, i128, bool, bool, bool, bool),
         config.pause_borrow,
         config.pause_deposit,
         config.pause_withdraw,
-        config.pause_liquidate
+        config.pause_liquidate,
     ))
 }
 
 pub fn get_system_stats(env: Env) -> Result<(i128, i128, i128, i128), ProtocolError> {
     let state = InterestRateStorage::get_state(&env);
-    
+
     Ok((
         state.total_supplied,
         state.total_borrowed,
         state.utilization_rate,
-        0 // active_users - simplified for now
+        0, // active_users - simplified for now
     ))
+}
+
+pub fn set_emergency_manager(
+    env: Env,
+    caller: String,
+    manager: String,
+    enabled: bool,
+) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    let manager_addr = Address::from_string(&manager);
+    EmergencyManager::set_manager(&env, &caller_addr, &manager_addr, enabled)
+}
+
+pub fn trigger_emergency_pause(
+    env: Env,
+    caller: String,
+    reason: Option<String>,
+) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    EmergencyManager::pause(&env, &caller_addr, reason)
+}
+
+pub fn enter_recovery_mode(
+    env: Env,
+    caller: String,
+    plan: Option<String>,
+) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    EmergencyManager::enter_recovery(&env, &caller_addr, plan)
+}
+
+pub fn resume_operations(env: Env, caller: String) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    EmergencyManager::resume(&env, &caller_addr)
+}
+
+pub fn record_recovery_step(env: Env, caller: String, step: String) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    EmergencyManager::record_recovery_step(&env, &caller_addr, step)
+}
+
+pub fn queue_emergency_param_update(
+    env: Env,
+    caller: String,
+    parameter: Symbol,
+    value: i128,
+) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    EmergencyManager::queue_param_update(&env, &caller_addr, parameter, value)
+}
+
+pub fn apply_emergency_param_updates(env: Env, caller: String) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    EmergencyManager::apply_param_updates(&env, &caller_addr)
+}
+
+pub fn adjust_emergency_fund(
+    env: Env,
+    caller: String,
+    token: Option<Address>,
+    delta: i128,
+    reserve_delta: i128,
+) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    EmergencyManager::adjust_fund(&env, &caller_addr, token, delta, reserve_delta)
+}
+
+pub fn get_emergency_state(env: Env) -> Result<EmergencyState, ProtocolError> {
+    Ok(EmergencyStorage::get(&env))
 }
 
 #[contractimpl]
@@ -944,7 +1722,11 @@ impl Contract {
     /// Initializes the contract and sets the admin address
     pub fn initialize(env: Env, admin: String) -> Result<(), ProtocolError> {
         let admin_addr = Address::from_string(&admin);
-        if env.storage().instance().has(&ProtocolConfig::admin_key(&env)) {
+        if env
+            .storage()
+            .instance()
+            .has(&ProtocolConfig::admin_key(&env))
+        {
             return Err(ProtocolError::AlreadyInitialized);
         }
         ProtocolConfig::set_admin(&env, &admin_addr);
@@ -975,7 +1757,11 @@ impl Contract {
     }
 
     /// Deposit collateral into the protocol
-    pub fn deposit_collateral(env: Env, depositor: String, amount: i128) -> Result<(), ProtocolError> {
+    pub fn deposit_collateral(
+        env: Env,
+        depositor: String,
+        amount: i128,
+    ) -> Result<(), ProtocolError> {
         deposit_collateral(env, depositor, amount)
     }
 
@@ -995,7 +1781,12 @@ impl Contract {
     }
 
     /// Liquidate an undercollateralized position
-    pub fn liquidate(env: Env, liquidator: String, user: String, amount: i128) -> Result<(), ProtocolError> {
+    pub fn liquidate(
+        env: Env,
+        liquidator: String,
+        user: String,
+        amount: i128,
+    ) -> Result<(), ProtocolError> {
         liquidate(env, liquidator, user, amount)
     }
 
@@ -1005,28 +1796,115 @@ impl Contract {
     }
 
     /// Set risk parameters (admin only)
-    pub fn set_risk_params(env: Env, caller: String, close_factor: i128, liquidation_incentive: i128) -> Result<(), ProtocolError> {
+    pub fn set_risk_params(
+        env: Env,
+        caller: String,
+        close_factor: i128,
+        liquidation_incentive: i128,
+    ) -> Result<(), ProtocolError> {
         set_risk_params(env, caller, close_factor, liquidation_incentive)
     }
 
     /// Set pause switches (admin only)
-    pub fn set_pause_switches(env: Env, caller: String, pause_borrow: bool, pause_deposit: bool, pause_withdraw: bool, pause_liquidate: bool) -> Result<(), ProtocolError> {
-        set_pause_switches(env, caller, pause_borrow, pause_deposit, pause_withdraw, pause_liquidate)
+    pub fn set_pause_switches(
+        env: Env,
+        caller: String,
+        pause_borrow: bool,
+        pause_deposit: bool,
+        pause_withdraw: bool,
+        pause_liquidate: bool,
+    ) -> Result<(), ProtocolError> {
+        set_pause_switches(
+            env,
+            caller,
+            pause_borrow,
+            pause_deposit,
+            pause_withdraw,
+            pause_liquidate,
+        )
     }
 
     /// Get protocol parameters
-    pub fn get_protocol_params(env: Env) -> Result<(i128, i128, i128, i128, i128, i128), ProtocolError> {
+    pub fn get_protocol_params(
+        env: Env,
+    ) -> Result<(i128, i128, i128, i128, i128, i128), ProtocolError> {
         get_protocol_params(env)
     }
 
     /// Get risk configuration
-    pub fn get_risk_config(env: Env) -> Result<(i128, i128, bool, bool, bool, bool), ProtocolError> {
+    pub fn get_risk_config(
+        env: Env,
+    ) -> Result<(i128, i128, bool, bool, bool, bool), ProtocolError> {
         get_risk_config(env)
     }
 
     /// Get system stats
     pub fn get_system_stats(env: Env) -> Result<(i128, i128, i128, i128), ProtocolError> {
         get_system_stats(env)
+    }
+
+    pub fn set_emergency_manager(
+        env: Env,
+        caller: String,
+        manager: String,
+        enabled: bool,
+    ) -> Result<(), ProtocolError> {
+        set_emergency_manager(env, caller, manager, enabled)
+    }
+
+    pub fn trigger_emergency_pause(
+        env: Env,
+        caller: String,
+        reason: Option<String>,
+    ) -> Result<(), ProtocolError> {
+        trigger_emergency_pause(env, caller, reason)
+    }
+
+    pub fn enter_recovery_mode(
+        env: Env,
+        caller: String,
+        plan: Option<String>,
+    ) -> Result<(), ProtocolError> {
+        enter_recovery_mode(env, caller, plan)
+    }
+
+    pub fn resume_operations(env: Env, caller: String) -> Result<(), ProtocolError> {
+        resume_operations(env, caller)
+    }
+
+    pub fn record_recovery_step(
+        env: Env,
+        caller: String,
+        step: String,
+    ) -> Result<(), ProtocolError> {
+        record_recovery_step(env, caller, step)
+    }
+
+    pub fn queue_emergency_param_update(
+        env: Env,
+        caller: String,
+        parameter: Symbol,
+        value: i128,
+    ) -> Result<(), ProtocolError> {
+        queue_emergency_param_update(env, caller, parameter, value)
+    }
+
+    pub fn apply_emergency_param_updates(env: Env, caller: String) -> Result<(), ProtocolError> {
+        apply_emergency_param_updates(env, caller)
+    }
+
+    pub fn adjust_emergency_fund(
+        env: Env,
+        caller: String,
+        token: Option<Address>,
+        delta: i128,
+        reserve_delta: i128,
+    ) -> Result<(), ProtocolError> {
+        adjust_emergency_fund(env, caller, token, delta, reserve_delta)
+    }
+
+    pub fn get_emergency_state(env: Env) -> Result<EmergencyState, ProtocolError> {
+        get_emergency_state(env)
     }
 
     // Analytics and Reporting Functions
@@ -1039,7 +1917,10 @@ impl Contract {
         analytics::AnalyticsModule::get_user_report(&env, &user_addr)
     }
 
-    pub fn get_asset_report(env: Env, asset: Address) -> Result<analytics::AssetReport, ProtocolError> {
+    pub fn get_asset_report(
+        env: Env,
+        asset: Address,
+    ) -> Result<analytics::AssetReport, ProtocolError> {
         analytics::AnalyticsModule::get_asset_report(&env, &asset)
     }
 
@@ -1047,11 +1928,21 @@ impl Contract {
         analytics::AnalyticsModule::calculate_risk_analytics(&env)
     }
 
-    pub fn update_performance_metrics(env: Env, processing_time: i128, success: bool) -> Result<(), ProtocolError> {
+    pub fn update_performance_metrics(
+        env: Env,
+        processing_time: i128,
+        success: bool,
+    ) -> Result<(), ProtocolError> {
         analytics::AnalyticsModule::update_performance_metrics(&env, processing_time, success)
     }
 
-    pub fn record_activity(env: Env, user: String, activity_type: String, amount: i128, asset: Option<Address>) -> Result<(), ProtocolError> {
+    pub fn record_activity(
+        env: Env,
+        user: String,
+        activity_type: String,
+        amount: i128,
+        asset: Option<Address>,
+    ) -> Result<(), ProtocolError> {
         let user_addr = Address::from_string(&user);
         // For now, we'll use a placeholder string since soroban_sdk::String doesn't implement Display
         // In a real implementation, you might want to modify the analytics module to accept soroban_sdk::String
