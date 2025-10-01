@@ -1169,6 +1169,260 @@ impl EventTracker {
     }
 }
 
+/// Registry for token assets supported by the protocol
+pub struct TokenRegistry;
+
+impl TokenRegistry {
+    fn registry_key(env: &Env) -> Symbol {
+        Symbol::new(env, "token_registry")
+    }
+
+    fn assets(env: &Env) -> Map<Symbol, Address> {
+        env.storage()
+            .instance()
+            .get(&Self::registry_key(env))
+            .unwrap_or_else(|| Map::new(env))
+    }
+
+    fn save_assets(env: &Env, assets: &Map<Symbol, Address>) {
+        env.storage()
+            .instance()
+            .set(&Self::registry_key(env), assets);
+    }
+
+    fn primary_key(env: &Env) -> Symbol {
+        Symbol::new(env, "primary_asset")
+    }
+
+    pub fn set_asset(
+        env: &Env,
+        caller: &Address,
+        key: Symbol,
+        token: Address,
+    ) -> Result<(), ProtocolError> {
+        ProtocolConfig::require_admin(env, caller)?;
+        let mut assets = Self::assets(env);
+        assets.set(key, token);
+        Self::save_assets(env, &assets);
+        Ok(())
+    }
+
+    pub fn get_asset(env: &Env, key: Symbol) -> Option<Address> {
+        Self::assets(env).get(key)
+    }
+
+    pub fn set_primary_asset(
+        env: &Env,
+        caller: &Address,
+        token: Address,
+    ) -> Result<(), ProtocolError> {
+        Self::set_asset(env, caller, Self::primary_key(env), token)
+    }
+
+    pub fn require_primary_asset(env: &Env) -> Result<Address, ProtocolError> {
+        Self::get_asset(env, Self::primary_key(env)).ok_or(ProtocolError::AssetNotSupported)
+    }
+}
+
+/// Utility enforcing token transfers with invariant checks
+pub struct TransferEnforcer;
+
+impl TransferEnforcer {
+    fn token_client(env: &Env) -> Result<(TokenClient, Address), ProtocolError> {
+        let asset = TokenRegistry::require_primary_asset(env)?;
+        Ok((TokenClient::new(env, &asset), asset))
+    }
+
+    fn contract_address(env: &Env) -> Address {
+        env.current_contract_address()
+    }
+
+    fn emit_attempt(
+        env: &Env,
+        from: &Address,
+        to: &Address,
+        asset: &Address,
+        amount: i128,
+        flow: &Symbol,
+    ) {
+        let event_type = Symbol::new(env, "transfer_attempt");
+        let mut topics = Vec::new(env);
+        topics.push_back(flow.clone());
+        topics.push_back(Symbol::new(env, "from"));
+        topics.push_back(Symbol::new(env, "to"));
+        EventTracker::record(env, event_type.clone(), topics, Some(from.clone()), Some(asset.clone()), amount);
+        env.events().publish(
+            (event_type, flow.clone()),
+            (
+                Symbol::new(env, "from"),
+                from.clone(),
+                Symbol::new(env, "to"),
+                to.clone(),
+                Symbol::new(env, "asset"),
+                asset.clone(),
+                Symbol::new(env, "amount"),
+                amount,
+            ),
+        );
+    }
+
+    fn emit_success(
+        env: &Env,
+        from: &Address,
+        to: &Address,
+        asset: &Address,
+        amount: i128,
+        flow: &Symbol,
+    ) {
+        let event_type = Symbol::new(env, "transfer_success");
+        let mut topics = Vec::new(env);
+        topics.push_back(flow.clone());
+        topics.push_back(Symbol::new(env, "from"));
+        topics.push_back(Symbol::new(env, "to"));
+        EventTracker::record(env, event_type.clone(), topics, Some(from.clone()), Some(asset.clone()), amount);
+        env.events().publish(
+            (event_type, flow.clone()),
+            (
+                Symbol::new(env, "from"),
+                from.clone(),
+                Symbol::new(env, "to"),
+                to.clone(),
+                Symbol::new(env, "asset"),
+                asset.clone(),
+                Symbol::new(env, "amount"),
+                amount,
+            ),
+        );
+    }
+
+    fn emit_failure(
+        env: &Env,
+        from: &Address,
+        to: &Address,
+        asset: &Address,
+        amount: i128,
+        flow: &Symbol,
+        reason: &str,
+    ) {
+        let event_type = Symbol::new(env, "transfer_failure");
+        let mut topics = Vec::new(env);
+        topics.push_back(flow.clone());
+        topics.push_back(Symbol::new(env, reason));
+        EventTracker::record(env, event_type.clone(), topics, Some(from.clone()), Some(asset.clone()), amount);
+        env.events().publish(
+            (event_type, flow.clone()),
+            (
+                Symbol::new(env, "from"),
+                from.clone(),
+                Symbol::new(env, "to"),
+                to.clone(),
+                Symbol::new(env, "asset"),
+                asset.clone(),
+                Symbol::new(env, "amount"),
+                amount,
+                Symbol::new(env, "reason"),
+                Symbol::new(env, reason),
+            ),
+        );
+    }
+
+    pub fn transfer_in(
+        env: &Env,
+        user: &Address,
+        amount: i128,
+        flow: Symbol,
+    ) -> Result<(), ProtocolError> {
+        if amount <= 0 {
+            return Err(ProtocolError::InvalidAmount);
+        }
+        let (client, asset) = Self::token_client(env)?;
+        let contract = Self::contract_address(env);
+
+        let before_contract = client.balance(&contract);
+        let before_user = client.balance(user);
+
+        Self::emit_attempt(env, user, &contract, &asset, amount, &flow);
+
+        client.transfer(user, &contract, &amount);
+
+        let after_contract = client.balance(&contract);
+        let after_user = client.balance(user);
+
+        let contract_delta = after_contract.saturating_sub(before_contract);
+        let user_delta = before_user.saturating_sub(after_user);
+
+        if contract_delta != amount || user_delta != amount {
+            Self::emit_failure(
+                env,
+                user,
+                &contract,
+                &asset,
+                amount,
+                &flow,
+                "invariant_violation",
+            );
+            return Err(ProtocolError::BalanceInvariantViolation);
+        }
+
+        Self::emit_success(env, user, &contract, &asset, amount, &flow);
+        Ok(())
+    }
+
+    pub fn transfer_out(
+        env: &Env,
+        user: &Address,
+        amount: i128,
+        flow: Symbol,
+    ) -> Result<(), ProtocolError> {
+        if amount <= 0 {
+            return Err(ProtocolError::InvalidAmount);
+        }
+        let (client, asset) = Self::token_client(env)?;
+        let contract = Self::contract_address(env);
+
+        let before_contract = client.balance(&contract);
+        if before_contract < amount {
+            Self::emit_failure(
+                env,
+                &contract,
+                user,
+                &asset,
+                amount,
+                &flow,
+                "insufficient_liquidity",
+            );
+            return Err(ProtocolError::InsufficientLiquidity);
+        }
+        let before_user = client.balance(user);
+
+        Self::emit_attempt(env, &contract, user, &asset, amount, &flow);
+
+        client.transfer(&contract, user, &amount);
+
+        let after_contract = client.balance(&contract);
+        let after_user = client.balance(user);
+
+        let contract_delta = before_contract.saturating_sub(after_contract);
+        let user_delta = after_user.saturating_sub(before_user);
+
+        if contract_delta != amount || user_delta != amount {
+            Self::emit_failure(
+                env,
+                &contract,
+                user,
+                &asset,
+                amount,
+                &flow,
+                "invariant_violation",
+            );
+            return Err(ProtocolError::BalanceInvariantViolation);
+        }
+
+        Self::emit_success(env, &contract, user, &asset, amount, &flow);
+        Ok(())
+    }
+}
+
 /// Emergency management helper with authorization and flow controls
 pub struct EmergencyManager;
 
@@ -1883,6 +2137,8 @@ pub enum ProtocolError {
     UserSuspended = 26,
     UserLimitExceeded = 27,
     UserRoleViolation = 28,
+    BalanceInvariantViolation = 29,
+    InsufficientLiquidity = 30,
 }
 
 /// Protocol events
@@ -2550,6 +2806,8 @@ pub fn deposit_collateral(env: Env, depositor: String, amount: i128) -> Result<(
     }
     let depositor_addr = Address::from_string(&depositor);
     UserManager::ensure_operation_allowed(&env, &depositor_addr, OperationKind::Deposit, amount)?;
+    let flow_symbol = Symbol::new(&env, "deposit");
+    TransferEnforcer::transfer_in(&env, &depositor_addr, amount, flow_symbol.clone())?;
     deposit::DepositModule::deposit_collateral(&env, &depositor, amount)?;
     UserManager::record_activity(&env, &depositor_addr, OperationKind::Deposit, amount)?;
     Ok(())
@@ -2562,6 +2820,7 @@ pub fn borrow(env: Env, borrower: String, amount: i128) -> Result<(), ProtocolEr
     let borrower_addr = Address::from_string(&borrower);
     UserManager::ensure_operation_allowed(&env, &borrower_addr, OperationKind::Borrow, amount)?;
     borrow::BorrowModule::borrow(&env, &borrower, amount)?;
+    TransferEnforcer::transfer_out(&env, &borrower_addr, amount, Symbol::new(&env, "borrow"))?;
     UserManager::record_activity(&env, &borrower_addr, OperationKind::Borrow, amount)?;
     Ok(())
 }
@@ -2572,6 +2831,8 @@ pub fn repay(env: Env, repayer: String, amount: i128) -> Result<(), ProtocolErro
     }
     let repayer_addr = Address::from_string(&repayer);
     UserManager::ensure_operation_allowed(&env, &repayer_addr, OperationKind::Repay, amount)?;
+    let flow_symbol = Symbol::new(&env, "repay");
+    TransferEnforcer::transfer_in(&env, &repayer_addr, amount, flow_symbol.clone())?;
     repay::RepayModule::repay(&env, &repayer, amount)?;
     UserManager::record_activity(&env, &repayer_addr, OperationKind::Repay, amount)?;
     Ok(())
@@ -2584,6 +2845,12 @@ pub fn withdraw(env: Env, withdrawer: String, amount: i128) -> Result<(), Protoc
     let withdrawer_addr = Address::from_string(&withdrawer);
     UserManager::ensure_operation_allowed(&env, &withdrawer_addr, OperationKind::Withdraw, amount)?;
     withdraw::WithdrawModule::withdraw(&env, &withdrawer, amount)?;
+    TransferEnforcer::transfer_out(
+        &env,
+        &withdrawer_addr,
+        amount,
+        Symbol::new(&env, "withdraw"),
+    )?;
     UserManager::record_activity(&env, &withdrawer_addr, OperationKind::Withdraw, amount)?;
     Ok(())
 }
@@ -2809,6 +3076,25 @@ pub fn get_events_for_type(
 
 pub fn get_recent_event_types(env: Env) -> Result<Vec<Symbol>, ProtocolError> {
     Ok(EventStorage::get_summary(&env).recent_types)
+}
+
+pub fn register_token_asset(
+    env: Env,
+    caller: String,
+    key: Symbol,
+    token: Address,
+) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    TokenRegistry::set_asset(&env, &caller_addr, key, token)
+}
+
+pub fn set_primary_asset(env: Env, caller: String, token: Address) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    TokenRegistry::set_primary_asset(&env, &caller_addr, token)
+}
+
+pub fn get_registered_asset(env: Env, key: Symbol) -> Result<Option<Address>, ProtocolError> {
+    Ok(TokenRegistry::get_asset(&env, key))
 }
 
 pub fn set_user_role(
@@ -3075,6 +3361,27 @@ impl Contract {
 
     pub fn get_recent_event_types(env: Env) -> Result<Vec<Symbol>, ProtocolError> {
         get_recent_event_types(env)
+    }
+
+    pub fn register_token_asset(
+        env: Env,
+        caller: String,
+        key: Symbol,
+        token: Address,
+    ) -> Result<(), ProtocolError> {
+        register_token_asset(env, caller, key, token)
+    }
+
+    pub fn set_primary_asset(
+        env: Env,
+        caller: String,
+        token: Address,
+    ) -> Result<(), ProtocolError> {
+        set_primary_asset(env, caller, token)
+    }
+
+    pub fn get_registered_asset(env: Env, key: Symbol) -> Result<Option<Address>, ProtocolError> {
+        get_registered_asset(env, key)
     }
 
     pub fn set_user_role(

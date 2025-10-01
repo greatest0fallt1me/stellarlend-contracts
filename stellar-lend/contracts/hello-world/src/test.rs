@@ -1,7 +1,74 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{testutils::Address as TestAddress, Address, Env, String, Symbol};
+use soroban_sdk::{
+    contract, contractimpl, testutils::Address as TestAddress, Address, Env, Map, String, Symbol,
+};
+
+#[contract]
+pub struct MockToken;
+
+#[contractimpl]
+impl MockToken {
+    pub fn initialize(env: Env, admin: Address) {
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, "admin"), &admin);
+    }
+
+    pub fn mint(env: Env, to: Address, amount: i128) {
+        Self::add_balance(&env, &to, amount);
+    }
+
+    pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
+        Self::deduct_balance(&env, &from, amount);
+        Self::add_balance(&env, &to, amount);
+    }
+
+    pub fn balance(env: Env, id: Address) -> i128 {
+        Self::get_balance(&env, &id)
+    }
+}
+
+impl MockToken {
+    fn balances_key(env: &Env) -> Symbol {
+        Symbol::new(env, "balances")
+    }
+
+    fn get_balances(env: &Env) -> Map<Address, i128> {
+        env.storage()
+            .instance()
+            .get(&Self::balances_key(env))
+            .unwrap_or_else(|| Map::new(env))
+    }
+
+    fn save_balances(env: &Env, balances: &Map<Address, i128>) {
+        env.storage()
+            .instance()
+            .set(&Self::balances_key(env), balances);
+    }
+
+    fn get_balance(env: &Env, addr: &Address) -> i128 {
+        Self::get_balances(env).get(addr.clone()).unwrap_or(0)
+    }
+
+    fn add_balance(env: &Env, addr: &Address, amount: i128) {
+        let mut balances = Self::get_balances(env);
+        let current = balances.get(addr.clone()).unwrap_or(0);
+        balances.set(addr.clone(), current.saturating_add(amount));
+        Self::save_balances(env, &balances);
+    }
+
+    fn deduct_balance(env: &Env, addr: &Address, amount: i128) {
+        let mut balances = Self::get_balances(env);
+        let current = balances.get(addr.clone()).unwrap_or(0);
+        if current < amount {
+            panic!("insufficient balance");
+        }
+        balances.set(addr.clone(), current - amount);
+        Self::save_balances(env, &balances);
+    }
+}
 
 /// Test utilities for creating test environments and addresses
 pub struct TestUtils;
@@ -47,6 +114,32 @@ impl TestUtils {
                 "GCUA7XL5K54CC2DDGP77FJ2YBHRJLT36CPZDXWPM6MP7MANOGG77PNJU",
             ),
         }
+    }
+
+    pub fn setup_contract_with_token(env: &Env, users: &[Address]) -> (Address, Address, Address) {
+        let admin = Self::create_admin_address(env);
+        let contract_id = env.register(Contract, ());
+        env.as_contract(&contract_id, || {
+            Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        });
+
+        let token_id = env.register_contract(None, MockToken);
+        env.as_contract(&token_id, || {
+            MockToken::initialize(env.clone(), admin.clone());
+        });
+
+        env.as_contract(&contract_id, || {
+            Contract::set_primary_asset(env.clone(), admin.to_string(), token_id.clone()).unwrap();
+        });
+
+        env.as_contract(&token_id, || {
+            MockToken::mint(env.clone(), contract_id.clone(), 1_000_000);
+            for addr in users {
+                MockToken::mint(env.clone(), addr.clone(), 1_000_000);
+            }
+        });
+
+        (admin, contract_id, token_id)
     }
 
     /// Initialize the contract with test admin
@@ -110,13 +203,10 @@ fn test_deposit_collateral() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let admin = TestUtils::create_admin_address(&env);
     let user = TestUtils::create_user_address(&env, 0);
 
-    let contract_id = env.register(Contract, ());
+    let (admin, contract_id, _token) = TestUtils::setup_contract_with_token(&env, &[user.clone()]);
     env.as_contract(&contract_id, || {
-        // Initialize contract
-        Contract::initialize(env.clone(), admin.to_string()).unwrap();
         TestUtils::verify_user(&env, &admin, &user);
 
         // Test successful deposit
@@ -135,13 +225,10 @@ fn test_deposit_collateral_invalid_amount() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let admin = TestUtils::create_admin_address(&env);
     let user = TestUtils::create_user_address(&env, 0);
 
-    let contract_id = env.register(Contract, ());
+    let (admin, contract_id, _token) = TestUtils::setup_contract_with_token(&env, &[user.clone()]);
     env.as_contract(&contract_id, || {
-        // Initialize contract
-        Contract::initialize(env.clone(), admin.to_string()).unwrap();
         TestUtils::verify_user(&env, &admin, &user);
 
         // Test deposit with zero amount
@@ -180,13 +267,10 @@ fn test_borrow_success() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let admin = TestUtils::create_admin_address(&env);
     let user = TestUtils::create_user_address(&env, 0);
 
-    let contract_id = env.register(Contract, ());
+    let (admin, contract_id, _token) = TestUtils::setup_contract_with_token(&env, &[user.clone()]);
     env.as_contract(&contract_id, || {
-        // Initialize contract
-        Contract::initialize(env.clone(), admin.to_string()).unwrap();
         TestUtils::verify_user(&env, &admin, &user);
 
         // Deposit collateral first
@@ -208,13 +292,10 @@ fn test_borrow_insufficient_collateral_ratio() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let admin = TestUtils::create_admin_address(&env);
     let user = TestUtils::create_user_address(&env, 0);
 
-    let contract_id = env.register(Contract, ());
+    let (admin, contract_id, _token) = TestUtils::setup_contract_with_token(&env, &[user.clone()]);
     env.as_contract(&contract_id, || {
-        // Initialize contract
-        Contract::initialize(env.clone(), admin.to_string()).unwrap();
         TestUtils::verify_user(&env, &admin, &user);
 
         // Deposit small amount of collateral
@@ -235,12 +316,10 @@ fn test_emergency_pause_blocks_deposit() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let admin = TestUtils::create_admin_address(&env);
     let user = TestUtils::create_user_address(&env, 0);
 
-    let contract_id = env.register(Contract, ());
+    let (admin, contract_id, _token) = TestUtils::setup_contract_with_token(&env, &[user.clone()]);
     env.as_contract(&contract_id, || {
-        Contract::initialize(env.clone(), admin.to_string()).unwrap();
         TestUtils::verify_user(&env, &admin, &user);
 
         let reason = Some(String::from_str(&env, "halt"));
@@ -261,12 +340,10 @@ fn test_recovery_mode_allows_repay_blocks_borrow() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let admin = TestUtils::create_admin_address(&env);
     let user = TestUtils::create_user_address(&env, 0);
 
-    let contract_id = env.register(Contract, ());
+    let (admin, contract_id, _token) = TestUtils::setup_contract_with_token(&env, &[user.clone()]);
     env.as_contract(&contract_id, || {
-        Contract::initialize(env.clone(), admin.to_string()).unwrap();
         TestUtils::verify_user(&env, &admin, &user);
 
         Contract::deposit_collateral(env.clone(), user.to_string(), 2000).unwrap();
@@ -368,13 +445,10 @@ fn test_repay_success() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let admin = TestUtils::create_admin_address(&env);
     let user = TestUtils::create_user_address(&env, 0);
 
-    let contract_id = env.register(Contract, ());
+    let (admin, contract_id, _token) = TestUtils::setup_contract_with_token(&env, &[user.clone()]);
     env.as_contract(&contract_id, || {
-        // Initialize contract
-        Contract::initialize(env.clone(), admin.to_string()).unwrap();
         TestUtils::verify_user(&env, &admin, &user);
 
         // Deposit and borrow
@@ -397,13 +471,10 @@ fn test_repay_full_amount() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let admin = TestUtils::create_admin_address(&env);
     let user = TestUtils::create_user_address(&env, 0);
 
-    let contract_id = env.register(Contract, ());
+    let (admin, contract_id, _token) = TestUtils::setup_contract_with_token(&env, &[user.clone()]);
     env.as_contract(&contract_id, || {
-        // Initialize contract
-        Contract::initialize(env.clone(), admin.to_string()).unwrap();
         TestUtils::verify_user(&env, &admin, &user);
 
         // Deposit and borrow
@@ -426,13 +497,10 @@ fn test_withdraw_success() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let admin = TestUtils::create_admin_address(&env);
     let user = TestUtils::create_user_address(&env, 0);
 
-    let contract_id = env.register(Contract, ());
+    let (admin, contract_id, _token) = TestUtils::setup_contract_with_token(&env, &[user.clone()]);
     env.as_contract(&contract_id, || {
-        // Initialize contract
-        Contract::initialize(env.clone(), admin.to_string()).unwrap();
         TestUtils::verify_user(&env, &admin, &user);
 
         // Deposit collateral
@@ -454,12 +522,10 @@ fn test_event_summary_updates() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let admin = TestUtils::create_admin_address(&env);
     let user = TestUtils::create_user_address(&env, 0);
 
-    let contract_id = env.register(Contract, ());
+    let (admin, contract_id, _token) = TestUtils::setup_contract_with_token(&env, &[user.clone()]);
     env.as_contract(&contract_id, || {
-        Contract::initialize(env.clone(), admin.to_string()).unwrap();
         TestUtils::verify_user(&env, &admin, &user);
 
         Contract::deposit_collateral(env.clone(), user.to_string(), 1200).unwrap();
@@ -489,13 +555,10 @@ fn test_withdraw_insufficient_collateral() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let admin = TestUtils::create_admin_address(&env);
     let user = TestUtils::create_user_address(&env, 0);
 
-    let contract_id = env.register(Contract, ());
+    let (admin, contract_id, _token) = TestUtils::setup_contract_with_token(&env, &[user.clone()]);
     env.as_contract(&contract_id, || {
-        // Initialize contract
-        Contract::initialize(env.clone(), admin.to_string()).unwrap();
         TestUtils::verify_user(&env, &admin, &user);
 
         // Deposit small amount
@@ -513,13 +576,10 @@ fn test_withdraw_insufficient_collateral_ratio() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let admin = TestUtils::create_admin_address(&env);
     let user = TestUtils::create_user_address(&env, 0);
 
-    let contract_id = env.register(Contract, ());
+    let (admin, contract_id, _token) = TestUtils::setup_contract_with_token(&env, &[user.clone()]);
     env.as_contract(&contract_id, || {
-        // Initialize contract
-        Contract::initialize(env.clone(), admin.to_string()).unwrap();
         TestUtils::verify_user(&env, &admin, &user);
 
         // Deposit and borrow
@@ -541,14 +601,12 @@ fn test_liquidate_success() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let admin = TestUtils::create_admin_address(&env);
     let user = TestUtils::create_user_address(&env, 0);
     let liquidator = TestUtils::create_user_address(&env, 1);
 
-    let contract_id = env.register(Contract, ());
+    let (admin, contract_id, _token) =
+        TestUtils::setup_contract_with_token(&env, &[user.clone(), liquidator.clone()]);
     env.as_contract(&contract_id, || {
-        // Initialize contract
-        Contract::initialize(env.clone(), admin.to_string()).unwrap();
         TestUtils::verify_user(&env, &admin, &user);
         TestUtils::verify_user(&env, &admin, &liquidator);
 
@@ -574,14 +632,12 @@ fn test_liquidate_not_eligible() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let admin = TestUtils::create_admin_address(&env);
     let user = TestUtils::create_user_address(&env, 0);
     let liquidator = TestUtils::create_user_address(&env, 1);
 
-    let contract_id = env.register(Contract, ());
+    let (admin, contract_id, _token) =
+        TestUtils::setup_contract_with_token(&env, &[user.clone(), liquidator.clone()]);
     env.as_contract(&contract_id, || {
-        // Initialize contract
-        Contract::initialize(env.clone(), admin.to_string()).unwrap();
         TestUtils::verify_user(&env, &admin, &user);
         TestUtils::verify_user(&env, &admin, &liquidator);
 
