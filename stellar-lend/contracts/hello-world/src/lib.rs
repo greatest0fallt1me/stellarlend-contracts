@@ -641,6 +641,534 @@ impl UserManager {
     }
 }
 
+/// Snapshot of an emitted protocol event for indexing and analytics
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct EventRecord {
+    pub event_type: Symbol,
+    pub topics: Vec<Symbol>,
+    pub user: Option<Address>,
+    pub asset: Option<Address>,
+    pub amount: i128,
+    pub timestamp: u64,
+}
+
+impl EventRecord {
+    pub fn new(
+        env: &Env,
+        event_type: Symbol,
+        topics: Vec<Symbol>,
+        user: Option<Address>,
+        asset: Option<Address>,
+        amount: i128,
+    ) -> Self {
+        Self {
+            event_type,
+            topics,
+            user,
+            asset,
+            amount,
+            timestamp: env.ledger().timestamp(),
+        }
+    }
+}
+
+/// Aggregated statistics for a particular event type
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct EventAggregate {
+    pub event_type: Symbol,
+    pub count: u64,
+    pub total_amount: i128,
+    pub last_timestamp: u64,
+}
+
+impl EventAggregate {
+    pub fn new(event_type: &Symbol) -> Self {
+        Self {
+            event_type: event_type.clone(),
+            count: 0,
+            total_amount: 0,
+            last_timestamp: 0,
+        }
+    }
+
+    pub fn apply(&mut self, amount: i128, timestamp: u64) {
+        self.count = self.count.saturating_add(1);
+        self.total_amount = self.total_amount.saturating_add(amount);
+        self.last_timestamp = timestamp;
+    }
+}
+
+/// Summary of protocol events for analytics consumers
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct EventSummary {
+    pub totals: Map<Symbol, EventAggregate>,
+    pub recent_types: Vec<Symbol>,
+}
+
+impl EventSummary {
+    pub fn empty(env: &Env) -> Self {
+        Self {
+            totals: Map::new(env),
+            recent_types: Vec::new(env),
+        }
+    }
+}
+
+/// Persistent storage helper for protocol events
+pub struct EventStorage;
+
+impl EventStorage {
+    fn aggregates_key(env: &Env) -> Symbol {
+        Symbol::new(env, "event_aggregates")
+    }
+
+    fn logs_key(env: &Env) -> Symbol {
+        Symbol::new(env, "event_logs")
+    }
+
+    fn summary_key(env: &Env) -> Symbol {
+        Symbol::new(env, "event_summary")
+    }
+
+    pub fn get_aggregates(env: &Env) -> Map<Symbol, EventAggregate> {
+        env.storage()
+            .instance()
+            .get(&Self::aggregates_key(env))
+            .unwrap_or_else(|| Map::new(env))
+    }
+
+    pub fn save_aggregates(env: &Env, aggregates: &Map<Symbol, EventAggregate>) {
+        env.storage()
+            .instance()
+            .set(&Self::aggregates_key(env), aggregates);
+    }
+
+    pub fn get_logs(env: &Env) -> Map<Symbol, Vec<EventRecord>> {
+        env.storage()
+            .instance()
+            .get(&Self::logs_key(env))
+            .unwrap_or_else(|| Map::new(env))
+    }
+
+    pub fn save_logs(env: &Env, logs: &Map<Symbol, Vec<EventRecord>>) {
+        env.storage().instance().set(&Self::logs_key(env), logs);
+    }
+
+    pub fn get_summary(env: &Env) -> EventSummary {
+        env.storage()
+            .instance()
+            .get(&Self::summary_key(env))
+            .unwrap_or_else(|| EventSummary::empty(env))
+    }
+
+    pub fn save_summary(env: &Env, summary: &EventSummary) {
+        env.storage()
+            .instance()
+            .set(&Self::summary_key(env), summary);
+    }
+
+    pub fn append_event(env: &Env, record: &EventRecord) {
+        let mut logs = Self::get_logs(env);
+        let mut events = logs
+            .get(record.event_type.clone())
+            .unwrap_or_else(|| Vec::new(env));
+        events.push_back(record.clone());
+        // Keep only the latest 32 events per type to cap storage use
+        if events.len() > 32 {
+            events = events.slice(events.len() - 32..);
+        }
+        logs.set(record.event_type.clone(), events);
+        Self::save_logs(env, &logs);
+
+        let mut aggregates = Self::get_aggregates(env);
+        let mut aggregate = aggregates
+            .get(record.event_type.clone())
+            .unwrap_or_else(|| EventAggregate::new(&record.event_type));
+        aggregate.apply(record.amount, record.timestamp);
+        aggregates.set(record.event_type.clone(), aggregate.clone());
+        Self::save_aggregates(env, &aggregates);
+
+        let mut summary = Self::get_summary(env);
+        summary.totals = aggregates;
+        let mut types = summary.recent_types;
+        let mut contains = false;
+        for existing in types.iter() {
+            if existing == record.event_type {
+                contains = true;
+                break;
+            }
+        }
+        if !contains {
+            types.push_back(record.event_type.clone());
+            if types.len() > 16 {
+                types = types.slice(types.len() - 16..);
+            }
+        }
+        summary.recent_types = types;
+        Self::save_summary(env, &summary);
+    }
+}
+
+/// Utility for capturing event analytics as events are emitted
+pub struct EventTracker;
+
+impl EventTracker {
+    fn base_topics(env: &Env, event_type: &Symbol) -> Vec<Symbol> {
+        let mut topics = Vec::new(env);
+        topics.push_back(event_type.clone());
+        topics
+    }
+
+    pub fn record(
+        env: &Env,
+        event_type: Symbol,
+        mut topics: Vec<Symbol>,
+        user: Option<Address>,
+        asset: Option<Address>,
+        amount: i128,
+    ) {
+        if topics.len() == 0 {
+            topics = Self::base_topics(env, &event_type);
+        }
+        let record = EventRecord::new(env, event_type, topics, user, asset, amount);
+        EventStorage::append_event(env, &record);
+    }
+
+    pub fn capture(env: &Env, event: &ProtocolEvent) {
+        let mut event_type = Symbol::new(env, "misc_event");
+        let mut topics = Self::base_topics(env, &event_type);
+        let mut user: Option<Address> = None;
+        let mut asset: Option<Address> = None;
+        let mut amount: i128 = 0;
+
+        match event {
+            ProtocolEvent::PositionUpdated(addr, collateral, _, _) => {
+                event_type = Symbol::new(env, "position_updated");
+                topics = Self::base_topics(env, &event_type);
+                topics.push_back(Symbol::new(env, "user"));
+                user = Some(addr.clone());
+                amount = *collateral;
+            }
+            ProtocolEvent::InterestAccrued(addr, borrow_interest, _) => {
+                event_type = Symbol::new(env, "interest_accrued");
+                topics = Self::base_topics(env, &event_type);
+                topics.push_back(Symbol::new(env, "user"));
+                user = Some(addr.clone());
+                amount = *borrow_interest;
+            }
+            ProtocolEvent::LiquidationExecuted(liquidator, target, seized, _) => {
+                event_type = Symbol::new(env, "liquidation_executed");
+                topics = Self::base_topics(env, &event_type);
+                topics.push_back(Symbol::new(env, "liquidator"));
+                topics.push_back(Symbol::new(env, "user"));
+                user = Some(liquidator.clone());
+                asset = Some(target.clone());
+                amount = *seized;
+            }
+            ProtocolEvent::CrossDeposit(addr, asset_addr, value) => {
+                event_type = Symbol::new(env, "cross_deposit");
+                topics = Self::base_topics(env, &event_type);
+                topics.push_back(Symbol::new(env, "user"));
+                topics.push_back(Symbol::new(env, "asset"));
+                user = Some(addr.clone());
+                asset = Some(asset_addr.clone());
+                amount = *value;
+            }
+            ProtocolEvent::CrossBorrow(addr, asset_addr, value) => {
+                event_type = Symbol::new(env, "cross_borrow");
+                topics = Self::base_topics(env, &event_type);
+                topics.push_back(Symbol::new(env, "user"));
+                topics.push_back(Symbol::new(env, "asset"));
+                user = Some(addr.clone());
+                asset = Some(asset_addr.clone());
+                amount = *value;
+            }
+            ProtocolEvent::CrossRepay(addr, asset_addr, value) => {
+                event_type = Symbol::new(env, "cross_repay");
+                topics = Self::base_topics(env, &event_type);
+                topics.push_back(Symbol::new(env, "user"));
+                topics.push_back(Symbol::new(env, "asset"));
+                user = Some(addr.clone());
+                asset = Some(asset_addr.clone());
+                amount = *value;
+            }
+            ProtocolEvent::CrossWithdraw(addr, asset_addr, value) => {
+                event_type = Symbol::new(env, "cross_withdraw");
+                topics = Self::base_topics(env, &event_type);
+                topics.push_back(Symbol::new(env, "user"));
+                topics.push_back(Symbol::new(env, "asset"));
+                user = Some(addr.clone());
+                asset = Some(asset_addr.clone());
+                amount = *value;
+            }
+            ProtocolEvent::FlashLoanInitiated(initiator, asset_addr, value, _) => {
+                event_type = Symbol::new(env, "flash_loan_initiated");
+                topics = Self::base_topics(env, &event_type);
+                topics.push_back(Symbol::new(env, "initiator"));
+                topics.push_back(Symbol::new(env, "asset"));
+                user = Some(initiator.clone());
+                asset = Some(asset_addr.clone());
+                amount = *value;
+            }
+            ProtocolEvent::FlashLoanCompleted(initiator, asset_addr, value, _) => {
+                event_type = Symbol::new(env, "flash_loan_completed");
+                topics = Self::base_topics(env, &event_type);
+                topics.push_back(Symbol::new(env, "initiator"));
+                topics.push_back(Symbol::new(env, "asset"));
+                user = Some(initiator.clone());
+                asset = Some(asset_addr.clone());
+                amount = *value;
+            }
+            ProtocolEvent::DynamicCFUpdated(asset_addr, new_cf) => {
+                event_type = Symbol::new(env, "dynamic_cf_updated");
+                topics = Self::base_topics(env, &event_type);
+                topics.push_back(Symbol::new(env, "asset"));
+                asset = Some(asset_addr.clone());
+                amount = *new_cf;
+            }
+            ProtocolEvent::AMMSwap(user_addr, in_asset, _out_asset, amount_in, _) => {
+                event_type = Symbol::new(env, "amm_swap");
+                topics = Self::base_topics(env, &event_type);
+                topics.push_back(Symbol::new(env, "user"));
+                topics.push_back(Symbol::new(env, "asset_in"));
+                topics.push_back(Symbol::new(env, "asset_out"));
+                user = Some(user_addr.clone());
+                asset = Some(in_asset.clone());
+                amount = *amount_in;
+            }
+            ProtocolEvent::AMMLiquidityAdded(user_addr, asset_a, _, amount_a, _) => {
+                event_type = Symbol::new(env, "amm_liquidity_added");
+                topics = Self::base_topics(env, &event_type);
+                topics.push_back(Symbol::new(env, "user"));
+                topics.push_back(Symbol::new(env, "asset"));
+                user = Some(user_addr.clone());
+                asset = Some(asset_a.clone());
+                amount = *amount_a;
+            }
+            ProtocolEvent::AMMLiquidityRemoved(user_addr, pool, lp_amount) => {
+                event_type = Symbol::new(env, "amm_liquidity_removed");
+                topics = Self::base_topics(env, &event_type);
+                topics.push_back(Symbol::new(env, "user"));
+                topics.push_back(Symbol::new(env, "pool"));
+                user = Some(user_addr.clone());
+                asset = Some(pool.clone());
+                amount = *lp_amount;
+            }
+            ProtocolEvent::RiskParamsSet(_, _, _, _) => {
+                event_type = Symbol::new(env, "risk_params_set");
+                topics = Self::base_topics(env, &event_type);
+            }
+            ProtocolEvent::UserRiskUpdated(user_addr, score, _) => {
+                event_type = Symbol::new(env, "user_risk_updated");
+                topics = Self::base_topics(env, &event_type);
+                topics.push_back(Symbol::new(env, "user"));
+                user = Some(user_addr.clone());
+                amount = *score;
+            }
+            ProtocolEvent::AuctionStarted(user_addr, asset_addr, debt_portion) => {
+                event_type = Symbol::new(env, "auction_started");
+                topics = Self::base_topics(env, &event_type);
+                topics.push_back(Symbol::new(env, "user"));
+                user = Some(user_addr.clone());
+                asset = Some(asset_addr.clone());
+                amount = *debt_portion;
+            }
+            ProtocolEvent::AuctionBidPlaced(bidder, user_addr, bid_amount) => {
+                event_type = Symbol::new(env, "auction_bid_placed");
+                topics = Self::base_topics(env, &event_type);
+                topics.push_back(Symbol::new(env, "bidder"));
+                topics.push_back(Symbol::new(env, "user"));
+                user = Some(bidder.clone());
+                asset = Some(user_addr.clone());
+                amount = *bid_amount;
+            }
+            ProtocolEvent::AuctionSettled(winner, user_addr, seized, _) => {
+                event_type = Symbol::new(env, "auction_settled");
+                topics = Self::base_topics(env, &event_type);
+                topics.push_back(Symbol::new(env, "winner"));
+                topics.push_back(Symbol::new(env, "user"));
+                user = Some(winner.clone());
+                asset = Some(user_addr.clone());
+                amount = *seized;
+            }
+            ProtocolEvent::RiskAlert(user_addr, score) => {
+                event_type = Symbol::new(env, "risk_alert");
+                topics = Self::base_topics(env, &event_type);
+                topics.push_back(Symbol::new(env, "user"));
+                user = Some(user_addr.clone());
+                amount = *score;
+            }
+            ProtocolEvent::PerfMetric(metric, value) => {
+                event_type = Symbol::new(env, "perf_metric");
+                topics = Self::base_topics(env, &event_type);
+                topics.push_back(metric.clone());
+                amount = *value;
+            }
+            ProtocolEvent::CacheUpdated(key, action) => {
+                event_type = Symbol::new(env, "cache_updated");
+                topics = Self::base_topics(env, &event_type);
+                topics.push_back(key.clone());
+                topics.push_back(action.clone());
+            }
+            ProtocolEvent::ComplianceKycUpdated(addr, status) => {
+                event_type = Symbol::new(env, "compliance_kyc_updated");
+                topics = Self::base_topics(env, &event_type);
+                topics.push_back(Symbol::new(env, "user"));
+                user = Some(addr.clone());
+                amount = if *status { 1 } else { 0 };
+            }
+            ProtocolEvent::ComplianceAlert(addr, reason) => {
+                event_type = Symbol::new(env, "compliance_alert");
+                topics = Self::base_topics(env, &event_type);
+                topics.push_back(reason.clone());
+                user = Some(addr.clone());
+            }
+            ProtocolEvent::MMIncentiveAccrued(user_addr, value) => {
+                event_type = Symbol::new(env, "mm_incentive_accrued");
+                topics = Self::base_topics(env, &event_type);
+                topics.push_back(Symbol::new(env, "user"));
+                user = Some(user_addr.clone());
+                amount = *value;
+            }
+            ProtocolEvent::WebhookRegistered(target, topic) => {
+                event_type = Symbol::new(env, "webhook_registered");
+                topics = Self::base_topics(env, &event_type);
+                user = Some(target.clone());
+                topics.push_back(topic.clone());
+            }
+            ProtocolEvent::BugReportLogged(reporter, code) => {
+                event_type = Symbol::new(env, "bug_report_logged");
+                topics = Self::base_topics(env, &event_type);
+                user = Some(reporter.clone());
+                topics.push_back(code.clone());
+            }
+            ProtocolEvent::AuditTrail(action, reference) => {
+                event_type = Symbol::new(env, "audit_trail");
+                topics = Self::base_topics(env, &event_type);
+                topics.push_back(action.clone());
+                topics.push_back(reference.clone());
+            }
+            ProtocolEvent::FeesUpdated(base, tier1) => {
+                event_type = Symbol::new(env, "fees_updated");
+                topics = Self::base_topics(env, &event_type);
+                amount = base.saturating_add(*tier1);
+            }
+            ProtocolEvent::InsuranceParamsUpdated(premium, coverage) => {
+                event_type = Symbol::new(env, "insurance_params_updated");
+                topics = Self::base_topics(env, &event_type);
+                amount = premium.saturating_add(*coverage);
+            }
+            ProtocolEvent::CircuitBreaker(flag) => {
+                event_type = Symbol::new(env, "circuit_breaker");
+                topics = Self::base_topics(env, &event_type);
+                amount = if *flag { 1 } else { 0 };
+            }
+            ProtocolEvent::ClaimFiled(user_addr, value, reason) => {
+                event_type = Symbol::new(env, "claim_filed");
+                topics = Self::base_topics(env, &event_type);
+                topics.push_back(reason.clone());
+                user = Some(user_addr.clone());
+                amount = *value;
+            }
+            ProtocolEvent::BridgeRegistered(network, bridge, fee) => {
+                event_type = Symbol::new(env, "bridge_registered");
+                topics = Self::base_topics(env, &event_type);
+                topics.push_back(Symbol::new(env, "bridge"));
+                asset = Some(bridge.clone());
+                amount = *fee;
+                let _ = network;
+            }
+            ProtocolEvent::BridgeFeeUpdated(_, fee) => {
+                event_type = Symbol::new(env, "bridge_fee_updated");
+                topics = Self::base_topics(env, &event_type);
+                amount = *fee;
+            }
+            ProtocolEvent::AssetBridgedIn(user_addr, _, asset_addr, amount_in, _) => {
+                event_type = Symbol::new(env, "asset_bridged_in");
+                topics = Self::base_topics(env, &event_type);
+                topics.push_back(Symbol::new(env, "user"));
+                topics.push_back(Symbol::new(env, "asset"));
+                user = Some(user_addr.clone());
+                asset = Some(asset_addr.clone());
+                amount = *amount_in;
+            }
+            ProtocolEvent::AssetBridgedOut(user_addr, _, asset_addr, amount_out, _) => {
+                event_type = Symbol::new(env, "asset_bridged_out");
+                topics = Self::base_topics(env, &event_type);
+                topics.push_back(Symbol::new(env, "user"));
+                topics.push_back(Symbol::new(env, "asset"));
+                user = Some(user_addr.clone());
+                asset = Some(asset_addr.clone());
+                amount = *amount_out;
+            }
+            ProtocolEvent::HealthReported(_) => {
+                event_type = Symbol::new(env, "health_reported");
+                topics = Self::base_topics(env, &event_type);
+            }
+            ProtocolEvent::PerformanceReported(gas) => {
+                event_type = Symbol::new(env, "performance_reported");
+                topics = Self::base_topics(env, &event_type);
+                amount = *gas;
+            }
+            ProtocolEvent::SecurityIncident(_) => {
+                event_type = Symbol::new(env, "security_incident");
+                topics = Self::base_topics(env, &event_type);
+            }
+            ProtocolEvent::IntegrationRegistered(_, _) => {
+                event_type = Symbol::new(env, "integration_registered");
+                topics = Self::base_topics(env, &event_type);
+            }
+            ProtocolEvent::IntegrationCalled(_, _) => {
+                event_type = Symbol::new(env, "integration_called");
+                topics = Self::base_topics(env, &event_type);
+            }
+            ProtocolEvent::AnalyticsUpdated(user_addr, _, value, _) => {
+                event_type = Symbol::new(env, "analytics_updated");
+                topics = Self::base_topics(env, &event_type);
+                topics.push_back(Symbol::new(env, "user"));
+                user = Some(user_addr.clone());
+                amount = *value;
+            }
+            ProtocolEvent::EmergencyStatusChanged(_, _) => {
+                event_type = Symbol::new(env, "emergency_status_changed");
+                topics = Self::base_topics(env, &event_type);
+            }
+            ProtocolEvent::EmergencyRecoveryStep(_) => {
+                event_type = Symbol::new(env, "emergency_recovery_step");
+                topics = Self::base_topics(env, &event_type);
+            }
+            ProtocolEvent::EmergencyParamUpdateQueued(_, _) => {
+                event_type = Symbol::new(env, "emergency_param_update_queued");
+                topics = Self::base_topics(env, &event_type);
+            }
+            ProtocolEvent::EmergencyParamUpdateApplied(_, _) => {
+                event_type = Symbol::new(env, "emergency_param_update_applied");
+                topics = Self::base_topics(env, &event_type);
+            }
+            ProtocolEvent::EmergencyFundUpdated(actor, delta, _) => {
+                event_type = Symbol::new(env, "emergency_fund_updated");
+                topics = Self::base_topics(env, &event_type);
+                topics.push_back(Symbol::new(env, "actor"));
+                user = Some(actor.clone());
+                amount = *delta;
+            }
+            ProtocolEvent::EmergencyManagerUpdated(manager, flag) => {
+                event_type = Symbol::new(env, "emergency_manager_updated");
+                topics = Self::base_topics(env, &event_type);
+                topics.push_back(Symbol::new(env, "manager"));
+                user = Some(manager.clone());
+                amount = if *flag { 1 } else { 0 };
+            }
+            _ => {}
+        }
+
+        Self::record(env, event_type, topics, user, asset, amount);
+    }
+}
+
 /// Emergency management helper with authorization and flow controls
 pub struct EmergencyManager;
 
@@ -1433,6 +1961,7 @@ pub enum ProtocolEvent {
 
 impl ProtocolEvent {
     pub fn emit(&self, env: &Env) {
+        EventTracker::capture(env, self);
         match self {
             ProtocolEvent::PositionUpdated(user, collateral, debt, collateral_ratio) => {
                 env.events().publish(
@@ -1987,10 +2516,12 @@ impl ProtocolEvent {
                     ),
                 );
             }
-            // Add placeholder implementations for missing event variants
+            // Add placeholder implementations for previously skipped event variants
             _ => {
-                // For now, we'll skip emitting these events to avoid compilation errors
-                // In a full implementation, these would have proper event emission logic
+                env.events().publish(
+                    (Symbol::new(env, "protocol_event"), Symbol::new(env, "misc")),
+                    Symbol::new(env, "captured"),
+                );
             }
         }
     }
@@ -2252,6 +2783,34 @@ pub fn get_emergency_state(env: Env) -> Result<EmergencyState, ProtocolError> {
     Ok(EmergencyStorage::get(&env))
 }
 
+pub fn get_event_summary(env: Env) -> Result<EventSummary, ProtocolError> {
+    Ok(EventStorage::get_summary(&env))
+}
+
+pub fn get_event_aggregates(env: Env) -> Result<Map<Symbol, EventAggregate>, ProtocolError> {
+    Ok(EventStorage::get_aggregates(&env))
+}
+
+pub fn get_events_for_type(
+    env: Env,
+    event_type: Symbol,
+    limit: u32,
+) -> Result<Vec<EventRecord>, ProtocolError> {
+    let logs = EventStorage::get_logs(&env);
+    let mut events = logs
+        .get(event_type.clone())
+        .unwrap_or_else(|| Vec::new(&env));
+    if limit > 0 && events.len() > limit {
+        let start = events.len() - limit;
+        events = events.slice(start..);
+    }
+    Ok(events)
+}
+
+pub fn get_recent_event_types(env: Env) -> Result<Vec<Symbol>, ProtocolError> {
+    Ok(EventStorage::get_summary(&env).recent_types)
+}
+
 pub fn set_user_role(
     env: Env,
     caller: String,
@@ -2496,6 +3055,26 @@ impl Contract {
 
     pub fn get_emergency_state(env: Env) -> Result<EmergencyState, ProtocolError> {
         get_emergency_state(env)
+    }
+
+    pub fn get_event_summary(env: Env) -> Result<EventSummary, ProtocolError> {
+        get_event_summary(env)
+    }
+
+    pub fn get_event_aggregates(env: Env) -> Result<Map<Symbol, EventAggregate>, ProtocolError> {
+        get_event_aggregates(env)
+    }
+
+    pub fn get_events_for_type(
+        env: Env,
+        event_type: Symbol,
+        limit: u32,
+    ) -> Result<Vec<EventRecord>, ProtocolError> {
+        get_events_for_type(env, event_type, limit)
+    }
+
+    pub fn get_recent_event_types(env: Env) -> Result<Vec<Symbol>, ProtocolError> {
+        get_recent_event_types(env)
     }
 
     pub fn set_user_role(

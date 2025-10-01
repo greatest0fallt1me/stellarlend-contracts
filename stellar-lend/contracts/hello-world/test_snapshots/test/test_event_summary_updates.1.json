@@ -63,7 +63,69 @@
                                   "val": {
                                     "i128": {
                                       "hi": 0,
-                                      "lo": 100
+                                      "lo": 1200
+                                    }
+                                  }
+                                },
+                                {
+                                  "key": {
+                                    "symbol": "asset"
+                                  },
+                                  "val": "void"
+                                },
+                                {
+                                  "key": {
+                                    "symbol": "metadata"
+                                  },
+                                  "val": {
+                                    "map": [
+                                      {
+                                        "key": {
+                                          "string": "timestamp"
+                                        },
+                                        "val": {
+                                          "string": "0"
+                                        }
+                                      }
+                                    ]
+                                  }
+                                },
+                                {
+                                  "key": {
+                                    "symbol": "timestamp"
+                                  },
+                                  "val": {
+                                    "u64": 0
+                                  }
+                                },
+                                {
+                                  "key": {
+                                    "symbol": "user"
+                                  },
+                                  "val": {
+                                    "address": "GCXOTMMXRS24MYZI5FJPUCOEOFNWSR4XX7UXIK3NDGGE6A5QMJ5FF2FS"
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "map": [
+                                {
+                                  "key": {
+                                    "symbol": "activity_type"
+                                  },
+                                  "val": {
+                                    "string": "withdraw"
+                                  }
+                                },
+                                {
+                                  "key": {
+                                    "symbol": "amount"
+                                  },
+                                  "val": {
+                                    "i128": {
+                                      "hi": 0,
+                                      "lo": 200
                                     }
                                   }
                                 },
@@ -136,7 +198,7 @@
                                       "symbol": "count"
                                     },
                                     "val": {
-                                      "u64": 1
+                                      "u64": 2
                                     }
                                   },
                                   {
@@ -162,7 +224,7 @@
                                     "val": {
                                       "i128": {
                                         "hi": 0,
-                                        "lo": 100
+                                        "lo": 1400
                                       }
                                     }
                                   }
@@ -180,7 +242,7 @@
                                       "symbol": "count"
                                     },
                                     "val": {
-                                      "u64": 1
+                                      "u64": 2
                                     }
                                   },
                                   {
@@ -206,7 +268,7 @@
                                     "val": {
                                       "i128": {
                                         "hi": 0,
-                                        "lo": 100
+                                        "lo": 2200
                                       }
                                     }
                                   }
@@ -237,7 +299,67 @@
                                         "val": {
                                           "i128": {
                                             "hi": 0,
-                                            "lo": 100
+                                            "lo": 1200
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "key": {
+                                          "symbol": "asset"
+                                        },
+                                        "val": "void"
+                                      },
+                                      {
+                                        "key": {
+                                          "symbol": "event_type"
+                                        },
+                                        "val": {
+                                          "symbol": "analytics_updated"
+                                        }
+                                      },
+                                      {
+                                        "key": {
+                                          "symbol": "timestamp"
+                                        },
+                                        "val": {
+                                          "u64": 0
+                                        }
+                                      },
+                                      {
+                                        "key": {
+                                          "symbol": "topics"
+                                        },
+                                        "val": {
+                                          "vec": [
+                                            {
+                                              "symbol": "analytics_updated"
+                                            },
+                                            {
+                                              "symbol": "user"
+                                            }
+                                          ]
+                                        }
+                                      },
+                                      {
+                                        "key": {
+                                          "symbol": "user"
+                                        },
+                                        "val": {
+                                          "address": "GCXOTMMXRS24MYZI5FJPUCOEOFNWSR4XX7UXIK3NDGGE6A5QMJ5FF2FS"
+                                        }
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "map": [
+                                      {
+                                        "key": {
+                                          "symbol": "amount"
+                                        },
+                                        "val": {
+                                          "i128": {
+                                            "hi": 0,
+                                            "lo": 200
                                           }
                                         }
                                       },
@@ -306,7 +428,67 @@
                                         "val": {
                                           "i128": {
                                             "hi": 0,
-                                            "lo": 100
+                                            "lo": 1200
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "key": {
+                                          "symbol": "asset"
+                                        },
+                                        "val": "void"
+                                      },
+                                      {
+                                        "key": {
+                                          "symbol": "event_type"
+                                        },
+                                        "val": {
+                                          "symbol": "position_updated"
+                                        }
+                                      },
+                                      {
+                                        "key": {
+                                          "symbol": "timestamp"
+                                        },
+                                        "val": {
+                                          "u64": 0
+                                        }
+                                      },
+                                      {
+                                        "key": {
+                                          "symbol": "topics"
+                                        },
+                                        "val": {
+                                          "vec": [
+                                            {
+                                              "symbol": "position_updated"
+                                            },
+                                            {
+                                              "symbol": "user"
+                                            }
+                                          ]
+                                        }
+                                      },
+                                      {
+                                        "key": {
+                                          "symbol": "user"
+                                        },
+                                        "val": {
+                                          "address": "GCXOTMMXRS24MYZI5FJPUCOEOFNWSR4XX7UXIK3NDGGE6A5QMJ5FF2FS"
+                                        }
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "map": [
+                                      {
+                                        "key": {
+                                          "symbol": "amount"
+                                        },
+                                        "val": {
+                                          "i128": {
+                                            "hi": 0,
+                                            "lo": 1000
                                           }
                                         }
                                       },
@@ -401,7 +583,7 @@
                                             "symbol": "count"
                                           },
                                           "val": {
-                                            "u64": 1
+                                            "u64": 2
                                           }
                                         },
                                         {
@@ -427,7 +609,7 @@
                                           "val": {
                                             "i128": {
                                               "hi": 0,
-                                              "lo": 100
+                                              "lo": 1400
                                             }
                                           }
                                         }
@@ -445,7 +627,7 @@
                                             "symbol": "count"
                                           },
                                           "val": {
-                                            "u64": 1
+                                            "u64": 2
                                           }
                                         },
                                         {
@@ -471,7 +653,7 @@
                                           "val": {
                                             "i128": {
                                               "hi": 0,
-                                              "lo": 100
+                                              "lo": 2200
                                             }
                                           }
                                         }
@@ -569,7 +751,7 @@
                                           "val": {
                                             "i128": {
                                               "hi": 0,
-                                              "lo": 100
+                                              "lo": 1200
                                             }
                                           }
                                         },
@@ -624,7 +806,7 @@
                                           "val": {
                                             "i128": {
                                               "hi": 0,
-                                              "lo": 100
+                                              "lo": 1000
                                             }
                                           }
                                         },
@@ -635,7 +817,7 @@
                                           "val": {
                                             "i128": {
                                               "hi": 0,
-                                              "lo": 100
+                                              "lo": 1200
                                             }
                                           }
                                         },
@@ -646,7 +828,7 @@
                                           "val": {
                                             "i128": {
                                               "hi": 0,
-                                              "lo": 0
+                                              "lo": 200
                                             }
                                           }
                                         }
@@ -796,7 +978,7 @@
                               "val": {
                                 "i128": {
                                   "hi": 0,
-                                  "lo": 1440000
+                                  "lo": 1728000
                                 }
                               }
                             },
@@ -815,7 +997,7 @@
                               "val": {
                                 "i128": {
                                   "hi": 0,
-                                  "lo": 1600000
+                                  "lo": 1920000
                                 }
                               }
                             },
@@ -879,7 +1061,7 @@
                               "val": {
                                 "i128": {
                                   "hi": 0,
-                                  "lo": 100
+                                  "lo": 1000
                                 }
                               }
                             },
@@ -989,7 +1171,7 @@
                               "val": {
                                 "i128": {
                                   "hi": 0,
-                                  "lo": 100
+                                  "lo": 1200
                                 }
                               }
                             },
@@ -1044,7 +1226,7 @@
                               "val": {
                                 "i128": {
                                   "hi": 0,
-                                  "lo": 100
+                                  "lo": 1000
                                 }
                               }
                             },
@@ -1055,7 +1237,7 @@
                               "val": {
                                 "i128": {
                                   "hi": 0,
-                                  "lo": 100
+                                  "lo": 1200
                                 }
                               }
                             },
@@ -1066,7 +1248,7 @@
                               "val": {
                                 "i128": {
                                   "hi": 0,
-                                  "lo": 0
+                                  "lo": 200
                                 }
                               }
                             }
@@ -1171,7 +1353,7 @@
                                     "val": {
                                       "i128": {
                                         "hi": 0,
-                                        "lo": 10
+                                        "lo": 21
                                       }
                                     }
                                   },
@@ -1264,7 +1446,7 @@
                                     "val": {
                                       "i128": {
                                         "hi": 0,
-                                        "lo": 100
+                                        "lo": 1200
                                       }
                                     }
                                   },
@@ -1286,7 +1468,7 @@
                                     "val": {
                                       "i128": {
                                         "hi": 0,
-                                        "lo": 0
+                                        "lo": 200
                                       }
                                     }
                                   },
@@ -1297,7 +1479,7 @@
                                     "val": {
                                       "i128": {
                                         "hi": 0,
-                                        "lo": 1
+                                        "lo": 2
                                       }
                                     }
                                   }
@@ -1474,7 +1656,7 @@
                               "val": {
                                 "i128": {
                                   "hi": 0,
-                                  "lo": 100
+                                  "lo": 1400
                                 }
                               }
                             },
@@ -1736,7 +1918,7 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 100
+                    "lo": 1200
                   }
                 },
                 {
@@ -1799,7 +1981,7 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 100
+                    "lo": 1200
                   }
                 },
                 {
@@ -1850,7 +2032,166 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 100
+                    "lo": 1200
+                  }
+                },
+                {
+                  "symbol": "timestamp"
+                },
+                {
+                  "u64": 0
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "position_updated"
+              },
+              {
+                "symbol": "user"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "symbol": "user"
+                },
+                {
+                  "address": "GCXOTMMXRS24MYZI5FJPUCOEOFNWSR4XX7UXIK3NDGGE6A5QMJ5FF2FS"
+                },
+                {
+                  "symbol": "collateral"
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 1000
+                  }
+                },
+                {
+                  "symbol": "debt"
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 0
+                  }
+                },
+                {
+                  "symbol": "collateral_ratio"
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 0
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "analytics_updated"
+              },
+              {
+                "symbol": "user"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "symbol": "user"
+                },
+                {
+                  "address": "GCXOTMMXRS24MYZI5FJPUCOEOFNWSR4XX7UXIK3NDGGE6A5QMJ5FF2FS"
+                },
+                {
+                  "symbol": "activity_type"
+                },
+                {
+                  "string": "withdraw"
+                },
+                {
+                  "symbol": "amount"
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 200
+                  }
+                },
+                {
+                  "symbol": "timestamp"
+                },
+                {
+                  "u64": 0
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "user_activity_tracked"
+              },
+              {
+                "symbol": "user"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "symbol": "user"
+                },
+                {
+                  "address": "GCXOTMMXRS24MYZI5FJPUCOEOFNWSR4XX7UXIK3NDGGE6A5QMJ5FF2FS"
+                },
+                {
+                  "symbol": "operation"
+                },
+                {
+                  "symbol": "withdraw"
+                },
+                {
+                  "symbol": "amount"
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 200
                   }
                 },
                 {
