@@ -50,6 +50,132 @@
                       },
                       {
                         "key": {
+                          "symbol": "emergency_state"
+                        },
+                        "val": {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "emergency_managers"
+                              },
+                              "val": {
+                                "vec": []
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "fund"
+                              },
+                              "val": {
+                                "map": [
+                                  {
+                                    "key": {
+                                      "symbol": "balance"
+                                    },
+                                    "val": {
+                                      "i128": {
+                                        "hi": 0,
+                                        "lo": 1000000
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "last_update"
+                                    },
+                                    "val": {
+                                      "u64": 0
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "reserved"
+                                    },
+                                    "val": {
+                                      "i128": {
+                                        "hi": 0,
+                                        "lo": 500000
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "token"
+                                    },
+                                    "val": {
+                                      "address": "GAUA7XL5K54CC2DDGP77FJ2YBHRJLT36CPZDXWPM6MP7MANOGG77PNJU"
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "last_recovery_update"
+                              },
+                              "val": {
+                                "u64": 0
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "paused_at"
+                              },
+                              "val": {
+                                "u64": 0
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "paused_by"
+                              },
+                              "val": "void"
+                            },
+                            {
+                              "key": {
+                                "symbol": "pending_param_updates"
+                              },
+                              "val": {
+                                "vec": []
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "reason"
+                              },
+                              "val": "void"
+                            },
+                            {
+                              "key": {
+                                "symbol": "recovery_plan"
+                              },
+                              "val": "void"
+                            },
+                            {
+                              "key": {
+                                "symbol": "recovery_steps"
+                              },
+                              "val": {
+                                "vec": []
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "status"
+                              },
+                              "val": {
+                                "vec": [
+                                  {
+                                    "symbol": "Operational"
+                                  }
+                                ]
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
                           "symbol": "interest_config"
                         },
                         "val": {
@@ -249,7 +375,7 @@
                               "val": {
                                 "i128": {
                                   "hi": 0,
-                                  "lo": 60000000
+                                  "lo": 50000000
                                 }
                               }
                             },
@@ -268,7 +394,7 @@
                               "val": {
                                 "i128": {
                                   "hi": 0,
-                                  "lo": 15000000
+                                  "lo": 10000000
                                 }
                               }
                             },
@@ -533,30 +659,36 @@
           "v0": {
             "topics": [
               {
-                "symbol": "risk_params_updated"
+                "symbol": "emergency_fund"
               },
               {
-                "symbol": "close_factor"
+                "address": "GCAZYE3EB54VKP3UQBX3H73VQO3SIWTZNR7NJQKJFZZ6XLADWA4C3SOC"
               }
             ],
             "data": {
               "vec": [
                 {
-                  "symbol": "close_factor"
+                  "symbol": "actor"
+                },
+                {
+                  "address": "GCAZYE3EB54VKP3UQBX3H73VQO3SIWTZNR7NJQKJFZZ6XLADWA4C3SOC"
+                },
+                {
+                  "symbol": "delta"
                 },
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 60000000
+                    "lo": 1000000
                   }
                 },
                 {
-                  "symbol": "liquidation_incentive"
+                  "symbol": "reserve_delta"
                 },
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 15000000
+                    "lo": 500000
                   }
                 }
               ]

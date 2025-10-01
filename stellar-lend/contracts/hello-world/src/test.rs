@@ -58,6 +58,17 @@ impl TestUtils {
         });
         admin
     }
+
+    /// Mark a user as verified for testing convenience
+    pub fn verify_user(env: &Env, admin: &Address, user: &Address) {
+        Contract::set_user_verification(
+            env.clone(),
+            admin.to_string(),
+            user.clone(),
+            VerificationStatus::Verified,
+        )
+        .unwrap();
+    }
 }
 
 #[test]
@@ -106,6 +117,7 @@ fn test_deposit_collateral() {
     env.as_contract(&contract_id, || {
         // Initialize contract
         Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        TestUtils::verify_user(&env, &admin, &user);
 
         // Test successful deposit
         let result = Contract::deposit_collateral(env.clone(), user.to_string(), 1000);
@@ -130,6 +142,7 @@ fn test_deposit_collateral_invalid_amount() {
     env.as_contract(&contract_id, || {
         // Initialize contract
         Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        TestUtils::verify_user(&env, &admin, &user);
 
         // Test deposit with zero amount
         let result = Contract::deposit_collateral(env.clone(), user.to_string(), 0);
@@ -174,6 +187,7 @@ fn test_borrow_success() {
     env.as_contract(&contract_id, || {
         // Initialize contract
         Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        TestUtils::verify_user(&env, &admin, &user);
 
         // Deposit collateral first
         Contract::deposit_collateral(env.clone(), user.to_string(), 2000).unwrap();
@@ -201,6 +215,7 @@ fn test_borrow_insufficient_collateral_ratio() {
     env.as_contract(&contract_id, || {
         // Initialize contract
         Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        TestUtils::verify_user(&env, &admin, &user);
 
         // Deposit small amount of collateral
         Contract::deposit_collateral(env.clone(), user.to_string(), 100).unwrap();
@@ -226,6 +241,7 @@ fn test_emergency_pause_blocks_deposit() {
     let contract_id = env.register(Contract, ());
     env.as_contract(&contract_id, || {
         Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        TestUtils::verify_user(&env, &admin, &user);
 
         let reason = Some(String::from_str(&env, "halt"));
         Contract::trigger_emergency_pause(env.clone(), admin.to_string(), reason).unwrap();
@@ -251,6 +267,7 @@ fn test_recovery_mode_allows_repay_blocks_borrow() {
     let contract_id = env.register(Contract, ());
     env.as_contract(&contract_id, || {
         Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        TestUtils::verify_user(&env, &admin, &user);
 
         Contract::deposit_collateral(env.clone(), user.to_string(), 2000).unwrap();
         Contract::borrow(env.clone(), user.to_string(), 500).unwrap();
@@ -358,6 +375,7 @@ fn test_repay_success() {
     env.as_contract(&contract_id, || {
         // Initialize contract
         Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        TestUtils::verify_user(&env, &admin, &user);
 
         // Deposit and borrow
         Contract::deposit_collateral(env.clone(), user.to_string(), 2000).unwrap();
@@ -386,6 +404,7 @@ fn test_repay_full_amount() {
     env.as_contract(&contract_id, || {
         // Initialize contract
         Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        TestUtils::verify_user(&env, &admin, &user);
 
         // Deposit and borrow
         Contract::deposit_collateral(env.clone(), user.to_string(), 2000).unwrap();
@@ -414,6 +433,7 @@ fn test_withdraw_success() {
     env.as_contract(&contract_id, || {
         // Initialize contract
         Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        TestUtils::verify_user(&env, &admin, &user);
 
         // Deposit collateral
         Contract::deposit_collateral(env.clone(), user.to_string(), 2000).unwrap();
@@ -441,6 +461,7 @@ fn test_withdraw_insufficient_collateral() {
     env.as_contract(&contract_id, || {
         // Initialize contract
         Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        TestUtils::verify_user(&env, &admin, &user);
 
         // Deposit small amount
         Contract::deposit_collateral(env.clone(), user.to_string(), 100).unwrap();
@@ -464,6 +485,7 @@ fn test_withdraw_insufficient_collateral_ratio() {
     env.as_contract(&contract_id, || {
         // Initialize contract
         Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        TestUtils::verify_user(&env, &admin, &user);
 
         // Deposit and borrow
         Contract::deposit_collateral(env.clone(), user.to_string(), 2000).unwrap();
@@ -492,6 +514,8 @@ fn test_liquidate_success() {
     env.as_contract(&contract_id, || {
         // Initialize contract
         Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        TestUtils::verify_user(&env, &admin, &user);
+        TestUtils::verify_user(&env, &admin, &liquidator);
 
         // Set a very low minimum collateral ratio for testing
         Contract::set_min_collateral_ratio(env.clone(), admin.to_string(), 50).unwrap();
@@ -523,6 +547,8 @@ fn test_liquidate_not_eligible() {
     env.as_contract(&contract_id, || {
         // Initialize contract
         Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        TestUtils::verify_user(&env, &admin, &user);
+        TestUtils::verify_user(&env, &admin, &liquidator);
 
         // Deposit large amount and borrow small amount (healthy position)
         Contract::deposit_collateral(env.clone(), user.to_string(), 2000).unwrap();

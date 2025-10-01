@@ -152,6 +152,495 @@ pub enum OperationKind {
     Admin,
 }
 
+/// Roles available for addresses interacting with the protocol
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub enum UserRole {
+    Suspended,
+    Standard,
+    Analyst,
+    Manager,
+    Admin,
+}
+
+impl UserRole {
+    fn level(&self) -> u32 {
+        match self {
+            UserRole::Suspended => 0,
+            UserRole::Standard => 1,
+            UserRole::Analyst => 2,
+            UserRole::Manager => 3,
+            UserRole::Admin => 4,
+        }
+    }
+
+    fn as_symbol<'a>(&self, env: &'a Env) -> Symbol {
+        match self {
+            UserRole::Suspended => Symbol::new(env, "suspended"),
+            UserRole::Standard => Symbol::new(env, "standard"),
+            UserRole::Analyst => Symbol::new(env, "analyst"),
+            UserRole::Manager => Symbol::new(env, "manager"),
+            UserRole::Admin => Symbol::new(env, "admin"),
+        }
+    }
+}
+
+/// Verification status that governs sensitive operations
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub enum VerificationStatus {
+    Unverified,
+    Pending,
+    Verified,
+    Rejected,
+}
+
+impl VerificationStatus {
+    fn is_verified(&self) -> bool {
+        matches!(self, VerificationStatus::Verified)
+    }
+}
+
+/// User-specific limits enforced by the protocol
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct UserLimits {
+    pub max_deposit: i128,
+    pub max_borrow: i128,
+    pub max_withdraw: i128,
+    pub daily_limit: i128,
+    pub daily_spent: i128,
+    pub daily_window_start: u64,
+}
+
+impl UserLimits {
+    pub fn default(env: &Env) -> Self {
+        Self {
+            max_deposit: i128::MAX,
+            max_borrow: i128::MAX,
+            max_withdraw: i128::MAX,
+            daily_limit: i128::MAX,
+            daily_spent: 0,
+            daily_window_start: env.ledger().timestamp(),
+        }
+    }
+
+    fn refresh_window(&mut self, now: u64) {
+        let day_seconds = 24 * 60 * 60;
+        if now.saturating_sub(self.daily_window_start) >= day_seconds {
+            self.daily_window_start = now;
+            self.daily_spent = 0;
+        }
+    }
+
+    fn check_operation(&self, operation: OperationKind, amount: i128) -> Result<(), ProtocolError> {
+        if amount <= 0 {
+            return Err(ProtocolError::InvalidAmount);
+        }
+
+        match operation {
+            OperationKind::Deposit => {
+                if amount > self.max_deposit {
+                    return Err(ProtocolError::UserLimitExceeded);
+                }
+            }
+            OperationKind::Borrow => {
+                if amount > self.max_borrow {
+                    return Err(ProtocolError::UserLimitExceeded);
+                }
+            }
+            OperationKind::Withdraw => {
+                if amount > self.max_withdraw {
+                    return Err(ProtocolError::UserLimitExceeded);
+                }
+            }
+            _ => {}
+        }
+
+        if self.daily_limit < i128::MAX {
+            let projected = self.daily_spent.saturating_add(amount);
+            if projected > self.daily_limit {
+                return Err(ProtocolError::UserLimitExceeded);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn apply_usage(
+        &mut self,
+        now: u64,
+        operation: OperationKind,
+        amount: i128,
+    ) -> Result<(), ProtocolError> {
+        self.refresh_window(now);
+        self.check_operation(operation, amount)?;
+
+        if self.daily_limit < i128::MAX {
+            self.daily_spent = self.daily_spent.saturating_add(amount);
+        }
+
+        Ok(())
+    }
+}
+
+/// On-ledger user profile capturing role, verification and activity metrics
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct UserProfile {
+    pub user: Address,
+    pub role: UserRole,
+    pub verification: VerificationStatus,
+    pub limits: UserLimits,
+    pub last_active: u64,
+    pub activity_score: i128,
+    pub is_frozen: bool,
+}
+
+impl UserProfile {
+    pub fn new(env: &Env, user: Address) -> Self {
+        Self {
+            user,
+            role: UserRole::Standard,
+            verification: VerificationStatus::Unverified,
+            limits: UserLimits::default(env),
+            last_active: env.ledger().timestamp(),
+            activity_score: 0,
+            is_frozen: false,
+        }
+    }
+}
+
+/// Storage key namespace for user profiles
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub enum UserStorageKey {
+    Profile(Address),
+}
+
+/// Centralized user management helper
+pub struct UserManager;
+
+impl UserManager {
+    fn profile_key(user: &Address) -> UserStorageKey {
+        UserStorageKey::Profile(user.clone())
+    }
+
+    fn ensure_profile(env: &Env, user: &Address) -> UserProfile {
+        let key = Self::profile_key(user);
+        env.storage()
+            .instance()
+            .get::<UserStorageKey, UserProfile>(&key)
+            .unwrap_or_else(|| {
+                let profile = UserProfile::new(env, user.clone());
+                env.storage().instance().set(&key, &profile);
+                profile
+            })
+    }
+
+    fn save_profile(env: &Env, profile: &UserProfile) {
+        let key = Self::profile_key(&profile.user);
+        env.storage().instance().set(&key, profile);
+    }
+
+    fn ensure_can_manage(
+        env: &Env,
+        caller: &Address,
+        minimum_role: UserRole,
+    ) -> Result<(), ProtocolError> {
+        if let Some(admin) = ProtocolConfig::get_admin(env) {
+            if admin == *caller {
+                return Ok(());
+            }
+        }
+
+        let profile = Self::ensure_profile(env, caller);
+        if !profile.verification.is_verified() {
+            return Err(ProtocolError::UserNotVerified);
+        }
+
+        if profile.role.level() < minimum_role.level() {
+            return Err(ProtocolError::UserRoleViolation);
+        }
+
+        Ok(())
+    }
+
+    pub fn bootstrap_admin(env: &Env, admin: &Address) {
+        let mut profile = Self::ensure_profile(env, admin);
+        profile.role = UserRole::Admin;
+        profile.verification = VerificationStatus::Verified;
+        profile.is_frozen = false;
+        profile.last_active = env.ledger().timestamp();
+        Self::save_profile(env, &profile);
+        env.events().publish(
+            (
+                Symbol::new(env, "user_registered"),
+                Symbol::new(env, "user"),
+            ),
+            (
+                Symbol::new(env, "user"),
+                admin.clone(),
+                Symbol::new(env, "role"),
+                UserRole::Admin.as_symbol(env),
+            ),
+        );
+    }
+
+    pub fn set_role(
+        env: &Env,
+        caller: &Address,
+        user: &Address,
+        role: UserRole,
+    ) -> Result<(), ProtocolError> {
+        Self::ensure_can_manage(env, caller, UserRole::Manager)?;
+        let mut profile = Self::ensure_profile(env, user);
+        profile.role = role.clone();
+        if matches!(role, UserRole::Suspended) {
+            profile.is_frozen = true;
+        } else {
+            profile.is_frozen = false;
+        }
+        if matches!(
+            role,
+            UserRole::Manager | UserRole::Admin | UserRole::Analyst
+        ) && profile.verification != VerificationStatus::Verified
+        {
+            profile.verification = VerificationStatus::Verified;
+        }
+        let role_symbol = role.as_symbol(env);
+        Self::save_profile(env, &profile);
+        env.events().publish(
+            (
+                Symbol::new(env, "user_role_updated"),
+                Symbol::new(env, "user"),
+            ),
+            (
+                Symbol::new(env, "user"),
+                user.clone(),
+                Symbol::new(env, "role"),
+                role_symbol,
+            ),
+        );
+        Ok(())
+    }
+
+    pub fn set_verification_status(
+        env: &Env,
+        caller: &Address,
+        user: &Address,
+        status: VerificationStatus,
+    ) -> Result<(), ProtocolError> {
+        Self::ensure_can_manage(env, caller, UserRole::Analyst)?;
+        let mut profile = Self::ensure_profile(env, user);
+        profile.verification = status.clone();
+        if status == VerificationStatus::Rejected {
+            profile.is_frozen = true;
+        }
+        if status == VerificationStatus::Verified {
+            profile.is_frozen = false;
+        }
+        let status_symbol = Self::verification_symbol(env, &status);
+        Self::save_profile(env, &profile);
+        env.events().publish(
+            (
+                Symbol::new(env, "user_verification_updated"),
+                Symbol::new(env, "user"),
+            ),
+            (
+                Symbol::new(env, "user"),
+                user.clone(),
+                Symbol::new(env, "status"),
+                status_symbol,
+            ),
+        );
+        Ok(())
+    }
+
+    pub fn set_limits(
+        env: &Env,
+        caller: &Address,
+        user: &Address,
+        max_deposit: i128,
+        max_borrow: i128,
+        max_withdraw: i128,
+        daily_limit: i128,
+    ) -> Result<(), ProtocolError> {
+        Self::ensure_can_manage(env, caller, UserRole::Manager)?;
+        if max_deposit <= 0 || max_borrow <= 0 || max_withdraw <= 0 || daily_limit <= 0 {
+            return Err(ProtocolError::InvalidParameters);
+        }
+        let mut profile = Self::ensure_profile(env, user);
+        profile.limits.max_deposit = max_deposit;
+        profile.limits.max_borrow = max_borrow;
+        profile.limits.max_withdraw = max_withdraw;
+        profile.limits.daily_limit = daily_limit;
+        Self::save_profile(env, &profile);
+        env.events().publish(
+            (
+                Symbol::new(env, "user_limits_updated"),
+                Symbol::new(env, "user"),
+            ),
+            (
+                Symbol::new(env, "user"),
+                user.clone(),
+                Symbol::new(env, "max_deposit"),
+                max_deposit,
+                Symbol::new(env, "max_borrow"),
+                max_borrow,
+                Symbol::new(env, "max_withdraw"),
+                max_withdraw,
+                Symbol::new(env, "daily_limit"),
+                daily_limit,
+            ),
+        );
+        Ok(())
+    }
+
+    pub fn ensure_operation_allowed(
+        env: &Env,
+        user: &Address,
+        operation: OperationKind,
+        amount: i128,
+    ) -> Result<(), ProtocolError> {
+        let profile = Self::ensure_profile(env, user);
+
+        if profile.is_frozen || profile.role == UserRole::Suspended {
+            return Err(ProtocolError::UserSuspended);
+        }
+
+        match operation {
+            OperationKind::Admin | OperationKind::Governance => {
+                if !profile.verification.is_verified() {
+                    return Err(ProtocolError::UserNotVerified);
+                }
+                if profile.role.level() < UserRole::Manager.level() {
+                    return Err(ProtocolError::UserRoleViolation);
+                }
+            }
+            OperationKind::Deposit
+            | OperationKind::Borrow
+            | OperationKind::Withdraw
+            | OperationKind::Liquidate
+            | OperationKind::FlashLoan => {
+                if !profile.verification.is_verified() {
+                    return Err(ProtocolError::UserNotVerified);
+                }
+            }
+            OperationKind::Repay => {
+                if profile.verification == VerificationStatus::Rejected {
+                    return Err(ProtocolError::UserNotVerified);
+                }
+            }
+        }
+
+        profile.limits.check_operation(operation, amount)
+    }
+
+    pub fn record_activity(
+        env: &Env,
+        user: &Address,
+        operation: OperationKind,
+        amount: i128,
+    ) -> Result<(), ProtocolError> {
+        let mut profile = Self::ensure_profile(env, user);
+        let now = env.ledger().timestamp();
+        profile.limits.apply_usage(now, operation, amount)?;
+        profile.last_active = now;
+        profile.activity_score =
+            profile
+                .activity_score
+                .saturating_add(if amount >= 0 { amount } else { -amount });
+        Self::save_profile(env, &profile);
+        env.events().publish(
+            (
+                Symbol::new(env, "user_activity_tracked"),
+                Symbol::new(env, "user"),
+            ),
+            (
+                Symbol::new(env, "user"),
+                user.clone(),
+                Symbol::new(env, "operation"),
+                Self::operation_symbol(env, operation),
+                Symbol::new(env, "amount"),
+                amount,
+                Symbol::new(env, "timestamp"),
+                now,
+            ),
+        );
+        Ok(())
+    }
+
+    pub fn get_profile(env: &Env, user: &Address) -> UserProfile {
+        Self::ensure_profile(env, user)
+    }
+
+    pub fn freeze_user(env: &Env, caller: &Address, user: &Address) -> Result<(), ProtocolError> {
+        Self::ensure_can_manage(env, caller, UserRole::Manager)?;
+        let mut profile = Self::ensure_profile(env, user);
+        profile.is_frozen = true;
+        Self::save_profile(env, &profile);
+        env.events().publish(
+            (
+                Symbol::new(env, "user_role_updated"),
+                Symbol::new(env, "user"),
+            ),
+            (
+                Symbol::new(env, "user"),
+                user.clone(),
+                Symbol::new(env, "role"),
+                UserRole::Suspended.as_symbol(env),
+            ),
+        );
+        Ok(())
+    }
+
+    pub fn unfreeze_user(env: &Env, caller: &Address, user: &Address) -> Result<(), ProtocolError> {
+        Self::ensure_can_manage(env, caller, UserRole::Manager)?;
+        let mut profile = Self::ensure_profile(env, user);
+        profile.is_frozen = false;
+        if profile.role == UserRole::Suspended {
+            profile.role = UserRole::Standard;
+        }
+        Self::save_profile(env, &profile);
+        env.events().publish(
+            (
+                Symbol::new(env, "user_role_updated"),
+                Symbol::new(env, "user"),
+            ),
+            (
+                Symbol::new(env, "user"),
+                user.clone(),
+                Symbol::new(env, "role"),
+                profile.role.as_symbol(env),
+            ),
+        );
+        Ok(())
+    }
+
+    fn operation_symbol(env: &Env, operation: OperationKind) -> Symbol {
+        match operation {
+            OperationKind::Deposit => Symbol::new(env, "deposit"),
+            OperationKind::Borrow => Symbol::new(env, "borrow"),
+            OperationKind::Repay => Symbol::new(env, "repay"),
+            OperationKind::Withdraw => Symbol::new(env, "withdraw"),
+            OperationKind::Liquidate => Symbol::new(env, "liquidate"),
+            OperationKind::FlashLoan => Symbol::new(env, "flash_loan"),
+            OperationKind::Governance => Symbol::new(env, "governance"),
+            OperationKind::Admin => Symbol::new(env, "admin"),
+        }
+    }
+
+    fn verification_symbol(env: &Env, status: &VerificationStatus) -> Symbol {
+        match status {
+            VerificationStatus::Unverified => Symbol::new(env, "unverified"),
+            VerificationStatus::Pending => Symbol::new(env, "pending"),
+            VerificationStatus::Verified => Symbol::new(env, "verified"),
+            VerificationStatus::Rejected => Symbol::new(env, "rejected"),
+        }
+    }
+}
+
 /// Emergency management helper with authorization and flow controls
 pub struct EmergencyManager;
 
@@ -862,6 +1351,10 @@ pub enum ProtocolError {
     StorageLimitExceeded = 22,
     RecoveryModeRestricted = 23,
     EmergencyFundInsufficient = 24,
+    UserNotVerified = 25,
+    UserSuspended = 26,
+    UserLimitExceeded = 27,
+    UserRoleViolation = 28,
 }
 
 /// Protocol events
@@ -1521,19 +2014,47 @@ fn ensure_amount_positive(amount: i128) -> Result<(), ProtocolError> {
 
 /// Core protocol functions
 pub fn deposit_collateral(env: Env, depositor: String, amount: i128) -> Result<(), ProtocolError> {
-    deposit::DepositModule::deposit_collateral(&env, &depositor, amount)
+    if depositor.is_empty() {
+        return Err(ProtocolError::InvalidAddress);
+    }
+    let depositor_addr = Address::from_string(&depositor);
+    UserManager::ensure_operation_allowed(&env, &depositor_addr, OperationKind::Deposit, amount)?;
+    deposit::DepositModule::deposit_collateral(&env, &depositor, amount)?;
+    UserManager::record_activity(&env, &depositor_addr, OperationKind::Deposit, amount)?;
+    Ok(())
 }
 
 pub fn borrow(env: Env, borrower: String, amount: i128) -> Result<(), ProtocolError> {
-    borrow::BorrowModule::borrow(&env, &borrower, amount)
+    if borrower.is_empty() {
+        return Err(ProtocolError::InvalidAddress);
+    }
+    let borrower_addr = Address::from_string(&borrower);
+    UserManager::ensure_operation_allowed(&env, &borrower_addr, OperationKind::Borrow, amount)?;
+    borrow::BorrowModule::borrow(&env, &borrower, amount)?;
+    UserManager::record_activity(&env, &borrower_addr, OperationKind::Borrow, amount)?;
+    Ok(())
 }
 
 pub fn repay(env: Env, repayer: String, amount: i128) -> Result<(), ProtocolError> {
-    repay::RepayModule::repay(&env, &repayer, amount)
+    if repayer.is_empty() {
+        return Err(ProtocolError::InvalidAddress);
+    }
+    let repayer_addr = Address::from_string(&repayer);
+    UserManager::ensure_operation_allowed(&env, &repayer_addr, OperationKind::Repay, amount)?;
+    repay::RepayModule::repay(&env, &repayer, amount)?;
+    UserManager::record_activity(&env, &repayer_addr, OperationKind::Repay, amount)?;
+    Ok(())
 }
 
 pub fn withdraw(env: Env, withdrawer: String, amount: i128) -> Result<(), ProtocolError> {
-    withdraw::WithdrawModule::withdraw(&env, &withdrawer, amount)
+    if withdrawer.is_empty() {
+        return Err(ProtocolError::InvalidAddress);
+    }
+    let withdrawer_addr = Address::from_string(&withdrawer);
+    UserManager::ensure_operation_allowed(&env, &withdrawer_addr, OperationKind::Withdraw, amount)?;
+    withdraw::WithdrawModule::withdraw(&env, &withdrawer, amount)?;
+    UserManager::record_activity(&env, &withdrawer_addr, OperationKind::Withdraw, amount)?;
+    Ok(())
 }
 
 pub fn liquidate(
@@ -1542,11 +2063,25 @@ pub fn liquidate(
     user: String,
     amount: i128,
 ) -> Result<(), ProtocolError> {
+    if liquidator.is_empty() {
+        return Err(ProtocolError::InvalidAddress);
+    }
+    let liquidator_addr = Address::from_string(&liquidator);
+    UserManager::ensure_operation_allowed(
+        &env,
+        &liquidator_addr,
+        OperationKind::Liquidate,
+        amount,
+    )?;
     liquidate::LiquidationModule::liquidate(&env, &liquidator, &user, amount)?;
+    UserManager::record_activity(&env, &liquidator_addr, OperationKind::Liquidate, amount)?;
     Ok(())
 }
 
 pub fn get_position(env: Env, user: String) -> Result<(i128, i128, i128), ProtocolError> {
+    if user.is_empty() {
+        return Err(ProtocolError::InvalidAddress);
+    }
     let user_addr = Address::from_string(&user);
     match StateHelper::get_position(&env, &user_addr) {
         Some(position) => {
@@ -1717,6 +2252,61 @@ pub fn get_emergency_state(env: Env) -> Result<EmergencyState, ProtocolError> {
     Ok(EmergencyStorage::get(&env))
 }
 
+pub fn set_user_role(
+    env: Env,
+    caller: String,
+    user: Address,
+    role: UserRole,
+) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    UserManager::set_role(&env, &caller_addr, &user, role)
+}
+
+pub fn set_user_verification(
+    env: Env,
+    caller: String,
+    user: Address,
+    status: VerificationStatus,
+) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    UserManager::set_verification_status(&env, &caller_addr, &user, status)
+}
+
+pub fn set_user_limits(
+    env: Env,
+    caller: String,
+    user: Address,
+    max_deposit: i128,
+    max_borrow: i128,
+    max_withdraw: i128,
+    daily_limit: i128,
+) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    UserManager::set_limits(
+        &env,
+        &caller_addr,
+        &user,
+        max_deposit,
+        max_borrow,
+        max_withdraw,
+        daily_limit,
+    )
+}
+
+pub fn freeze_user(env: Env, caller: String, user: Address) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    UserManager::freeze_user(&env, &caller_addr, &user)
+}
+
+pub fn unfreeze_user(env: Env, caller: String, user: Address) -> Result<(), ProtocolError> {
+    let caller_addr = Address::from_string(&caller);
+    UserManager::unfreeze_user(&env, &caller_addr, &user)
+}
+
+pub fn get_user_profile(env: Env, user: Address) -> Result<UserProfile, ProtocolError> {
+    Ok(UserManager::get_profile(&env, &user))
+}
+
 #[contractimpl]
 impl Contract {
     /// Initializes the contract and sets the admin address
@@ -1730,6 +2320,7 @@ impl Contract {
             return Err(ProtocolError::AlreadyInitialized);
         }
         ProtocolConfig::set_admin(&env, &admin_addr);
+        UserManager::bootstrap_admin(&env, &admin_addr);
 
         // Initialize interest rate system with default configuration
         let config = InterestRateConfig::default();
@@ -1905,6 +2496,56 @@ impl Contract {
 
     pub fn get_emergency_state(env: Env) -> Result<EmergencyState, ProtocolError> {
         get_emergency_state(env)
+    }
+
+    pub fn set_user_role(
+        env: Env,
+        caller: String,
+        user: Address,
+        role: UserRole,
+    ) -> Result<(), ProtocolError> {
+        set_user_role(env, caller, user, role)
+    }
+
+    pub fn set_user_verification(
+        env: Env,
+        caller: String,
+        user: Address,
+        status: VerificationStatus,
+    ) -> Result<(), ProtocolError> {
+        set_user_verification(env, caller, user, status)
+    }
+
+    pub fn set_user_limits(
+        env: Env,
+        caller: String,
+        user: Address,
+        max_deposit: i128,
+        max_borrow: i128,
+        max_withdraw: i128,
+        daily_limit: i128,
+    ) -> Result<(), ProtocolError> {
+        set_user_limits(
+            env,
+            caller,
+            user,
+            max_deposit,
+            max_borrow,
+            max_withdraw,
+            daily_limit,
+        )
+    }
+
+    pub fn freeze_user(env: Env, caller: String, user: Address) -> Result<(), ProtocolError> {
+        freeze_user(env, caller, user)
+    }
+
+    pub fn unfreeze_user(env: Env, caller: String, user: Address) -> Result<(), ProtocolError> {
+        unfreeze_user(env, caller, user)
+    }
+
+    pub fn get_user_profile(env: Env, user: Address) -> Result<UserProfile, ProtocolError> {
+        get_user_profile(env, user)
     }
 
     // Analytics and Reporting Functions
