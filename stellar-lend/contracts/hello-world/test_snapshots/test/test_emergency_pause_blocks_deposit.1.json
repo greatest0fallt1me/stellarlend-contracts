@@ -399,7 +399,7 @@
                                       "symbol": "count"
                                     },
                                     "val": {
-                                      "u64": 2
+                                      "u64": 1
                                     }
                                   },
                                   {
@@ -425,7 +425,7 @@
                                     "val": {
                                       "i128": {
                                         "hi": 0,
-                                        "lo": 2000
+                                        "lo": 1000
                                       }
                                     }
                                   }
@@ -443,7 +443,7 @@
                                       "symbol": "count"
                                     },
                                     "val": {
-                                      "u64": 2
+                                      "u64": 1
                                     }
                                   },
                                   {
@@ -469,7 +469,7 @@
                                     "val": {
                                       "i128": {
                                         "hi": 0,
-                                        "lo": 2000
+                                        "lo": 1000
                                       }
                                     }
                                   }
@@ -812,71 +812,6 @@
                                         }
                                       }
                                     ]
-                                  },
-                                  {
-                                    "map": [
-                                      {
-                                        "key": {
-                                          "symbol": "amount"
-                                        },
-                                        "val": {
-                                          "i128": {
-                                            "hi": 0,
-                                            "lo": 1000
-                                          }
-                                        }
-                                      },
-                                      {
-                                        "key": {
-                                          "symbol": "asset"
-                                        },
-                                        "val": {
-                                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
-                                        }
-                                      },
-                                      {
-                                        "key": {
-                                          "symbol": "event_type"
-                                        },
-                                        "val": {
-                                          "symbol": "transfer_attempt"
-                                        }
-                                      },
-                                      {
-                                        "key": {
-                                          "symbol": "timestamp"
-                                        },
-                                        "val": {
-                                          "u64": 0
-                                        }
-                                      },
-                                      {
-                                        "key": {
-                                          "symbol": "topics"
-                                        },
-                                        "val": {
-                                          "vec": [
-                                            {
-                                              "symbol": "deposit"
-                                            },
-                                            {
-                                              "symbol": "from"
-                                            },
-                                            {
-                                              "symbol": "to"
-                                            }
-                                          ]
-                                        }
-                                      },
-                                      {
-                                        "key": {
-                                          "symbol": "user"
-                                        },
-                                        "val": {
-                                          "address": "GCXOTMMXRS24MYZI5FJPUCOEOFNWSR4XX7UXIK3NDGGE6A5QMJ5FF2FS"
-                                        }
-                                      }
-                                    ]
                                   }
                                 ]
                               }
@@ -887,71 +822,6 @@
                               },
                               "val": {
                                 "vec": [
-                                  {
-                                    "map": [
-                                      {
-                                        "key": {
-                                          "symbol": "amount"
-                                        },
-                                        "val": {
-                                          "i128": {
-                                            "hi": 0,
-                                            "lo": 1000
-                                          }
-                                        }
-                                      },
-                                      {
-                                        "key": {
-                                          "symbol": "asset"
-                                        },
-                                        "val": {
-                                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
-                                        }
-                                      },
-                                      {
-                                        "key": {
-                                          "symbol": "event_type"
-                                        },
-                                        "val": {
-                                          "symbol": "transfer_success"
-                                        }
-                                      },
-                                      {
-                                        "key": {
-                                          "symbol": "timestamp"
-                                        },
-                                        "val": {
-                                          "u64": 0
-                                        }
-                                      },
-                                      {
-                                        "key": {
-                                          "symbol": "topics"
-                                        },
-                                        "val": {
-                                          "vec": [
-                                            {
-                                              "symbol": "deposit"
-                                            },
-                                            {
-                                              "symbol": "from"
-                                            },
-                                            {
-                                              "symbol": "to"
-                                            }
-                                          ]
-                                        }
-                                      },
-                                      {
-                                        "key": {
-                                          "symbol": "user"
-                                        },
-                                        "val": {
-                                          "address": "GCXOTMMXRS24MYZI5FJPUCOEOFNWSR4XX7UXIK3NDGGE6A5QMJ5FF2FS"
-                                        }
-                                      }
-                                    ]
-                                  },
                                   {
                                     "map": [
                                       {
@@ -1202,7 +1072,7 @@
                                             "symbol": "count"
                                           },
                                           "val": {
-                                            "u64": 2
+                                            "u64": 1
                                           }
                                         },
                                         {
@@ -1228,7 +1098,7 @@
                                           "val": {
                                             "i128": {
                                               "hi": 0,
-                                              "lo": 2000
+                                              "lo": 1000
                                             }
                                           }
                                         }
@@ -1246,7 +1116,7 @@
                                             "symbol": "count"
                                           },
                                           "val": {
-                                            "u64": 2
+                                            "u64": 1
                                           }
                                         },
                                         {
@@ -1272,7 +1142,7 @@
                                           "val": {
                                             "i128": {
                                               "hi": 0,
-                                              "lo": 2000
+                                              "lo": 1000
                                             }
                                           }
                                         }
@@ -2473,7 +2343,7 @@
                               "val": {
                                 "i128": {
                                   "hi": 0,
-                                  "lo": 998000
+                                  "lo": 999000
                                 }
                               }
                             },
@@ -2484,7 +2354,7 @@
                               "val": {
                                 "i128": {
                                   "hi": 0,
-                                  "lo": 1002000
+                                  "lo": 1001000
                                 }
                               }
                             }
@@ -2589,108 +2459,6 @@
                 },
                 {
                   "string": "halt"
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
-        "type_": "contract",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "transfer_attempt"
-              },
-              {
-                "symbol": "deposit"
-              }
-            ],
-            "data": {
-              "vec": [
-                {
-                  "symbol": "from"
-                },
-                {
-                  "address": "GCXOTMMXRS24MYZI5FJPUCOEOFNWSR4XX7UXIK3NDGGE6A5QMJ5FF2FS"
-                },
-                {
-                  "symbol": "to"
-                },
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
-                },
-                {
-                  "symbol": "asset"
-                },
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
-                },
-                {
-                  "symbol": "amount"
-                },
-                {
-                  "i128": {
-                    "hi": 0,
-                    "lo": 1000
-                  }
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
-        "type_": "contract",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "transfer_success"
-              },
-              {
-                "symbol": "deposit"
-              }
-            ],
-            "data": {
-              "vec": [
-                {
-                  "symbol": "from"
-                },
-                {
-                  "address": "GCXOTMMXRS24MYZI5FJPUCOEOFNWSR4XX7UXIK3NDGGE6A5QMJ5FF2FS"
-                },
-                {
-                  "symbol": "to"
-                },
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
-                },
-                {
-                  "symbol": "asset"
-                },
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
-                },
-                {
-                  "symbol": "amount"
-                },
-                {
-                  "i128": {
-                    "hi": 0,
-                    "lo": 1000
-                  }
                 }
               ]
             }
