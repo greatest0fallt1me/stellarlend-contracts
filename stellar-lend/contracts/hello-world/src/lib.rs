@@ -1250,7 +1250,14 @@ impl TransferEnforcer {
         topics.push_back(flow.clone());
         topics.push_back(Symbol::new(env, "from"));
         topics.push_back(Symbol::new(env, "to"));
-        EventTracker::record(env, event_type.clone(), topics, Some(from.clone()), Some(asset.clone()), amount);
+        EventTracker::record(
+            env,
+            event_type.clone(),
+            topics,
+            Some(from.clone()),
+            Some(asset.clone()),
+            amount,
+        );
         env.events().publish(
             (event_type, flow.clone()),
             (
@@ -1279,7 +1286,14 @@ impl TransferEnforcer {
         topics.push_back(flow.clone());
         topics.push_back(Symbol::new(env, "from"));
         topics.push_back(Symbol::new(env, "to"));
-        EventTracker::record(env, event_type.clone(), topics, Some(from.clone()), Some(asset.clone()), amount);
+        EventTracker::record(
+            env,
+            event_type.clone(),
+            topics,
+            Some(from.clone()),
+            Some(asset.clone()),
+            amount,
+        );
         env.events().publish(
             (event_type, flow.clone()),
             (
@@ -1308,7 +1322,14 @@ impl TransferEnforcer {
         let mut topics = Vec::new(env);
         topics.push_back(flow.clone());
         topics.push_back(Symbol::new(env, reason));
-        EventTracker::record(env, event_type.clone(), topics, Some(from.clone()), Some(asset.clone()), amount);
+        EventTracker::record(
+            env,
+            event_type.clone(),
+            topics,
+            Some(from.clone()),
+            Some(asset.clone()),
+            amount,
+        );
         env.events().publish(
             (event_type, flow.clone()),
             (
@@ -2805,12 +2826,7 @@ pub fn deposit_collateral(env: Env, depositor: String, amount: i128) -> Result<(
         return Err(ProtocolError::InvalidAddress);
     }
     let depositor_addr = Address::from_string(&depositor);
-    UserManager::ensure_operation_allowed(&env, &depositor_addr, OperationKind::Deposit, amount)?;
-    let flow_symbol = Symbol::new(&env, "deposit");
-    TransferEnforcer::transfer_in(&env, &depositor_addr, amount, flow_symbol.clone())?;
-    deposit::DepositModule::deposit_collateral(&env, &depositor, amount)?;
-    UserManager::record_activity(&env, &depositor_addr, OperationKind::Deposit, amount)?;
-    Ok(())
+    deposit::DepositModule::deposit_collateral(&env, &depositor_addr, amount)
 }
 
 pub fn borrow(env: Env, borrower: String, amount: i128) -> Result<(), ProtocolError> {
@@ -2818,11 +2834,7 @@ pub fn borrow(env: Env, borrower: String, amount: i128) -> Result<(), ProtocolEr
         return Err(ProtocolError::InvalidAddress);
     }
     let borrower_addr = Address::from_string(&borrower);
-    UserManager::ensure_operation_allowed(&env, &borrower_addr, OperationKind::Borrow, amount)?;
-    borrow::BorrowModule::borrow(&env, &borrower, amount)?;
-    TransferEnforcer::transfer_out(&env, &borrower_addr, amount, Symbol::new(&env, "borrow"))?;
-    UserManager::record_activity(&env, &borrower_addr, OperationKind::Borrow, amount)?;
-    Ok(())
+    borrow::BorrowModule::borrow(&env, &borrower_addr, amount)
 }
 
 pub fn repay(env: Env, repayer: String, amount: i128) -> Result<(), ProtocolError> {
@@ -2830,12 +2842,7 @@ pub fn repay(env: Env, repayer: String, amount: i128) -> Result<(), ProtocolErro
         return Err(ProtocolError::InvalidAddress);
     }
     let repayer_addr = Address::from_string(&repayer);
-    UserManager::ensure_operation_allowed(&env, &repayer_addr, OperationKind::Repay, amount)?;
-    let flow_symbol = Symbol::new(&env, "repay");
-    TransferEnforcer::transfer_in(&env, &repayer_addr, amount, flow_symbol.clone())?;
-    repay::RepayModule::repay(&env, &repayer, amount)?;
-    UserManager::record_activity(&env, &repayer_addr, OperationKind::Repay, amount)?;
-    Ok(())
+    repay::RepayModule::repay(&env, &repayer_addr, amount)
 }
 
 pub fn withdraw(env: Env, withdrawer: String, amount: i128) -> Result<(), ProtocolError> {
@@ -2843,16 +2850,7 @@ pub fn withdraw(env: Env, withdrawer: String, amount: i128) -> Result<(), Protoc
         return Err(ProtocolError::InvalidAddress);
     }
     let withdrawer_addr = Address::from_string(&withdrawer);
-    UserManager::ensure_operation_allowed(&env, &withdrawer_addr, OperationKind::Withdraw, amount)?;
-    withdraw::WithdrawModule::withdraw(&env, &withdrawer, amount)?;
-    TransferEnforcer::transfer_out(
-        &env,
-        &withdrawer_addr,
-        amount,
-        Symbol::new(&env, "withdraw"),
-    )?;
-    UserManager::record_activity(&env, &withdrawer_addr, OperationKind::Withdraw, amount)?;
-    Ok(())
+    withdraw::WithdrawModule::withdraw(&env, &withdrawer_addr, amount)
 }
 
 pub fn liquidate(

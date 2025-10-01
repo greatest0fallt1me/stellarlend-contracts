@@ -5,8 +5,9 @@ use crate::analytics::AnalyticsModule;
 use crate::{
     EmergencyManager, InterestRateManager, InterestRateStorage, OperationKind, Position,
     ProtocolError, ProtocolEvent, ReentrancyGuard, RiskConfigStorage, StateHelper,
+    TransferEnforcer, UserManager,
 };
-use soroban_sdk::{contracterror, contracttype, Address, Env, String};
+use soroban_sdk::{contracterror, contracttype, Address, Env, String, Symbol};
 
 /// Deposit-specific errors
 #[contracterror]
@@ -64,15 +65,11 @@ impl DepositModule {
     /// Deposit collateral into the protocol
     pub fn deposit_collateral(
         env: &Env,
-        depositor: &String,
+        depositor: &Address,
         amount: i128,
     ) -> Result<(), ProtocolError> {
         ReentrancyGuard::enter(env)?;
         let result = (|| -> Result<(), ProtocolError> {
-            // Input validation
-            if depositor.is_empty() {
-                return Err(DepositError::InvalidAddress.into());
-            }
             if amount <= 0 {
                 return Err(DepositError::InvalidAmount.into());
             }
@@ -85,12 +82,14 @@ impl DepositModule {
                 return Err(DepositError::ProtocolPaused.into());
             }
 
-            let depositor_addr = Address::from_string(depositor);
+            UserManager::ensure_operation_allowed(env, depositor, OperationKind::Deposit, amount)?;
+
+            TransferEnforcer::transfer_in(env, depositor, amount, Symbol::new(env, "deposit"))?;
 
             // Load user position with error handling
-            let mut position = match StateHelper::get_position(env, &depositor_addr) {
+            let mut position = match StateHelper::get_position(env, depositor) {
                 Some(pos) => pos,
-                None => Position::new(depositor_addr.clone(), 0, 0),
+                None => Position::new(depositor.clone(), 0, 0),
             };
 
             // Accrue interest before updating position
@@ -116,7 +115,7 @@ impl DepositModule {
             };
 
             ProtocolEvent::PositionUpdated(
-                depositor_addr.clone(),
+                depositor.clone(),
                 position.collateral,
                 position.debt,
                 collateral_ratio,
@@ -124,7 +123,8 @@ impl DepositModule {
             .emit(env);
 
             // Analytics
-            AnalyticsModule::record_activity(env, &depositor_addr, "deposit", amount, None)?;
+            AnalyticsModule::record_activity(env, depositor, "deposit", amount, None)?;
+            UserManager::record_activity(env, depositor, OperationKind::Deposit, amount)?;
 
             Ok(())
         })();

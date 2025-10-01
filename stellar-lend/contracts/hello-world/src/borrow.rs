@@ -5,8 +5,9 @@ use crate::analytics::AnalyticsModule;
 use crate::{
     EmergencyManager, InterestRateManager, InterestRateStorage, OperationKind, ProtocolConfig,
     ProtocolError, ProtocolEvent, ReentrancyGuard, RiskConfigStorage, StateHelper,
+    TransferEnforcer, UserManager,
 };
-use soroban_sdk::{contracterror, contracttype, Address, Env, String};
+use soroban_sdk::{contracterror, contracttype, Address, Env, String, Symbol};
 
 /// Borrow-specific errors
 #[contracterror]
@@ -69,13 +70,9 @@ pub struct BorrowModule;
 
 impl BorrowModule {
     /// Borrow assets from the protocol
-    pub fn borrow(env: &Env, borrower: &String, amount: i128) -> Result<(), ProtocolError> {
+    pub fn borrow(env: &Env, borrower: &Address, amount: i128) -> Result<(), ProtocolError> {
         ReentrancyGuard::enter(env)?;
         let result = (|| -> Result<(), ProtocolError> {
-            // Input validation
-            if borrower.is_empty() {
-                return Err(BorrowError::InvalidAddress.into());
-            }
             if amount <= 0 {
                 return Err(BorrowError::InvalidAmount.into());
             }
@@ -88,10 +85,10 @@ impl BorrowModule {
                 return Err(BorrowError::ProtocolPaused.into());
             }
 
-            let borrower_addr = Address::from_string(borrower);
+            UserManager::ensure_operation_allowed(env, borrower, OperationKind::Borrow, amount)?;
 
             // Load user position
-            let mut position = match StateHelper::get_position(env, &borrower_addr) {
+            let mut position = match StateHelper::get_position(env, borrower) {
                 Some(pos) => pos,
                 None => return Err(BorrowError::PositionNotFound.into()),
             };
@@ -119,12 +116,13 @@ impl BorrowModule {
             }
 
             // Update position
+            TransferEnforcer::transfer_out(env, borrower, amount, Symbol::new(env, "borrow"))?;
             position.debt = new_debt;
             StateHelper::save_position(env, &position);
 
             // Emit event
             ProtocolEvent::PositionUpdated(
-                borrower_addr.clone(),
+                borrower.clone(),
                 position.collateral,
                 position.debt,
                 collateral_ratio,
@@ -132,7 +130,8 @@ impl BorrowModule {
             .emit(env);
 
             // Analytics
-            AnalyticsModule::record_activity(env, &borrower_addr, "borrow", amount, None)?;
+            AnalyticsModule::record_activity(env, borrower, "borrow", amount, None)?;
+            UserManager::record_activity(env, borrower, OperationKind::Borrow, amount)?;
 
             Ok(())
         })();
