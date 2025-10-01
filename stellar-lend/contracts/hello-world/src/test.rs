@@ -1,7 +1,7 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{testutils::Address as TestAddress, Address, Env, String};
+use soroban_sdk::{testutils::Address as TestAddress, Address, Env, String, Symbol};
 
 /// Test utilities for creating test environments and addresses
 pub struct TestUtils;
@@ -446,6 +446,41 @@ fn test_withdraw_success() {
         let position = Contract::get_position(env.clone(), user.to_string()).unwrap();
         assert_eq!(position.0, 1000); // collateral
         assert_eq!(position.1, 0); // debt
+    });
+}
+
+#[test]
+fn test_event_summary_updates() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = TestUtils::create_admin_address(&env);
+    let user = TestUtils::create_user_address(&env, 0);
+
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+        TestUtils::verify_user(&env, &admin, &user);
+
+        Contract::deposit_collateral(env.clone(), user.to_string(), 1200).unwrap();
+        Contract::withdraw(env.clone(), user.to_string(), 200).unwrap();
+
+        let summary = Contract::get_event_summary(env.clone()).unwrap();
+        let totals = summary.totals;
+        let key = Symbol::new(&env, "position_updated");
+        let aggregate = totals.get(key).unwrap();
+        assert!(aggregate.count > 0);
+
+        let recent_types = Contract::get_recent_event_types(env.clone()).unwrap();
+        assert!(recent_types.len() > 0);
+
+        let events =
+            Contract::get_events_for_type(env.clone(), Symbol::new(&env, "position_updated"), 5)
+                .unwrap();
+        assert!(events.len() > 0);
+
+        let aggregates = Contract::get_event_aggregates(env.clone()).unwrap();
+        assert!(aggregates.len() >= totals.len());
     });
 }
 
