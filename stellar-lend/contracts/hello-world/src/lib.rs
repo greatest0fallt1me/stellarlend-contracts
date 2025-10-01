@@ -1734,6 +1734,24 @@ impl ReentrancyGuard {
     }
 }
 
+/// RAII helper to ensure reentrancy guard exit on scope drop
+pub struct ReentrancyScope<'a> {
+    env: &'a Env,
+}
+
+impl<'a> ReentrancyScope<'a> {
+    pub fn enter(env: &'a Env) -> Result<Self, ProtocolError> {
+        ReentrancyGuard::enter(env)?;
+        Ok(Self { env })
+    }
+}
+
+impl<'a> Drop for ReentrancyScope<'a> {
+    fn drop(&mut self) {
+        ReentrancyGuard::exit(self.env);
+    }
+}
+
 /// The main contract struct for StellarLend
 #[contract]
 pub struct Contract;
@@ -2898,6 +2916,7 @@ pub fn set_risk_params(
     close_factor: i128,
     liquidation_incentive: i128,
 ) -> Result<(), ProtocolError> {
+    let _guard = ReentrancyScope::enter(&env)?;
     let caller_addr = Address::from_string(&caller);
     ProtocolConfig::require_admin(&env, &caller_addr)?;
 
@@ -2919,6 +2938,7 @@ pub fn set_pause_switches(
     pause_withdraw: bool,
     pause_liquidate: bool,
 ) -> Result<(), ProtocolError> {
+    let _guard = ReentrancyScope::enter(&env)?;
     let caller_addr = Address::from_string(&caller);
     ProtocolConfig::require_admin(&env, &caller_addr)?;
 
@@ -2985,6 +3005,7 @@ pub fn set_emergency_manager(
     manager: String,
     enabled: bool,
 ) -> Result<(), ProtocolError> {
+    let _guard = ReentrancyScope::enter(&env)?;
     let caller_addr = Address::from_string(&caller);
     let manager_addr = Address::from_string(&manager);
     EmergencyManager::set_manager(&env, &caller_addr, &manager_addr, enabled)
@@ -2995,6 +3016,7 @@ pub fn trigger_emergency_pause(
     caller: String,
     reason: Option<String>,
 ) -> Result<(), ProtocolError> {
+    let _guard = ReentrancyScope::enter(&env)?;
     let caller_addr = Address::from_string(&caller);
     EmergencyManager::pause(&env, &caller_addr, reason)
 }
@@ -3004,16 +3026,19 @@ pub fn enter_recovery_mode(
     caller: String,
     plan: Option<String>,
 ) -> Result<(), ProtocolError> {
+    let _guard = ReentrancyScope::enter(&env)?;
     let caller_addr = Address::from_string(&caller);
     EmergencyManager::enter_recovery(&env, &caller_addr, plan)
 }
 
 pub fn resume_operations(env: Env, caller: String) -> Result<(), ProtocolError> {
+    let _guard = ReentrancyScope::enter(&env)?;
     let caller_addr = Address::from_string(&caller);
     EmergencyManager::resume(&env, &caller_addr)
 }
 
 pub fn record_recovery_step(env: Env, caller: String, step: String) -> Result<(), ProtocolError> {
+    let _guard = ReentrancyScope::enter(&env)?;
     let caller_addr = Address::from_string(&caller);
     EmergencyManager::record_recovery_step(&env, &caller_addr, step)
 }
@@ -3024,11 +3049,13 @@ pub fn queue_emergency_param_update(
     parameter: Symbol,
     value: i128,
 ) -> Result<(), ProtocolError> {
+    let _guard = ReentrancyScope::enter(&env)?;
     let caller_addr = Address::from_string(&caller);
     EmergencyManager::queue_param_update(&env, &caller_addr, parameter, value)
 }
 
 pub fn apply_emergency_param_updates(env: Env, caller: String) -> Result<(), ProtocolError> {
+    let _guard = ReentrancyScope::enter(&env)?;
     let caller_addr = Address::from_string(&caller);
     EmergencyManager::apply_param_updates(&env, &caller_addr)
 }
@@ -3040,6 +3067,7 @@ pub fn adjust_emergency_fund(
     delta: i128,
     reserve_delta: i128,
 ) -> Result<(), ProtocolError> {
+    let _guard = ReentrancyScope::enter(&env)?;
     let caller_addr = Address::from_string(&caller);
     EmergencyManager::adjust_fund(&env, &caller_addr, token, delta, reserve_delta)
 }
@@ -3082,11 +3110,13 @@ pub fn register_token_asset(
     key: Symbol,
     token: Address,
 ) -> Result<(), ProtocolError> {
+    let _guard = ReentrancyScope::enter(&env)?;
     let caller_addr = Address::from_string(&caller);
     TokenRegistry::set_asset(&env, &caller_addr, key, token)
 }
 
 pub fn set_primary_asset(env: Env, caller: String, token: Address) -> Result<(), ProtocolError> {
+    let _guard = ReentrancyScope::enter(&env)?;
     let caller_addr = Address::from_string(&caller);
     TokenRegistry::set_primary_asset(&env, &caller_addr, token)
 }
@@ -3101,6 +3131,7 @@ pub fn set_user_role(
     user: Address,
     role: UserRole,
 ) -> Result<(), ProtocolError> {
+    let _guard = ReentrancyScope::enter(&env)?;
     let caller_addr = Address::from_string(&caller);
     UserManager::set_role(&env, &caller_addr, &user, role)
 }
@@ -3111,6 +3142,7 @@ pub fn set_user_verification(
     user: Address,
     status: VerificationStatus,
 ) -> Result<(), ProtocolError> {
+    let _guard = ReentrancyScope::enter(&env)?;
     let caller_addr = Address::from_string(&caller);
     UserManager::set_verification_status(&env, &caller_addr, &user, status)
 }
@@ -3124,6 +3156,7 @@ pub fn set_user_limits(
     max_withdraw: i128,
     daily_limit: i128,
 ) -> Result<(), ProtocolError> {
+    let _guard = ReentrancyScope::enter(&env)?;
     let caller_addr = Address::from_string(&caller);
     UserManager::set_limits(
         &env,
@@ -3137,11 +3170,13 @@ pub fn set_user_limits(
 }
 
 pub fn freeze_user(env: Env, caller: String, user: Address) -> Result<(), ProtocolError> {
+    let _guard = ReentrancyScope::enter(&env)?;
     let caller_addr = Address::from_string(&caller);
     UserManager::freeze_user(&env, &caller_addr, &user)
 }
 
 pub fn unfreeze_user(env: Env, caller: String, user: Address) -> Result<(), ProtocolError> {
+    let _guard = ReentrancyScope::enter(&env)?;
     let caller_addr = Address::from_string(&caller);
     UserManager::unfreeze_user(&env, &caller_addr, &user)
 }
@@ -3154,6 +3189,7 @@ pub fn get_user_profile(env: Env, user: Address) -> Result<UserProfile, Protocol
 impl Contract {
     /// Initializes the contract and sets the admin address
     pub fn initialize(env: Env, admin: String) -> Result<(), ProtocolError> {
+        let _guard = ReentrancyScope::enter(&env)?;
         let admin_addr = Address::from_string(&admin);
         if env
             .storage()

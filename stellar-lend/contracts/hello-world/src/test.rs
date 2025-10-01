@@ -5,6 +5,8 @@ use soroban_sdk::{
     contract, contractimpl, testutils::Address as TestAddress, Address, Env, Map, String, Symbol,
 };
 
+use crate::{FlashLoan, ProtocolError, ReentrancyGuard};
+
 #[contract]
 pub struct MockToken;
 
@@ -67,6 +69,21 @@ impl MockToken {
         }
         balances.set(addr.clone(), current - amount);
         Self::save_balances(env, &balances);
+    }
+}
+
+#[contract]
+pub struct FlashLoanReceiver;
+
+#[contractimpl]
+impl FlashLoanReceiver {
+    pub fn on_flash_loan(
+        _env: Env,
+        _asset: Address,
+        _amount: i128,
+        _fee: i128,
+        _initiator: Address,
+    ) {
     }
 }
 
@@ -551,6 +568,22 @@ fn test_event_summary_updates() {
 }
 
 #[test]
+fn test_deposit_reentrancy_blocked() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let user = TestUtils::create_user_address(&env, 0);
+    let (_admin, contract_id, _token) = TestUtils::setup_contract_with_token(&env, &[user.clone()]);
+
+    env.as_contract(&contract_id, || {
+        ReentrancyGuard::enter(&env).unwrap();
+        let result = Contract::deposit_collateral(env.clone(), user.to_string(), 100);
+        ReentrancyGuard::exit(&env);
+        assert_eq!(Err(ProtocolError::ReentrancyDetected), result);
+    });
+}
+
+#[test]
 fn test_withdraw_insufficient_collateral() {
     let env = Env::default();
     env.mock_all_auths();
@@ -653,6 +686,24 @@ fn test_liquidate_not_eligible() {
             result.unwrap_err(),
             ProtocolError::NotEligibleForLiquidation
         );
+    });
+}
+
+#[test]
+fn test_flash_loan_reentrancy_blocked() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let initiator = TestUtils::create_user_address(&env, 0);
+    let (_admin, contract_id, token_id) =
+        TestUtils::setup_contract_with_token(&env, &[initiator.clone()]);
+    let receiver = env.register_contract(None, FlashLoanReceiver);
+
+    env.as_contract(&contract_id, || {
+        ReentrancyGuard::enter(&env).unwrap();
+        let result = FlashLoan::execute(&env, &initiator, &token_id, 100, 10, &receiver);
+        ReentrancyGuard::exit(&env);
+        assert_eq!(Err(ProtocolError::ReentrancyDetected), result);
     });
 }
 
