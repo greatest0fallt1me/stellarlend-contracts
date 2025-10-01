@@ -438,6 +438,14 @@
                       },
                       {
                         "key": {
+                          "symbol": "reentrancy"
+                        },
+                        "val": {
+                          "bool": false
+                        }
+                      },
+                      {
+                        "key": {
                           "symbol": "risk_config"
                         },
                         "val": {
