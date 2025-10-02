@@ -112,8 +112,8 @@ impl LiquidationModule {
                 return Err(LiquidationError::ProtocolPaused.into());
             }
 
-            let liquidator_addr = Address::from_string(liquidator);
-            let user_addr = Address::from_string(user);
+            let liquidator_addr = crate::AddressHelper::require_valid_address(env, liquidator)?;
+            let user_addr = crate::AddressHelper::require_valid_address(env, user)?;
 
             // Load user position
             let mut position = match StateHelper::get_position(env, &user_addr) {
