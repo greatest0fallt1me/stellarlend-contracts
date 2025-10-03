@@ -561,3 +561,189 @@ impl AMMRegistry {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use soroban_sdk::{testutils::Address as _, Address, Env};
+    use crate::Contract;
+
+    fn create_test_env() -> (Env, Address) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(Contract, ());
+        (env, contract_id)
+    }
+
+    #[test]
+    fn test_register_amm_pair() {
+        let (env, contract_id) = create_test_env();
+
+        let asset_a = Address::generate(&env);
+        let asset_b = Address::generate(&env);
+        let amm_address = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            // Register pair
+            let result = AMMRegistry::register_pair(&env, asset_a.clone(), asset_b.clone(), amm_address.clone(), None);
+            assert!(result.is_ok());
+
+            // Verify pair is registered
+            assert!(AMMRegistry::is_pair_registered(&env, &asset_a, &asset_b));
+
+            // Verify pair count
+            assert_eq!(AMMRegistry::get_total_pairs(&env), 1);
+        });
+    }
+
+    #[test]
+    fn test_register_duplicate_pair_fails() {
+        let (env, contract_id) = create_test_env();
+
+        let asset_a = Address::generate(&env);
+        let asset_b = Address::generate(&env);
+        let amm_address = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            // Register pair first time
+            let result = AMMRegistry::register_pair(&env, asset_a.clone(), asset_b.clone(), amm_address.clone(), None);
+            assert!(result.is_ok());
+
+            // Try to register again - should fail
+            let result = AMMRegistry::register_pair(&env, asset_a.clone(), asset_b.clone(), amm_address.clone(), None);
+            assert!(result.is_err());
+        });
+    }
+
+    #[test]
+    fn test_pair_normalization() {
+        let (env, contract_id) = create_test_env();
+
+        let asset_a = Address::generate(&env);
+        let asset_b = Address::generate(&env);
+        let amm_address = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            // Register in one order
+            let result = AMMRegistry::register_pair(&env, asset_a.clone(), asset_b.clone(), amm_address.clone(), None);
+            assert!(result.is_ok());
+
+            // Check in reverse order - should find the same pair
+            assert!(AMMRegistry::is_pair_registered(&env, &asset_b, &asset_a));
+
+            // Get pair info in reverse order
+            let pair_info = AMMRegistry::get_pair_info(&env, &asset_b, &asset_a);
+            assert!(pair_info.is_ok());
+        });
+    }
+
+    #[test]
+    fn test_execute_swap() {
+        let (env, contract_id) = create_test_env();
+
+        let user = Address::generate(&env);
+        let asset_in = Address::generate(&env);
+        let asset_out = Address::generate(&env);
+        let amm_address = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            // Register pair
+            AMMRegistry::register_pair(&env, asset_in.clone(), asset_out.clone(), amm_address, None).unwrap();
+
+            // Create swap params
+            let params = SwapParams::new(
+                user.clone(),
+                asset_in.clone(),
+                asset_out.clone(),
+                1_000_000,
+                900_000,
+            );
+
+            // Execute swap
+            let result = AMMRegistry::execute_swap(&env, params);
+            assert!(result.is_ok());
+
+            let swap_result = result.unwrap();
+            assert_eq!(swap_result.amount_in, 1_000_000);
+            assert!(swap_result.amount_out > 0);
+            assert!(swap_result.fee_paid > 0);
+        });
+    }
+
+    #[test]
+    fn test_liquidation_swap_hook() {
+        let (env, contract_id) = create_test_env();
+
+        let liquidator = Address::generate(&env);
+        let collateral_asset = Address::generate(&env);
+        let debt_asset = Address::generate(&env);
+        let amm_address = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            // Register pair
+            AMMRegistry::register_pair(
+                &env,
+                collateral_asset.clone(),
+                debt_asset.clone(),
+                amm_address,
+                None,
+            ).unwrap();
+
+            // Create a position for the liquidator
+            let position = Position::new(liquidator.clone(), 2_000_000, 1_000_000);
+            StateHelper::save_position(&env, &position);
+
+            // Execute liquidation swap hook
+            let result = AMMRegistry::liquidation_swap_hook(
+                &env,
+                &liquidator,
+                &collateral_asset,
+                &debt_asset,
+                500_000,
+                400_000,
+            );
+
+            assert!(result.is_ok());
+            let swap_result = result.unwrap();
+            assert_eq!(swap_result.amount_in, 500_000);
+            assert!(swap_result.amount_out >= 400_000);
+
+            // Verify position was updated
+            let updated_position = StateHelper::get_position(&env, &liquidator).unwrap();
+            assert_eq!(updated_position.collateral, 2_000_000 - 500_000);
+            assert_eq!(updated_position.debt, 1_000_000 - swap_result.amount_out);
+        });
+    }
+
+    #[test]
+    fn test_swap_history_tracking() {
+        let (env, contract_id) = create_test_env();
+
+        let user = Address::generate(&env);
+        let asset_in = Address::generate(&env);
+        let asset_out = Address::generate(&env);
+        let amm_address = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            // Register pair
+            AMMRegistry::register_pair(&env, asset_in.clone(), asset_out.clone(), amm_address, None).unwrap();
+
+            // Execute multiple swaps
+            for _ in 0..3 {
+                let params = SwapParams::new(
+                    user.clone(),
+                    asset_in.clone(),
+                    asset_out.clone(),
+                    1_000_000,
+                    900_000,
+                );
+
+                let result = AMMRegistry::execute_swap(&env, params);
+                assert!(result.is_ok());
+            }
+
+            // Get swap history
+            let history = AMMRegistry::get_swap_history(&env);
+            assert_eq!(history.len(), 3);
+        });
+    }
+}
