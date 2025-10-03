@@ -7,6 +7,7 @@
 extern crate alloc;
 
 use alloc::format;
+use alloc::string::ToString;
 use soroban_sdk::token::TokenClient;
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, Address, Env, Map, String, Symbol, Vec,
@@ -3540,6 +3541,13 @@ impl Contract {
         analytics::AnalyticsModule::calculate_risk_analytics(&env)
     }
 
+    pub fn get_recent_activity(
+        env: Env,
+        limit: u32,
+    ) -> Result<analytics::ActivityFeed, ProtocolError> {
+        Ok(analytics::AnalyticsModule::get_recent_activity(&env, limit))
+    }
+
     pub fn update_performance_metrics(
         env: Env,
         processing_time: i128,
@@ -3551,14 +3559,19 @@ impl Contract {
     pub fn record_activity(
         env: Env,
         user: String,
-        _activity_type: String,
+        activity_type: String,
         amount: i128,
         asset: Option<Address>,
     ) -> Result<(), ProtocolError> {
         let user_addr = AddressHelper::require_valid_address(&env, &user)?;
-        // For now, we'll use a placeholder string since soroban_sdk::String doesn't implement Display
-        // In a real implementation, you might want to modify the analytics module to accept soroban_sdk::String
-        analytics::AnalyticsModule::record_activity(&env, &user_addr, "activity", amount, asset)
+        let activity = activity_type.to_string();
+        analytics::AnalyticsModule::record_activity(
+            &env,
+            &user_addr,
+            activity.as_str(),
+            amount,
+            asset,
+        )
     }
 
     // ==================== AMM Registry and Swap Hooks ====================
@@ -3648,6 +3661,7 @@ impl Contract {
     ///
     /// # Returns
     /// * Swap result with actual amounts swapped
+    /// awdadaw
     /// * Updates position with adjusted collateral and debt
     pub fn liquidation_swap_hook(
         env: Env,
