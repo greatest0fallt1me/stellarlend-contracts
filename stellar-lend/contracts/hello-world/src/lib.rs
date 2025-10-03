@@ -28,6 +28,7 @@ static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 mod test;
 
 // Core protocol modules
+mod amm;
 mod analytics;
 mod borrow;
 mod deposit;
@@ -3508,5 +3509,216 @@ impl Contract {
         // For now, we'll use a placeholder string since soroban_sdk::String doesn't implement Display
         // In a real implementation, you might want to modify the analytics module to accept soroban_sdk::String
         analytics::AnalyticsModule::record_activity(&env, &user_addr, "activity", amount, asset)
+    }
+
+    // ==================== AMM Registry and Swap Hooks ====================
+
+    /// Register a new AMM asset pair for swap operations
+    ///
+    /// # Arguments
+    /// * `admin` - Admin address (must match contract admin)
+    /// * `asset_a` - First asset address
+    /// * `asset_b` - Second asset address
+    /// * `amm_address` - AMM contract address managing this pair
+    /// * `pool_address` - Optional liquidity pool address
+    ///
+    /// # Returns
+    /// * `Ok(())` on successful registration
+    /// * `Err(ProtocolError)` if pair already exists or invalid parameters
+    pub fn register_amm_pair(
+        env: Env,
+        admin: Address,
+        asset_a: Address,
+        asset_b: Address,
+        amm_address: Address,
+        pool_address: Option<Address>,
+    ) -> Result<(), ProtocolError> {
+        let _guard = ReentrancyScope::enter(&env)?;
+
+        // Verify admin privileges
+        ProtocolConfig::require_admin(&env, &admin)?;
+
+        amm::AMMRegistry::register_pair(&env, asset_a, asset_b, amm_address, pool_address)
+    }
+
+    /// Check if an AMM pair is registered and active
+    ///
+    /// # Arguments
+    /// * `asset_a` - First asset address
+    /// * `asset_b` - Second asset address
+    ///
+    /// # Returns
+    /// * `true` if pair is registered and active, `false` otherwise
+    pub fn is_amm_pair_registered(
+        env: Env,
+        asset_a: Address,
+        asset_b: Address,
+    ) -> bool {
+        amm::AMMRegistry::is_pair_registered(&env, &asset_a, &asset_b)
+    }
+
+    /// Get information about a registered AMM pair
+    ///
+    /// # Arguments
+    /// * `asset_a` - First asset address
+    /// * `asset_b` - Second asset address
+    ///
+    /// # Returns
+    /// * Asset pair information if registered
+    /// * Error if pair not found
+    pub fn get_amm_pair_info(
+        env: Env,
+        asset_a: Address,
+        asset_b: Address,
+    ) -> Result<amm::AssetPair, ProtocolError> {
+        amm::AMMRegistry::get_pair_info(&env, &asset_a, &asset_b)
+    }
+
+    /// Execute a swap through registered AMM
+    ///
+    /// # Arguments
+    /// * `params` - Swap parameters including assets, amounts, and slippage tolerance
+    ///
+    /// # Returns
+    /// * Swap result with amounts and exchange rate
+    /// * Error if swap fails or parameters invalid
+    pub fn execute_amm_swap(
+        env: Env,
+        params: amm::SwapParams,
+    ) -> Result<amm::SwapResult, ProtocolError> {
+        let _guard = ReentrancyScope::enter(&env)?;
+        amm::AMMRegistry::execute_swap(&env, params)
+    }
+
+    /// Swap hook for liquidation flows
+    /// Automatically swaps seized collateral to debt asset during liquidation
+    ///
+    /// # Arguments
+    /// * `liquidator` - Address of the liquidator
+    /// * `collateral_asset` - Asset seized as collateral
+    /// * `debt_asset` - Asset to repay debt
+    /// * `collateral_amount` - Amount of collateral to swap
+    /// * `min_debt_amount` - Minimum debt amount expected from swap
+    ///
+    /// # Returns
+    /// * Swap result with actual amounts swapped
+    /// * Updates position with adjusted collateral and debt
+    pub fn liquidation_swap_hook(
+        env: Env,
+        liquidator: Address,
+        collateral_asset: Address,
+        debt_asset: Address,
+        collateral_amount: i128,
+        min_debt_amount: i128,
+    ) -> Result<amm::SwapResult, ProtocolError> {
+        let _guard = ReentrancyScope::enter(&env)?;
+
+        amm::AMMRegistry::liquidation_swap_hook(
+            &env,
+            &liquidator,
+            &collateral_asset,
+            &debt_asset,
+            collateral_amount,
+            min_debt_amount,
+        )
+    }
+
+    /// Swap hook for deleveraging flows
+    /// Allows users to reduce debt by swapping assets
+    ///
+    /// # Arguments
+    /// * `user` - User deleveraging their position
+    /// * `asset_to_sell` - Asset to sell
+    /// * `debt_asset` - Debt asset to repay
+    /// * `sell_amount` - Amount to sell
+    /// * `min_debt_repayment` - Minimum debt repayment expected
+    ///
+    /// # Returns
+    /// * Swap result with actual amounts
+    /// * Updates position with reduced debt
+    pub fn deleverage_swap_hook(
+        env: Env,
+        user: Address,
+        asset_to_sell: Address,
+        debt_asset: Address,
+        sell_amount: i128,
+        min_debt_repayment: i128,
+    ) -> Result<amm::SwapResult, ProtocolError> {
+        let _guard = ReentrancyScope::enter(&env)?;
+
+        amm::AMMRegistry::deleverage_swap_hook(
+            &env,
+            &user,
+            &asset_to_sell,
+            &debt_asset,
+            sell_amount,
+            min_debt_repayment,
+        )
+    }
+
+    /// Get total number of registered AMM pairs
+    ///
+    /// # Returns
+    /// * Count of registered pairs
+    pub fn get_total_amm_pairs(env: Env) -> i128 {
+        amm::AMMRegistry::get_total_pairs(&env)
+    }
+
+    /// Get all registered AMM pairs
+    ///
+    /// # Returns
+    /// * Vector of all registered asset pairs
+    pub fn get_all_amm_pairs(env: Env) -> Vec<amm::AssetPair> {
+        amm::AMMRegistry::get_all_pairs(&env)
+    }
+
+    /// Get AMM swap history for analytics
+    ///
+    /// # Returns
+    /// * Vector of recent swap results (last 100)
+    pub fn get_amm_swap_history(env: Env) -> Vec<amm::SwapResult> {
+        amm::AMMRegistry::get_swap_history(&env)
+    }
+
+    /// Deactivate an AMM pair
+    /// Admin-only function to disable a pair
+    ///
+    /// # Arguments
+    /// * `admin` - Admin address (must match contract admin)
+    /// * `asset_a` - First asset address
+    /// * `asset_b` - Second asset address
+    pub fn deactivate_amm_pair(
+        env: Env,
+        admin: Address,
+        asset_a: Address,
+        asset_b: Address,
+    ) -> Result<(), ProtocolError> {
+        let _guard = ReentrancyScope::enter(&env)?;
+
+        // Verify admin privileges
+        ProtocolConfig::require_admin(&env, &admin)?;
+
+        amm::AMMRegistry::deactivate_pair(&env, &asset_a, &asset_b)
+    }
+
+    /// Reactivate an AMM pair
+    /// Admin-only function to re-enable a previously deactivated pair
+    ///
+    /// # Arguments
+    /// * `admin` - Admin address (must match contract admin)
+    /// * `asset_a` - First asset address
+    /// * `asset_b` - Second asset address
+    pub fn activate_amm_pair(
+        env: Env,
+        admin: Address,
+        asset_a: Address,
+        asset_b: Address,
+    ) -> Result<(), ProtocolError> {
+        let _guard = ReentrancyScope::enter(&env)?;
+
+        // Verify admin privileges
+        ProtocolConfig::require_admin(&env, &admin)?;
+
+        amm::AMMRegistry::activate_pair(&env, &asset_a, &asset_b)
     }
 }
