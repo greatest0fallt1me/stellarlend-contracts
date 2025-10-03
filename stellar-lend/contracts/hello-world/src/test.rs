@@ -2,7 +2,10 @@ use super::*;
 use soroban_sdk::{contract, contractimpl, testutils::Ledger, Address, Env, Map, String, Symbol};
 
 use crate::flash_loan::FlashLoan;
-use crate::{ProtocolError, ReentrancyGuard};
+use crate::{
+    analytics::{ActivityLogEntry, AnalyticsStorage},
+    ProtocolError, ReentrancyGuard,
+};
 
 #[contract]
 pub struct MockToken;
@@ -904,6 +907,51 @@ fn test_recent_activity_feed_ordering_and_limit() {
         let second = feed.entries.get(1).unwrap();
         assert_eq!(second.activity_type.to_string(), "borrow");
         assert_eq!(second.timestamp, 200);
+    });
+}
+
+#[test]
+fn test_recent_activity_feed_edge_limits() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let user = TestUtils::create_user_address(&env, 0);
+
+    let (admin, contract_id, _token) = TestUtils::setup_contract_with_token(&env, &[user.clone()]);
+    env.as_contract(&contract_id, || {
+        TestUtils::verify_user(&env, &admin, &user);
+
+        let activity = String::from_str(&env, "deposit");
+        let metadata = Map::new(&env);
+        let mut log = soroban_sdk::Vec::new(&env);
+        for i in 0..=1_000u32 {
+            log.push_back(ActivityLogEntry {
+                timestamp: 1_000 + i as u64,
+                user: user.clone(),
+                activity_type: activity.clone(),
+                amount: i as i128,
+                asset: None,
+                metadata: metadata.clone(),
+            });
+        }
+        AnalyticsStorage::put_activity_log(&env, &log);
+
+        env.ledger().with_mut(|l| l.timestamp = 5_000);
+        let zero_feed = Contract::get_recent_activity(env.clone(), 0).unwrap();
+        assert_eq!(zero_feed.entries.len(), 0);
+        assert_eq!(zero_feed.total_available, 1_001);
+        assert_eq!(zero_feed.generated_at, 5_000);
+
+        env.ledger().with_mut(|l| l.timestamp = 6_000);
+        let wide_feed = Contract::get_recent_activity(env.clone(), 5_000).unwrap();
+        assert_eq!(wide_feed.entries.len(), 1_000);
+        assert_eq!(wide_feed.total_available, 1_001);
+        assert_eq!(wide_feed.generated_at, 6_000);
+
+        let newest = wide_feed.entries.get(0).unwrap();
+        assert_eq!(newest.timestamp, 1_000 + 1_000);
+        let oldest = wide_feed.entries.get(999).unwrap();
+        assert_eq!(oldest.timestamp, 1_000 + 1);
     });
 }
 
