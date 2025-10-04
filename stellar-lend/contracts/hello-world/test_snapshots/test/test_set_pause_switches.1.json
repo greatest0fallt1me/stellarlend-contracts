@@ -50,6 +50,206 @@
                       },
                       {
                         "key": {
+                          "symbol": "event_aggregates"
+                        },
+                        "val": {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "misc_event"
+                              },
+                              "val": {
+                                "map": [
+                                  {
+                                    "key": {
+                                      "symbol": "count"
+                                    },
+                                    "val": {
+                                      "u64": 1
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "event_type"
+                                    },
+                                    "val": {
+                                      "symbol": "misc_event"
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "last_timestamp"
+                                    },
+                                    "val": {
+                                      "u64": 0
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "total_amount"
+                                    },
+                                    "val": {
+                                      "i128": {
+                                        "hi": 0,
+                                        "lo": 0
+                                      }
+                                    }
+                                  }
+                                ]
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "event_logs"
+                        },
+                        "val": {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "misc_event"
+                              },
+                              "val": {
+                                "vec": [
+                                  {
+                                    "map": [
+                                      {
+                                        "key": {
+                                          "symbol": "amount"
+                                        },
+                                        "val": {
+                                          "i128": {
+                                            "hi": 0,
+                                            "lo": 0
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "key": {
+                                          "symbol": "asset"
+                                        },
+                                        "val": "void"
+                                      },
+                                      {
+                                        "key": {
+                                          "symbol": "event_type"
+                                        },
+                                        "val": {
+                                          "symbol": "misc_event"
+                                        }
+                                      },
+                                      {
+                                        "key": {
+                                          "symbol": "timestamp"
+                                        },
+                                        "val": {
+                                          "u64": 0
+                                        }
+                                      },
+                                      {
+                                        "key": {
+                                          "symbol": "topics"
+                                        },
+                                        "val": {
+                                          "vec": [
+                                            {
+                                              "symbol": "misc_event"
+                                            }
+                                          ]
+                                        }
+                                      },
+                                      {
+                                        "key": {
+                                          "symbol": "user"
+                                        },
+                                        "val": "void"
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "event_summary"
+                        },
+                        "val": {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "recent_types"
+                              },
+                              "val": {
+                                "vec": [
+                                  {
+                                    "symbol": "misc_event"
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "totals"
+                              },
+                              "val": {
+                                "map": [
+                                  {
+                                    "key": {
+                                      "symbol": "misc_event"
+                                    },
+                                    "val": {
+                                      "map": [
+                                        {
+                                          "key": {
+                                            "symbol": "count"
+                                          },
+                                          "val": {
+                                            "u64": 1
+                                          }
+                                        },
+                                        {
+                                          "key": {
+                                            "symbol": "event_type"
+                                          },
+                                          "val": {
+                                            "symbol": "misc_event"
+                                          }
+                                        },
+                                        {
+                                          "key": {
+                                            "symbol": "last_timestamp"
+                                          },
+                                          "val": {
+                                            "u64": 0
+                                          }
+                                        },
+                                        {
+                                          "key": {
+                                            "symbol": "total_amount"
+                                          },
+                                          "val": {
+                                            "i128": {
+                                              "hi": 0,
+                                              "lo": 0
+                                            }
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  }
+                                ]
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
                           "symbol": "interest_config"
                         },
                         "val": {
@@ -238,6 +438,14 @@
                       },
                       {
                         "key": {
+                          "symbol": "reentrancy"
+                        },
+                        "val": {
+                          "bool": false
+                        }
+                      },
+                      {
+                        "key": {
                           "symbol": "risk_config"
                         },
                         "val": {
@@ -306,6 +514,153 @@
                             }
                           ]
                         }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "Profile"
+                            },
+                            {
+                              "address": "GCAZYE3EB54VKP3UQBX3H73VQO3SIWTZNR7NJQKJFZZ6XLADWA4C3SOC"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "activity_score"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 0
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "is_frozen"
+                              },
+                              "val": {
+                                "bool": false
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "last_active"
+                              },
+                              "val": {
+                                "u64": 0
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "limits"
+                              },
+                              "val": {
+                                "map": [
+                                  {
+                                    "key": {
+                                      "symbol": "daily_limit"
+                                    },
+                                    "val": {
+                                      "i128": {
+                                        "hi": 9223372036854775807,
+                                        "lo": 18446744073709551615
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "daily_spent"
+                                    },
+                                    "val": {
+                                      "i128": {
+                                        "hi": 0,
+                                        "lo": 0
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "daily_window_start"
+                                    },
+                                    "val": {
+                                      "u64": 0
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "max_borrow"
+                                    },
+                                    "val": {
+                                      "i128": {
+                                        "hi": 9223372036854775807,
+                                        "lo": 18446744073709551615
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "max_deposit"
+                                    },
+                                    "val": {
+                                      "i128": {
+                                        "hi": 9223372036854775807,
+                                        "lo": 18446744073709551615
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "max_withdraw"
+                                    },
+                                    "val": {
+                                      "i128": {
+                                        "hi": 9223372036854775807,
+                                        "lo": 18446744073709551615
+                                      }
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "role"
+                              },
+                              "val": {
+                                "vec": [
+                                  {
+                                    "symbol": "Admin"
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "user"
+                              },
+                              "val": {
+                                "address": "GCAZYE3EB54VKP3UQBX3H73VQO3SIWTZNR7NJQKJFZZ6XLADWA4C3SOC"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "verification"
+                              },
+                              "val": {
+                                "vec": [
+                                  {
+                                    "symbol": "Verified"
+                                  }
+                                ]
+                              }
+                            }
+                          ]
+                        }
                       }
                     ]
                   }
@@ -341,6 +696,42 @@
     ]
   },
   "events": [
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "user_registered"
+              },
+              {
+                "symbol": "user"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "symbol": "user"
+                },
+                {
+                  "address": "GCAZYE3EB54VKP3UQBX3H73VQO3SIWTZNR7NJQKJFZZ6XLADWA4C3SOC"
+                },
+                {
+                  "symbol": "role"
+                },
+                {
+                  "symbol": "admin"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
     {
       "event": {
         "ext": "v0",

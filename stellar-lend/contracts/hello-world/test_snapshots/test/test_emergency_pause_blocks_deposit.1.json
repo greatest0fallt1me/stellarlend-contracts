@@ -68,7 +68,7 @@
                                   "val": {
                                     "i128": {
                                       "hi": 0,
-                                      "lo": 100
+                                      "lo": 1000
                                     }
                                   }
                                 },
@@ -126,6 +126,132 @@
                       },
                       {
                         "key": {
+                          "symbol": "emergency_state"
+                        },
+                        "val": {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "emergency_managers"
+                              },
+                              "val": {
+                                "vec": []
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "fund"
+                              },
+                              "val": {
+                                "map": [
+                                  {
+                                    "key": {
+                                      "symbol": "balance"
+                                    },
+                                    "val": {
+                                      "i128": {
+                                        "hi": 0,
+                                        "lo": 0
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "last_update"
+                                    },
+                                    "val": {
+                                      "u64": 0
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "reserved"
+                                    },
+                                    "val": {
+                                      "i128": {
+                                        "hi": 0,
+                                        "lo": 0
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "token"
+                                    },
+                                    "val": "void"
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "last_recovery_update"
+                              },
+                              "val": {
+                                "u64": 0
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "paused_at"
+                              },
+                              "val": {
+                                "u64": 0
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "paused_by"
+                              },
+                              "val": {
+                                "address": "GCAZYE3EB54VKP3UQBX3H73VQO3SIWTZNR7NJQKJFZZ6XLADWA4C3SOC"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "pending_param_updates"
+                              },
+                              "val": {
+                                "vec": []
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "reason"
+                              },
+                              "val": "void"
+                            },
+                            {
+                              "key": {
+                                "symbol": "recovery_plan"
+                              },
+                              "val": "void"
+                            },
+                            {
+                              "key": {
+                                "symbol": "recovery_steps"
+                              },
+                              "val": {
+                                "vec": []
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "status"
+                              },
+                              "val": {
+                                "vec": [
+                                  {
+                                    "symbol": "Operational"
+                                  }
+                                ]
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
                           "symbol": "event_aggregates"
                         },
                         "val": {
@@ -167,7 +293,51 @@
                                     "val": {
                                       "i128": {
                                         "hi": 0,
-                                        "lo": 100
+                                        "lo": 1000
+                                      }
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "emergency_status_changed"
+                              },
+                              "val": {
+                                "map": [
+                                  {
+                                    "key": {
+                                      "symbol": "count"
+                                    },
+                                    "val": {
+                                      "u64": 2
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "event_type"
+                                    },
+                                    "val": {
+                                      "symbol": "emergency_status_changed"
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "last_timestamp"
+                                    },
+                                    "val": {
+                                      "u64": 0
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "total_amount"
+                                    },
+                                    "val": {
+                                      "i128": {
+                                        "hi": 0,
+                                        "lo": 0
                                       }
                                     }
                                   }
@@ -211,7 +381,7 @@
                                     "val": {
                                       "i128": {
                                         "hi": 0,
-                                        "lo": 100
+                                        "lo": 1000
                                       }
                                     }
                                   }
@@ -255,7 +425,7 @@
                                     "val": {
                                       "i128": {
                                         "hi": 0,
-                                        "lo": 100
+                                        "lo": 1000
                                       }
                                     }
                                   }
@@ -299,7 +469,7 @@
                                     "val": {
                                       "i128": {
                                         "hi": 0,
-                                        "lo": 100
+                                        "lo": 1000
                                       }
                                     }
                                   }
@@ -330,7 +500,7 @@
                                         "val": {
                                           "i128": {
                                             "hi": 0,
-                                            "lo": 100
+                                            "lo": 1000
                                           }
                                         }
                                       },
@@ -386,6 +556,125 @@
                             },
                             {
                               "key": {
+                                "symbol": "emergency_status_changed"
+                              },
+                              "val": {
+                                "vec": [
+                                  {
+                                    "map": [
+                                      {
+                                        "key": {
+                                          "symbol": "amount"
+                                        },
+                                        "val": {
+                                          "i128": {
+                                            "hi": 0,
+                                            "lo": 0
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "key": {
+                                          "symbol": "asset"
+                                        },
+                                        "val": "void"
+                                      },
+                                      {
+                                        "key": {
+                                          "symbol": "event_type"
+                                        },
+                                        "val": {
+                                          "symbol": "emergency_status_changed"
+                                        }
+                                      },
+                                      {
+                                        "key": {
+                                          "symbol": "timestamp"
+                                        },
+                                        "val": {
+                                          "u64": 0
+                                        }
+                                      },
+                                      {
+                                        "key": {
+                                          "symbol": "topics"
+                                        },
+                                        "val": {
+                                          "vec": [
+                                            {
+                                              "symbol": "emergency_status_changed"
+                                            }
+                                          ]
+                                        }
+                                      },
+                                      {
+                                        "key": {
+                                          "symbol": "user"
+                                        },
+                                        "val": "void"
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "map": [
+                                      {
+                                        "key": {
+                                          "symbol": "amount"
+                                        },
+                                        "val": {
+                                          "i128": {
+                                            "hi": 0,
+                                            "lo": 0
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "key": {
+                                          "symbol": "asset"
+                                        },
+                                        "val": "void"
+                                      },
+                                      {
+                                        "key": {
+                                          "symbol": "event_type"
+                                        },
+                                        "val": {
+                                          "symbol": "emergency_status_changed"
+                                        }
+                                      },
+                                      {
+                                        "key": {
+                                          "symbol": "timestamp"
+                                        },
+                                        "val": {
+                                          "u64": 0
+                                        }
+                                      },
+                                      {
+                                        "key": {
+                                          "symbol": "topics"
+                                        },
+                                        "val": {
+                                          "vec": [
+                                            {
+                                              "symbol": "emergency_status_changed"
+                                            }
+                                          ]
+                                        }
+                                      },
+                                      {
+                                        "key": {
+                                          "symbol": "user"
+                                        },
+                                        "val": "void"
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "key": {
                                 "symbol": "position_updated"
                               },
                               "val": {
@@ -399,7 +688,7 @@
                                         "val": {
                                           "i128": {
                                             "hi": 0,
-                                            "lo": 100
+                                            "lo": 1000
                                           }
                                         }
                                       },
@@ -468,7 +757,7 @@
                                         "val": {
                                           "i128": {
                                             "hi": 0,
-                                            "lo": 100
+                                            "lo": 1000
                                           }
                                         }
                                       },
@@ -542,7 +831,7 @@
                                         "val": {
                                           "i128": {
                                             "hi": 0,
-                                            "lo": 100
+                                            "lo": 1000
                                           }
                                         }
                                       },
@@ -617,6 +906,9 @@
                               "val": {
                                 "vec": [
                                   {
+                                    "symbol": "emergency_status_changed"
+                                  },
+                                  {
                                     "symbol": "transfer_attempt"
                                   },
                                   {
@@ -674,7 +966,51 @@
                                           "val": {
                                             "i128": {
                                               "hi": 0,
-                                              "lo": 100
+                                              "lo": 1000
+                                            }
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "emergency_status_changed"
+                                    },
+                                    "val": {
+                                      "map": [
+                                        {
+                                          "key": {
+                                            "symbol": "count"
+                                          },
+                                          "val": {
+                                            "u64": 2
+                                          }
+                                        },
+                                        {
+                                          "key": {
+                                            "symbol": "event_type"
+                                          },
+                                          "val": {
+                                            "symbol": "emergency_status_changed"
+                                          }
+                                        },
+                                        {
+                                          "key": {
+                                            "symbol": "last_timestamp"
+                                          },
+                                          "val": {
+                                            "u64": 0
+                                          }
+                                        },
+                                        {
+                                          "key": {
+                                            "symbol": "total_amount"
+                                          },
+                                          "val": {
+                                            "i128": {
+                                              "hi": 0,
+                                              "lo": 0
                                             }
                                           }
                                         }
@@ -718,7 +1054,7 @@
                                           "val": {
                                             "i128": {
                                               "hi": 0,
-                                              "lo": 100
+                                              "lo": 1000
                                             }
                                           }
                                         }
@@ -762,7 +1098,7 @@
                                           "val": {
                                             "i128": {
                                               "hi": 0,
-                                              "lo": 100
+                                              "lo": 1000
                                             }
                                           }
                                         }
@@ -806,7 +1142,7 @@
                                           "val": {
                                             "i128": {
                                               "hi": 0,
-                                              "lo": 100
+                                              "lo": 1000
                                             }
                                           }
                                         }
@@ -904,7 +1240,7 @@
                                           "val": {
                                             "i128": {
                                               "hi": 0,
-                                              "lo": 100
+                                              "lo": 1000
                                             }
                                           }
                                         },
@@ -959,7 +1295,7 @@
                                           "val": {
                                             "i128": {
                                               "hi": 0,
-                                              "lo": 100
+                                              "lo": 1000
                                             }
                                           }
                                         },
@@ -970,7 +1306,7 @@
                                           "val": {
                                             "i128": {
                                               "hi": 0,
-                                              "lo": 100
+                                              "lo": 1000
                                             }
                                           }
                                         },
@@ -1214,7 +1550,7 @@
                               "val": {
                                 "i128": {
                                   "hi": 0,
-                                  "lo": 100
+                                  "lo": 1000
                                 }
                               }
                             },
@@ -1324,7 +1660,7 @@
                               "val": {
                                 "i128": {
                                   "hi": 0,
-                                  "lo": 100
+                                  "lo": 1000
                                 }
                               }
                             },
@@ -1379,7 +1715,7 @@
                               "val": {
                                 "i128": {
                                   "hi": 0,
-                                  "lo": 100
+                                  "lo": 1000
                                 }
                               }
                             },
@@ -1390,7 +1726,7 @@
                               "val": {
                                 "i128": {
                                   "hi": 0,
-                                  "lo": 100
+                                  "lo": 1000
                                 }
                               }
                             },
@@ -1523,7 +1859,7 @@
                                     "val": {
                                       "i128": {
                                         "hi": 0,
-                                        "lo": 10
+                                        "lo": 11
                                       }
                                     }
                                   },
@@ -1616,7 +1952,7 @@
                                     "val": {
                                       "i128": {
                                         "hi": 0,
-                                        "lo": 100
+                                        "lo": 1000
                                       }
                                     }
                                   },
@@ -1826,7 +2162,7 @@
                               "val": {
                                 "i128": {
                                   "hi": 0,
-                                  "lo": 100
+                                  "lo": 1000
                                 }
                               }
                             },
@@ -2007,7 +2343,7 @@
                               "val": {
                                 "i128": {
                                   "hi": 0,
-                                  "lo": 999900
+                                  "lo": 999000
                                 }
                               }
                             },
@@ -2018,7 +2354,7 @@
                               "val": {
                                 "i128": {
                                   "hi": 0,
-                                  "lo": 1000100
+                                  "lo": 1001000
                                 }
                               }
                             }
@@ -2104,6 +2440,76 @@
           "v0": {
             "topics": [
               {
+                "symbol": "emergency_status"
+              },
+              {
+                "symbol": "paused"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "symbol": "status"
+                },
+                {
+                  "symbol": "paused"
+                },
+                {
+                  "symbol": "reason"
+                },
+                {
+                  "string": "halt"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "emergency_status"
+              },
+              {
+                "symbol": "operational"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "symbol": "status"
+                },
+                {
+                  "symbol": "operational"
+                },
+                {
+                  "symbol": "reason"
+                },
+                "void"
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
                 "symbol": "transfer_attempt"
               },
               {
@@ -2136,7 +2542,7 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 100
+                    "lo": 1000
                   }
                 }
               ]
@@ -2187,7 +2593,7 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 100
+                    "lo": 1000
                   }
                 }
               ]
@@ -2226,7 +2632,7 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 100
+                    "lo": 1000
                   }
                 },
                 {
@@ -2289,7 +2695,7 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 100
+                    "lo": 1000
                   }
                 },
                 {
@@ -2340,7 +2746,7 @@
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 100
+                    "lo": 1000
                   }
                 },
                 {

@@ -3,10 +3,11 @@
 
 use crate::analytics::AnalyticsModule;
 use crate::{
-    InterestRateManager, InterestRateStorage, ProtocolConfig, ProtocolError, ProtocolEvent,
-    ReentrancyGuard, RiskConfigStorage, StateHelper,
+    EmergencyManager, InterestRateManager, InterestRateStorage, OperationKind, ProtocolConfig,
+    ProtocolError, ProtocolEvent, ReentrancyGuard, RiskConfigStorage, StateHelper,
+    TransferEnforcer, UserManager,
 };
-use soroban_sdk::{contracterror, contracttype, Address, Env, String};
+use soroban_sdk::{contracterror, contracttype, Address, Env, String, Symbol};
 
 /// Withdraw-specific errors
 #[contracterror]
@@ -71,16 +72,14 @@ pub struct WithdrawModule;
 
 impl WithdrawModule {
     /// Withdraw collateral from the protocol
-    pub fn withdraw(env: &Env, withdrawer: &String, amount: i128) -> Result<(), ProtocolError> {
+    pub fn withdraw(env: &Env, withdrawer: &Address, amount: i128) -> Result<(), ProtocolError> {
         ReentrancyGuard::enter(env)?;
         let result = (|| -> Result<(), ProtocolError> {
-            // Input validation
-            if withdrawer.is_empty() {
-                return Err(WithdrawError::InvalidAddress.into());
-            }
             if amount <= 0 {
                 return Err(WithdrawError::InvalidAmount.into());
             }
+
+            EmergencyManager::ensure_operation_allowed(env, OperationKind::Withdraw)?;
 
             // Check if withdraw is paused
             let risk_config = RiskConfigStorage::get(env);
@@ -88,10 +87,15 @@ impl WithdrawModule {
                 return Err(WithdrawError::ProtocolPaused.into());
             }
 
-            let withdrawer_addr = Address::from_string(withdrawer);
+            UserManager::ensure_operation_allowed(
+                env,
+                withdrawer,
+                OperationKind::Withdraw,
+                amount,
+            )?;
 
             // Load user position
-            let mut position = match StateHelper::get_position(env, &withdrawer_addr) {
+            let mut position = match StateHelper::get_position(env, withdrawer) {
                 Some(pos) => pos,
                 None => return Err(WithdrawError::PositionNotFound.into()),
             };
@@ -125,11 +129,12 @@ impl WithdrawModule {
 
             // Update position
             position.collateral = new_collateral;
+            TransferEnforcer::transfer_out(env, withdrawer, amount, Symbol::new(env, "withdraw"))?;
             StateHelper::save_position(env, &position);
 
             // Emit event
             ProtocolEvent::PositionUpdated(
-                withdrawer_addr.clone(),
+                withdrawer.clone(),
                 position.collateral,
                 position.debt,
                 collateral_ratio,
@@ -137,7 +142,8 @@ impl WithdrawModule {
             .emit(env);
 
             // Analytics
-            AnalyticsModule::record_activity(env, &withdrawer_addr, "withdraw", amount, None)?;
+            AnalyticsModule::record_activity(env, withdrawer, "withdraw", amount, None)?;
+            UserManager::record_activity(env, withdrawer, OperationKind::Withdraw, amount)?;
 
             Ok(())
         })();
@@ -161,6 +167,8 @@ impl WithdrawModule {
             if amount <= 0 {
                 return Err(WithdrawError::InvalidAmount.into());
             }
+
+            EmergencyManager::ensure_operation_allowed(env, OperationKind::Withdraw)?;
 
             let user_addr = Address::from_string(user);
 
@@ -203,7 +211,7 @@ impl WithdrawModule {
     }
 
     /// Calculate maximum withdrawable amount
-    pub fn _calculate_max_withdrawable(env: &Env, user: &Address) -> Result<i128, ProtocolError> {
+    pub fn calculate_max_withdrawable(env: &Env, user: &Address) -> Result<i128, ProtocolError> {
         let position = match StateHelper::get_position(env, user) {
             Some(pos) => pos,
             None => return Err(WithdrawError::PositionNotFound.into()),

@@ -1,9 +1,15 @@
 {
   "generators": {
-    "address": 1,
+    "address": 3,
     "nonce": 0
   },
   "auth": [
+    [],
+    [],
+    [],
+    [],
+    [],
+    [],
     [],
     []
   ],
@@ -46,206 +52,6 @@
                         },
                         "val": {
                           "address": "GCAZYE3EB54VKP3UQBX3H73VQO3SIWTZNR7NJQKJFZZ6XLADWA4C3SOC"
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "event_aggregates"
-                        },
-                        "val": {
-                          "map": [
-                            {
-                              "key": {
-                                "symbol": "misc_event"
-                              },
-                              "val": {
-                                "map": [
-                                  {
-                                    "key": {
-                                      "symbol": "count"
-                                    },
-                                    "val": {
-                                      "u64": 1
-                                    }
-                                  },
-                                  {
-                                    "key": {
-                                      "symbol": "event_type"
-                                    },
-                                    "val": {
-                                      "symbol": "misc_event"
-                                    }
-                                  },
-                                  {
-                                    "key": {
-                                      "symbol": "last_timestamp"
-                                    },
-                                    "val": {
-                                      "u64": 0
-                                    }
-                                  },
-                                  {
-                                    "key": {
-                                      "symbol": "total_amount"
-                                    },
-                                    "val": {
-                                      "i128": {
-                                        "hi": 0,
-                                        "lo": 0
-                                      }
-                                    }
-                                  }
-                                ]
-                              }
-                            }
-                          ]
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "event_logs"
-                        },
-                        "val": {
-                          "map": [
-                            {
-                              "key": {
-                                "symbol": "misc_event"
-                              },
-                              "val": {
-                                "vec": [
-                                  {
-                                    "map": [
-                                      {
-                                        "key": {
-                                          "symbol": "amount"
-                                        },
-                                        "val": {
-                                          "i128": {
-                                            "hi": 0,
-                                            "lo": 0
-                                          }
-                                        }
-                                      },
-                                      {
-                                        "key": {
-                                          "symbol": "asset"
-                                        },
-                                        "val": "void"
-                                      },
-                                      {
-                                        "key": {
-                                          "symbol": "event_type"
-                                        },
-                                        "val": {
-                                          "symbol": "misc_event"
-                                        }
-                                      },
-                                      {
-                                        "key": {
-                                          "symbol": "timestamp"
-                                        },
-                                        "val": {
-                                          "u64": 0
-                                        }
-                                      },
-                                      {
-                                        "key": {
-                                          "symbol": "topics"
-                                        },
-                                        "val": {
-                                          "vec": [
-                                            {
-                                              "symbol": "misc_event"
-                                            }
-                                          ]
-                                        }
-                                      },
-                                      {
-                                        "key": {
-                                          "symbol": "user"
-                                        },
-                                        "val": "void"
-                                      }
-                                    ]
-                                  }
-                                ]
-                              }
-                            }
-                          ]
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "event_summary"
-                        },
-                        "val": {
-                          "map": [
-                            {
-                              "key": {
-                                "symbol": "recent_types"
-                              },
-                              "val": {
-                                "vec": [
-                                  {
-                                    "symbol": "misc_event"
-                                  }
-                                ]
-                              }
-                            },
-                            {
-                              "key": {
-                                "symbol": "totals"
-                              },
-                              "val": {
-                                "map": [
-                                  {
-                                    "key": {
-                                      "symbol": "misc_event"
-                                    },
-                                    "val": {
-                                      "map": [
-                                        {
-                                          "key": {
-                                            "symbol": "count"
-                                          },
-                                          "val": {
-                                            "u64": 1
-                                          }
-                                        },
-                                        {
-                                          "key": {
-                                            "symbol": "event_type"
-                                          },
-                                          "val": {
-                                            "symbol": "misc_event"
-                                          }
-                                        },
-                                        {
-                                          "key": {
-                                            "symbol": "last_timestamp"
-                                          },
-                                          "val": {
-                                            "u64": 0
-                                          }
-                                        },
-                                        {
-                                          "key": {
-                                            "symbol": "total_amount"
-                                          },
-                                          "val": {
-                                            "i128": {
-                                              "hi": 0,
-                                              "lo": 0
-                                            }
-                                          }
-                                        }
-                                      ]
-                                    }
-                                  }
-                                ]
-                              }
-                            }
-                          ]
                         }
                       },
                       {
@@ -457,7 +263,7 @@
                               "val": {
                                 "i128": {
                                   "hi": 0,
-                                  "lo": 60000000
+                                  "lo": 50000000
                                 }
                               }
                             },
@@ -476,7 +282,7 @@
                               "val": {
                                 "i128": {
                                   "hi": 0,
-                                  "lo": 15000000
+                                  "lo": 10000000
                                 }
                               }
                             },
@@ -510,6 +316,23 @@
                               },
                               "val": {
                                 "bool": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "token_registry"
+                        },
+                        "val": {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "primary_asset"
+                              },
+                              "val": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                               }
                             }
                           ]
@@ -674,6 +497,110 @@
       ],
       [
         {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+            "key": "ledger_key_contract_instance",
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+                "key": "ledger_key_contract_instance",
+                "durability": "persistent",
+                "val": {
+                  "contract_instance": {
+                    "executable": {
+                      "wasm": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    },
+                    "storage": [
+                      {
+                        "key": {
+                          "symbol": "admin"
+                        },
+                        "val": {
+                          "address": "GCAZYE3EB54VKP3UQBX3H73VQO3SIWTZNR7NJQKJFZZ6XLADWA4C3SOC"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "balances"
+                        },
+                        "val": {
+                          "map": [
+                            {
+                              "key": {
+                                "address": "GCXOTMMXRS24MYZI5FJPUCOEOFNWSR4XX7UXIK3NDGGE6A5QMJ5FF2FS"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 1000000
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 1000000
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          4095
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+            "key": "ledger_key_contract_instance",
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+                "key": "ledger_key_contract_instance",
+                "durability": "persistent",
+                "val": {
+                  "contract_instance": {
+                    "executable": {
+                      "wasm": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    },
+                    "storage": null
+                  }
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          4095
+        ]
+      ],
+      [
+        {
           "contract_code": {
             "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
           }
@@ -695,84 +622,5 @@
       ]
     ]
   },
-  "events": [
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
-        "type_": "contract",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "user_registered"
-              },
-              {
-                "symbol": "user"
-              }
-            ],
-            "data": {
-              "vec": [
-                {
-                  "symbol": "user"
-                },
-                {
-                  "address": "GCAZYE3EB54VKP3UQBX3H73VQO3SIWTZNR7NJQKJFZZ6XLADWA4C3SOC"
-                },
-                {
-                  "symbol": "role"
-                },
-                {
-                  "symbol": "admin"
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    },
-    {
-      "event": {
-        "ext": "v0",
-        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
-        "type_": "contract",
-        "body": {
-          "v0": {
-            "topics": [
-              {
-                "symbol": "risk_params_updated"
-              },
-              {
-                "symbol": "close_factor"
-              }
-            ],
-            "data": {
-              "vec": [
-                {
-                  "symbol": "close_factor"
-                },
-                {
-                  "i128": {
-                    "hi": 0,
-                    "lo": 60000000
-                  }
-                },
-                {
-                  "symbol": "liquidation_incentive"
-                },
-                {
-                  "i128": {
-                    "hi": 0,
-                    "lo": 15000000
-                  }
-                }
-              ]
-            }
-          }
-        }
-      },
-      "failed_call": false
-    }
-  ]
+  "events": []
 }

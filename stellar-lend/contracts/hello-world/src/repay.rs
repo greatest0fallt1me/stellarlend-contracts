@@ -3,10 +3,10 @@
 
 use crate::analytics::AnalyticsModule;
 use crate::{
-    InterestRateManager, InterestRateStorage, ProtocolError, ProtocolEvent, ReentrancyGuard,
-    StateHelper,
+    EmergencyManager, InterestRateManager, InterestRateStorage, OperationKind, ProtocolError,
+    ProtocolEvent, ReentrancyGuard, StateHelper, TransferEnforcer, UserManager,
 };
-use soroban_sdk::{contracterror, contracttype, Address, Env, String};
+use soroban_sdk::{contracterror, contracttype, Address, Env, String, Symbol};
 
 /// Repay-specific errors
 #[contracterror]
@@ -76,21 +76,19 @@ pub struct RepayModule;
 
 impl RepayModule {
     /// Repay borrowed assets
-    pub fn repay(env: &Env, repayer: &String, amount: i128) -> Result<(), ProtocolError> {
+    pub fn repay(env: &Env, repayer: &Address, amount: i128) -> Result<(), ProtocolError> {
         ReentrancyGuard::enter(env)?;
         let result = (|| -> Result<(), ProtocolError> {
-            // Input validation
-            if repayer.is_empty() {
-                return Err(RepayError::InvalidAddress.into());
-            }
             if amount <= 0 {
                 return Err(RepayError::InvalidAmount.into());
             }
 
-            let repayer_addr = Address::from_string(repayer);
+            EmergencyManager::ensure_operation_allowed(env, OperationKind::Repay)?;
+
+            UserManager::ensure_operation_allowed(env, repayer, OperationKind::Repay, amount)?;
 
             // Load user position
-            let mut position = match StateHelper::get_position(env, &repayer_addr) {
+            let mut position = match StateHelper::get_position(env, repayer) {
                 Some(pos) => pos,
                 None => return Err(RepayError::PositionNotFound.into()),
             };
@@ -110,11 +108,10 @@ impl RepayModule {
             }
 
             // Update position
-            let repay_amount = if amount > position.debt {
-                position.debt
-            } else {
-                amount
-            };
+            let repay_amount = core::cmp::min(amount, position.debt);
+
+            TransferEnforcer::transfer_in(env, repayer, repay_amount, Symbol::new(env, "repay"))?;
+
             position.debt -= repay_amount;
             StateHelper::save_position(env, &position);
 
@@ -126,7 +123,7 @@ impl RepayModule {
             };
 
             ProtocolEvent::PositionUpdated(
-                repayer_addr.clone(),
+                repayer.clone(),
                 position.collateral,
                 position.debt,
                 collateral_ratio,
@@ -134,7 +131,8 @@ impl RepayModule {
             .emit(env);
 
             // Analytics
-            AnalyticsModule::record_activity(env, &repayer_addr, "repay", repay_amount, None)?;
+            AnalyticsModule::record_activity(env, repayer, "repay", repay_amount, None)?;
+            UserManager::record_activity(env, repayer, OperationKind::Repay, repay_amount)?;
 
             Ok(())
         })();
@@ -158,6 +156,8 @@ impl RepayModule {
             if amount <= 0 {
                 return Err(RepayError::InvalidAmount.into());
             }
+
+            EmergencyManager::ensure_operation_allowed(env, OperationKind::Repay)?;
 
             let user_addr = Address::from_string(user);
 
@@ -191,7 +191,7 @@ impl RepayModule {
     }
 
     /// Full repayment of all debt
-    pub fn _full_repay(env: &Env, repayer: &String) -> Result<i128, ProtocolError> {
+    pub fn full_repay(env: &Env, repayer: &String) -> Result<i128, ProtocolError> {
         ReentrancyGuard::enter(env)?;
         let result = (|| -> Result<i128, ProtocolError> {
             if repayer.is_empty() {
@@ -270,7 +270,7 @@ impl RepayModule {
     }
 
     /// Calculate remaining debt after repayment
-    pub fn _calculate_remaining_debt(current_debt: i128, repay_amount: i128) -> i128 {
+    pub fn calculate_remaining_debt(current_debt: i128, repay_amount: i128) -> i128 {
         if repay_amount >= current_debt {
             0
         } else {

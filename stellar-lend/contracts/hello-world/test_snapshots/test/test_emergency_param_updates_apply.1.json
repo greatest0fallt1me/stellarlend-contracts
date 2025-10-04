@@ -50,13 +50,137 @@
                       },
                       {
                         "key": {
+                          "symbol": "emergency_state"
+                        },
+                        "val": {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "emergency_managers"
+                              },
+                              "val": {
+                                "vec": []
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "fund"
+                              },
+                              "val": {
+                                "map": [
+                                  {
+                                    "key": {
+                                      "symbol": "balance"
+                                    },
+                                    "val": {
+                                      "i128": {
+                                        "hi": 0,
+                                        "lo": 0
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "last_update"
+                                    },
+                                    "val": {
+                                      "u64": 0
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "reserved"
+                                    },
+                                    "val": {
+                                      "i128": {
+                                        "hi": 0,
+                                        "lo": 0
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "token"
+                                    },
+                                    "val": "void"
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "last_recovery_update"
+                              },
+                              "val": {
+                                "u64": 0
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "paused_at"
+                              },
+                              "val": {
+                                "u64": 0
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "paused_by"
+                              },
+                              "val": "void"
+                            },
+                            {
+                              "key": {
+                                "symbol": "pending_param_updates"
+                              },
+                              "val": {
+                                "vec": []
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "reason"
+                              },
+                              "val": "void"
+                            },
+                            {
+                              "key": {
+                                "symbol": "recovery_plan"
+                              },
+                              "val": "void"
+                            },
+                            {
+                              "key": {
+                                "symbol": "recovery_steps"
+                              },
+                              "val": {
+                                "vec": []
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "status"
+                              },
+                              "val": {
+                                "vec": [
+                                  {
+                                    "symbol": "Operational"
+                                  }
+                                ]
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
                           "symbol": "event_aggregates"
                         },
                         "val": {
                           "map": [
                             {
                               "key": {
-                                "symbol": "misc_event"
+                                "symbol": "emergency_param_update_applied"
                               },
                               "val": {
                                 "map": [
@@ -73,7 +197,51 @@
                                       "symbol": "event_type"
                                     },
                                     "val": {
-                                      "symbol": "misc_event"
+                                      "symbol": "emergency_param_update_applied"
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "last_timestamp"
+                                    },
+                                    "val": {
+                                      "u64": 0
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "total_amount"
+                                    },
+                                    "val": {
+                                      "i128": {
+                                        "hi": 0,
+                                        "lo": 0
+                                      }
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "emergency_param_update_queued"
+                              },
+                              "val": {
+                                "map": [
+                                  {
+                                    "key": {
+                                      "symbol": "count"
+                                    },
+                                    "val": {
+                                      "u64": 1
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "event_type"
+                                    },
+                                    "val": {
+                                      "symbol": "emergency_param_update_queued"
                                     }
                                   },
                                   {
@@ -109,7 +277,7 @@
                           "map": [
                             {
                               "key": {
-                                "symbol": "misc_event"
+                                "symbol": "emergency_param_update_applied"
                               },
                               "val": {
                                 "vec": [
@@ -137,7 +305,7 @@
                                           "symbol": "event_type"
                                         },
                                         "val": {
-                                          "symbol": "misc_event"
+                                          "symbol": "emergency_param_update_applied"
                                         }
                                       },
                                       {
@@ -155,7 +323,71 @@
                                         "val": {
                                           "vec": [
                                             {
-                                              "symbol": "misc_event"
+                                              "symbol": "emergency_param_update_applied"
+                                            }
+                                          ]
+                                        }
+                                      },
+                                      {
+                                        "key": {
+                                          "symbol": "user"
+                                        },
+                                        "val": "void"
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "emergency_param_update_queued"
+                              },
+                              "val": {
+                                "vec": [
+                                  {
+                                    "map": [
+                                      {
+                                        "key": {
+                                          "symbol": "amount"
+                                        },
+                                        "val": {
+                                          "i128": {
+                                            "hi": 0,
+                                            "lo": 0
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "key": {
+                                          "symbol": "asset"
+                                        },
+                                        "val": "void"
+                                      },
+                                      {
+                                        "key": {
+                                          "symbol": "event_type"
+                                        },
+                                        "val": {
+                                          "symbol": "emergency_param_update_queued"
+                                        }
+                                      },
+                                      {
+                                        "key": {
+                                          "symbol": "timestamp"
+                                        },
+                                        "val": {
+                                          "u64": 0
+                                        }
+                                      },
+                                      {
+                                        "key": {
+                                          "symbol": "topics"
+                                        },
+                                        "val": {
+                                          "vec": [
+                                            {
+                                              "symbol": "emergency_param_update_queued"
                                             }
                                           ]
                                         }
@@ -187,7 +419,10 @@
                               "val": {
                                 "vec": [
                                   {
-                                    "symbol": "misc_event"
+                                    "symbol": "emergency_param_update_queued"
+                                  },
+                                  {
+                                    "symbol": "emergency_param_update_applied"
                                   }
                                 ]
                               }
@@ -200,7 +435,7 @@
                                 "map": [
                                   {
                                     "key": {
-                                      "symbol": "misc_event"
+                                      "symbol": "emergency_param_update_applied"
                                     },
                                     "val": {
                                       "map": [
@@ -217,7 +452,51 @@
                                             "symbol": "event_type"
                                           },
                                           "val": {
-                                            "symbol": "misc_event"
+                                            "symbol": "emergency_param_update_applied"
+                                          }
+                                        },
+                                        {
+                                          "key": {
+                                            "symbol": "last_timestamp"
+                                          },
+                                          "val": {
+                                            "u64": 0
+                                          }
+                                        },
+                                        {
+                                          "key": {
+                                            "symbol": "total_amount"
+                                          },
+                                          "val": {
+                                            "i128": {
+                                              "hi": 0,
+                                              "lo": 0
+                                            }
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "emergency_param_update_queued"
+                                    },
+                                    "val": {
+                                      "map": [
+                                        {
+                                          "key": {
+                                            "symbol": "count"
+                                          },
+                                          "val": {
+                                            "u64": 1
+                                          }
+                                        },
+                                        {
+                                          "key": {
+                                            "symbol": "event_type"
+                                          },
+                                          "val": {
+                                            "symbol": "emergency_param_update_queued"
                                           }
                                         },
                                         {
@@ -261,7 +540,7 @@
                               "val": {
                                 "i128": {
                                   "hi": 0,
-                                  "lo": 2000000
+                                  "lo": 5000000
                                 }
                               }
                             },
@@ -457,7 +736,7 @@
                               "val": {
                                 "i128": {
                                   "hi": 0,
-                                  "lo": 60000000
+                                  "lo": 50000000
                                 }
                               }
                             },
@@ -476,7 +755,7 @@
                               "val": {
                                 "i128": {
                                   "hi": 0,
-                                  "lo": 15000000
+                                  "lo": 10000000
                                 }
                               }
                             },
@@ -741,30 +1020,66 @@
           "v0": {
             "topics": [
               {
-                "symbol": "risk_params_updated"
+                "symbol": "emergency_param_update_queued"
               },
               {
-                "symbol": "close_factor"
+                "symbol": "base_rate"
               }
             ],
             "data": {
               "vec": [
                 {
-                  "symbol": "close_factor"
+                  "symbol": "parameter"
+                },
+                {
+                  "symbol": "base_rate"
+                },
+                {
+                  "symbol": "value"
                 },
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 60000000
+                    "lo": 5000000
                   }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "emergency_param_update_applied"
+              },
+              {
+                "symbol": "base_rate"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "symbol": "parameter"
                 },
                 {
-                  "symbol": "liquidation_incentive"
+                  "symbol": "base_rate"
+                },
+                {
+                  "symbol": "value"
                 },
                 {
                   "i128": {
                     "hi": 0,
-                    "lo": 15000000
+                    "lo": 5000000
                   }
                 }
               ]
