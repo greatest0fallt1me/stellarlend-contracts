@@ -83,16 +83,7 @@
                                     "symbol": "metadata"
                                   },
                                   "val": {
-                                    "map": [
-                                      {
-                                        "key": {
-                                          "string": "timestamp"
-                                        },
-                                        "val": {
-                                          "string": "1000"
-                                        }
-                                      }
-                                    ]
+                                    "map": []
                                   }
                                 },
                                 {
@@ -145,16 +136,7 @@
                                     "symbol": "metadata"
                                   },
                                   "val": {
-                                    "map": [
-                                      {
-                                        "key": {
-                                          "string": "timestamp"
-                                        },
-                                        "val": {
-                                          "string": "1050"
-                                        }
-                                      }
-                                    ]
+                                    "map": []
                                   }
                                 },
                                 {
@@ -207,16 +189,7 @@
                                     "symbol": "metadata"
                                   },
                                   "val": {
-                                    "map": [
-                                      {
-                                        "key": {
-                                          "string": "timestamp"
-                                        },
-                                        "val": {
-                                          "string": "1100"
-                                        }
-                                      }
-                                    ]
+                                    "map": []
                                   }
                                 },
                                 {

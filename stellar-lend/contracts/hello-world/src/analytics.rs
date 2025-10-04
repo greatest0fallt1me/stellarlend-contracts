@@ -479,19 +479,13 @@ impl AnalyticsModule {
         let timestamp = env.ledger().timestamp();
 
         // Create activity log entry
-        let mut metadata = Map::new(env);
-        metadata.set(
-            String::from_str(env, "timestamp"),
-            String::from_str(env, &timestamp.to_string()),
-        );
-
         let entry = ActivityLogEntry {
             timestamp,
             user: user.clone(),
             activity_type: String::from_str(env, activity_type),
             amount,
             asset,
-            metadata,
+            metadata: Map::new(env),
         };
 
         // Add to activity log
