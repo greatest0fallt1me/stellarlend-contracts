@@ -9,10 +9,10 @@
     "total_fees_collected": 8500,
     "active_users": 2,
     "total_users": 4,
-    "avg_utilization_rate": 333333,
+    "avg_utilization_rate": 33,
     "total_volume": 1600000,
     "last_update": 1200,
-    "health_score": 66
+    "health_score": 67
   },
   "risk_analytics": {
     "protocol_risk_score": 42,
@@ -23,10 +23,10 @@
     "last_assessment": 1200
   },
   "performance_metrics": {
-    "uptime_percentage": 99950,
+    "uptime_percentage": 99,
     "avg_processing_time": 280,
-    "success_rate": 97500,
-    "error_rate": 2500,
+    "success_rate": 97,
+    "error_rate": 3,
     "throughput": 42,
     "last_update": 1195
   },
