@@ -191,7 +191,7 @@ impl RepayModule {
     }
 
     /// Full repayment of all debt
-    pub fn full_repay(env: &Env, repayer: &String) -> Result<i128, ProtocolError> {
+    pub fn _full_repay(env: &Env, repayer: &String) -> Result<i128, ProtocolError> {
         ReentrancyGuard::enter(env)?;
         let result = (|| -> Result<i128, ProtocolError> {
             if repayer.is_empty() {
@@ -270,7 +270,7 @@ impl RepayModule {
     }
 
     /// Calculate remaining debt after repayment
-    pub fn calculate_remaining_debt(current_debt: i128, repay_amount: i128) -> i128 {
+    pub fn _calculate_remaining_debt(current_debt: i128, repay_amount: i128) -> i128 {
         if repay_amount >= current_debt {
             0
         } else {

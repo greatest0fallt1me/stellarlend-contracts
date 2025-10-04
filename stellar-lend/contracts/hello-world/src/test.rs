@@ -1,9 +1,8 @@
 use super::*;
-use soroban_sdk::{
-    contract, contractimpl, testutils::Address as TestAddress, Address, Env, Map, String, Symbol,
-};
+use soroban_sdk::{contract, contractimpl, Address, Env, Map, String, Symbol};
 
-use crate::{FlashLoan, ProtocolError, ReentrancyGuard};
+use crate::flash_loan::FlashLoan;
+use crate::{ProtocolError, ReentrancyGuard};
 
 #[contract]
 pub struct MockToken;
@@ -138,6 +137,7 @@ impl TestUtils {
             Contract::initialize(env.clone(), admin.to_string()).unwrap();
         });
 
+        #[allow(deprecated)]
         let token_id = env.register_contract(None, MockToken);
         env.as_contract(&token_id, || {
             MockToken::initialize(env.clone(), admin.clone());
@@ -220,7 +220,8 @@ fn test_deposit_collateral() {
 
     let user = TestUtils::create_user_address(&env, 0);
 
-    let (admin, contract_id, _token) = TestUtils::setup_contract_with_token(&env, &[user.clone()]);
+    let (admin, contract_id, _token) =
+        TestUtils::setup_contract_with_token(&env, core::slice::from_ref(&user));
     env.as_contract(&contract_id, || {
         TestUtils::verify_user(&env, &admin, &user);
 
@@ -242,7 +243,8 @@ fn test_deposit_collateral_invalid_amount() {
 
     let user = TestUtils::create_user_address(&env, 0);
 
-    let (admin, contract_id, _token) = TestUtils::setup_contract_with_token(&env, &[user.clone()]);
+    let (admin, contract_id, _token) =
+        TestUtils::setup_contract_with_token(&env, core::slice::from_ref(&user));
     env.as_contract(&contract_id, || {
         TestUtils::verify_user(&env, &admin, &user);
 
@@ -284,7 +286,8 @@ fn test_borrow_success() {
 
     let user = TestUtils::create_user_address(&env, 0);
 
-    let (admin, contract_id, _token) = TestUtils::setup_contract_with_token(&env, &[user.clone()]);
+    let (admin, contract_id, _token) =
+        TestUtils::setup_contract_with_token(&env, core::slice::from_ref(&user));
     env.as_contract(&contract_id, || {
         TestUtils::verify_user(&env, &admin, &user);
 
@@ -309,7 +312,8 @@ fn test_borrow_insufficient_collateral_ratio() {
 
     let user = TestUtils::create_user_address(&env, 0);
 
-    let (admin, contract_id, _token) = TestUtils::setup_contract_with_token(&env, &[user.clone()]);
+    let (admin, contract_id, _token) =
+        TestUtils::setup_contract_with_token(&env, core::slice::from_ref(&user));
     env.as_contract(&contract_id, || {
         TestUtils::verify_user(&env, &admin, &user);
 
@@ -333,7 +337,8 @@ fn test_emergency_pause_blocks_deposit() {
 
     let user = TestUtils::create_user_address(&env, 0);
 
-    let (admin, contract_id, _token) = TestUtils::setup_contract_with_token(&env, &[user.clone()]);
+    let (admin, contract_id, _token) =
+        TestUtils::setup_contract_with_token(&env, core::slice::from_ref(&user));
     env.as_contract(&contract_id, || {
         TestUtils::verify_user(&env, &admin, &user);
 
@@ -357,7 +362,8 @@ fn test_recovery_mode_allows_repay_blocks_borrow() {
 
     let user = TestUtils::create_user_address(&env, 0);
 
-    let (admin, contract_id, _token) = TestUtils::setup_contract_with_token(&env, &[user.clone()]);
+    let (admin, contract_id, _token) =
+        TestUtils::setup_contract_with_token(&env, core::slice::from_ref(&user));
     env.as_contract(&contract_id, || {
         TestUtils::verify_user(&env, &admin, &user);
 
@@ -462,7 +468,8 @@ fn test_repay_success() {
 
     let user = TestUtils::create_user_address(&env, 0);
 
-    let (admin, contract_id, _token) = TestUtils::setup_contract_with_token(&env, &[user.clone()]);
+    let (admin, contract_id, _token) =
+        TestUtils::setup_contract_with_token(&env, core::slice::from_ref(&user));
     env.as_contract(&contract_id, || {
         TestUtils::verify_user(&env, &admin, &user);
 
@@ -488,7 +495,8 @@ fn test_repay_full_amount() {
 
     let user = TestUtils::create_user_address(&env, 0);
 
-    let (admin, contract_id, _token) = TestUtils::setup_contract_with_token(&env, &[user.clone()]);
+    let (admin, contract_id, _token) =
+        TestUtils::setup_contract_with_token(&env, core::slice::from_ref(&user));
     env.as_contract(&contract_id, || {
         TestUtils::verify_user(&env, &admin, &user);
 
@@ -514,7 +522,8 @@ fn test_withdraw_success() {
 
     let user = TestUtils::create_user_address(&env, 0);
 
-    let (admin, contract_id, _token) = TestUtils::setup_contract_with_token(&env, &[user.clone()]);
+    let (admin, contract_id, _token) =
+        TestUtils::setup_contract_with_token(&env, core::slice::from_ref(&user));
     env.as_contract(&contract_id, || {
         TestUtils::verify_user(&env, &admin, &user);
 
@@ -539,7 +548,8 @@ fn test_event_summary_updates() {
 
     let user = TestUtils::create_user_address(&env, 0);
 
-    let (admin, contract_id, _token) = TestUtils::setup_contract_with_token(&env, &[user.clone()]);
+    let (admin, contract_id, _token) =
+        TestUtils::setup_contract_with_token(&env, core::slice::from_ref(&user));
     env.as_contract(&contract_id, || {
         TestUtils::verify_user(&env, &admin, &user);
 
@@ -553,12 +563,12 @@ fn test_event_summary_updates() {
         assert!(aggregate.count > 0);
 
         let recent_types = Contract::get_recent_event_types(env.clone()).unwrap();
-        assert!(recent_types.len() > 0);
+        assert!(!recent_types.is_empty());
 
         let events =
             Contract::get_events_for_type(env.clone(), Symbol::new(&env, "position_updated"), 5)
                 .unwrap();
-        assert!(events.len() > 0);
+        assert!(!events.is_empty());
 
         let aggregates = Contract::get_event_aggregates(env.clone()).unwrap();
         assert!(aggregates.len() >= totals.len());
@@ -571,7 +581,8 @@ fn test_deposit_reentrancy_blocked() {
     env.mock_all_auths();
 
     let user = TestUtils::create_user_address(&env, 0);
-    let (_admin, contract_id, _token) = TestUtils::setup_contract_with_token(&env, &[user.clone()]);
+    let (_admin, contract_id, _token) =
+        TestUtils::setup_contract_with_token(&env, core::slice::from_ref(&user));
 
     env.as_contract(&contract_id, || {
         ReentrancyGuard::enter(&env).unwrap();
@@ -588,7 +599,8 @@ fn test_withdraw_insufficient_collateral() {
 
     let user = TestUtils::create_user_address(&env, 0);
 
-    let (admin, contract_id, _token) = TestUtils::setup_contract_with_token(&env, &[user.clone()]);
+    let (admin, contract_id, _token) =
+        TestUtils::setup_contract_with_token(&env, core::slice::from_ref(&user));
     env.as_contract(&contract_id, || {
         TestUtils::verify_user(&env, &admin, &user);
 
@@ -609,7 +621,8 @@ fn test_withdraw_insufficient_collateral_ratio() {
 
     let user = TestUtils::create_user_address(&env, 0);
 
-    let (admin, contract_id, _token) = TestUtils::setup_contract_with_token(&env, &[user.clone()]);
+    let (admin, contract_id, _token) =
+        TestUtils::setup_contract_with_token(&env, core::slice::from_ref(&user));
     env.as_contract(&contract_id, || {
         TestUtils::verify_user(&env, &admin, &user);
 
@@ -694,12 +707,13 @@ fn test_flash_loan_reentrancy_blocked() {
 
     let initiator = TestUtils::create_user_address(&env, 0);
     let (_admin, contract_id, token_id) =
-        TestUtils::setup_contract_with_token(&env, &[initiator.clone()]);
+        TestUtils::setup_contract_with_token(&env, core::slice::from_ref(&initiator));
+    #[allow(deprecated)]
     let receiver = env.register_contract(None, FlashLoanReceiver);
 
     env.as_contract(&contract_id, || {
         ReentrancyGuard::enter(&env).unwrap();
-        let result = FlashLoan::execute(&env, &initiator, &token_id, 100, 10, &receiver);
+        let result = FlashLoan::_execute(&env, &initiator, &token_id, 100, 10, &receiver);
         ReentrancyGuard::exit(&env);
         assert_eq!(Err(ProtocolError::ReentrancyDetected), result);
     });
@@ -773,10 +787,10 @@ fn test_set_pause_switches() {
 
         // Verify the switches were set
         let risk_config = Contract::get_risk_config(env.clone()).unwrap();
-        assert_eq!(risk_config.2, true); // pause_borrow
-        assert_eq!(risk_config.3, false); // pause_deposit
-        assert_eq!(risk_config.4, true); // pause_withdraw
-        assert_eq!(risk_config.5, false); // pause_liquidate
+        assert!(risk_config.2); // pause_borrow
+        assert!(!risk_config.3); // pause_deposit
+        assert!(risk_config.4); // pause_withdraw
+        assert!(!risk_config.5); // pause_liquidate
     });
 }
 

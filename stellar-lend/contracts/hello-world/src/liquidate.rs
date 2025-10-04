@@ -3,8 +3,8 @@
 
 use crate::analytics::AnalyticsModule;
 use crate::{
-    EmergencyManager, InterestRateManager, InterestRateStorage, OperationKind, ProtocolConfig,
-    ProtocolError, ProtocolEvent, ReentrancyGuard, RiskConfigStorage, StateHelper,
+    EmergencyManager, OperationKind, ProtocolConfig, ProtocolError, ProtocolEvent, ReentrancyGuard,
+    RiskConfigStorage, StateHelper,
 };
 use soroban_sdk::{contracterror, contracttype, Address, Env, String};
 
@@ -182,7 +182,7 @@ impl LiquidationModule {
     }
 
     /// Check if a position is eligible for liquidation
-    pub fn is_eligible_for_liquidation(env: &Env, user: &Address) -> Result<bool, ProtocolError> {
+    pub fn _is_eligible_for_liquidation(env: &Env, user: &Address) -> Result<bool, ProtocolError> {
         let position = match StateHelper::get_position(env, user) {
             Some(pos) => pos,
             None => return Err(LiquidationError::PositionNotFound.into()),
@@ -237,13 +237,13 @@ impl LiquidationModule {
     }
 
     /// Calculate liquidation incentive
-    pub fn calculate_liquidation_incentive(env: &Env, liquidation_amount: i128) -> i128 {
+    pub fn _calculate_liquidation_incentive(env: &Env, liquidation_amount: i128) -> i128 {
         let risk_config = RiskConfigStorage::get(env);
         (liquidation_amount * risk_config.liquidation_incentive) / 100000000
     }
 
     /// Get liquidation health factor
-    pub fn get_health_factor(env: &Env, user: &Address) -> Result<i128, ProtocolError> {
+    pub fn _get_health_factor(env: &Env, user: &Address) -> Result<i128, ProtocolError> {
         let position = match StateHelper::get_position(env, user) {
             Some(pos) => pos,
             None => return Err(LiquidationError::PositionNotFound.into()),

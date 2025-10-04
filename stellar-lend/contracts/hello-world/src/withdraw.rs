@@ -211,7 +211,7 @@ impl WithdrawModule {
     }
 
     /// Calculate maximum withdrawable amount
-    pub fn calculate_max_withdrawable(env: &Env, user: &Address) -> Result<i128, ProtocolError> {
+    pub fn _calculate_max_withdrawable(env: &Env, user: &Address) -> Result<i128, ProtocolError> {
         let position = match StateHelper::get_position(env, user) {
             Some(pos) => pos,
             None => return Err(WithdrawError::PositionNotFound.into()),
