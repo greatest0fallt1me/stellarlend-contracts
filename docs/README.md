@@ -56,13 +56,13 @@ Key admin entrypoints (see contract for full list):
 - Example payloads: [`protocol_report.json`](examples/protocol_report.json) and
   [`user_report.json`](examples/user_report.json) demonstrate the serialized shape returned by the contract. Monetary
   totals are raw integers in the protocol’s smallest units, and percentage-style fields (e.g., utilization, success
-  rate, health score) are plain integers in the `0–100` range.
+  rate, health score) are exported as fixed-point integers scaled by `1e6` (`333333` ≈ 33.3333%).
 - Field hints:
   - `total_value_locked`, `total_deposits`, `total_borrows`, etc. are cumulative atomic units across all assets.
-- Percentage-like values (e.g., `avg_utilization_rate`, `protocol_risk_score`, `uptime_percentage`) are direct
-    integers representing whole percentages.
+  - Percentage-like values (e.g., `avg_utilization_rate`, `protocol_risk_score`, `uptime_percentage`,
+    `collateralization_ratio`) use the same `1e6` scaling; divide by 1_000_000 to obtain human-readable percentages.
   - User analytics expose running totals plus derived scores (`activity_score`, `loyalty_tier`) that map to reward
-    tiers; `collateralization_ratio` is stored as a percentage scaled by `1e2`.
+    tiers.
 - Example Soroban call:
   ```sh
   soroban contract invoke \

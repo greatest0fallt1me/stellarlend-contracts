@@ -7,12 +7,12 @@
     "total_repayments": 250000,
     "collateral_value": 950000,
     "debt_value": 380000,
-    "collateralization_ratio": 250,
+    "collateralization_ratio": 2500000,
     "activity_score": 620,
     "transaction_count": 12,
     "first_interaction": 1000,
     "last_activity": 1200,
-    "risk_level": 35,
+    "risk_level": 350000,
     "loyalty_tier": 3
   },
   "recent_activities": [
