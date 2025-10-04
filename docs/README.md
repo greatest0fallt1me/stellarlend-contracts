@@ -47,12 +47,22 @@ Key admin entrypoints (see contract for full list):
 - Monitoring entrypoints: `monitor_report_health/performance/security`, `monitor_get`
 
 ### Analytics Read APIs
-- `get_protocol_report()` & `get_user_report(user)` surface typed structs (`ProtocolReport`, `UserReport`) containing
+- `get_protocol_report()` & `get_user_report(address)` surface typed structs (`ProtocolReport`, `UserReport`) containing
   current metrics, active-user counts, and the latest activity feed snapshot time.
 - `get_asset_report(asset)` returns `AssetReport` with per-asset analytics and historical bucketed data.
 - `get_recent_activity(limit)` supplies an `ActivityFeed` with newest-first entries, a `total_available` counter
   (capped at 1,000 retained records), and the `generated_at` ledger timestamp for indexers.
 - Activity entries include `user`, `activity_type`, `amount`, optional `asset`, and a metadata map for extended tags.
+- Example payloads: [`protocol_report.json`](examples/protocol_report.json) and
+  [`user_report.json`](examples/user_report.json) demonstrate the serialized shape returned by the contract. All
+  monetary and rate fields are raw `i128` values expressed in protocol base units (stroop-style 7-decimal fixed point),
+  while timestamps are ledger seconds.
+- Field hints:
+  - `total_value_locked`, `total_deposits`, `total_borrows`, etc. are cumulative atomic units across all assets.
+  - Percentage-like values (e.g., `avg_utilization_rate`, `protocol_risk_score`, `uptime_percentage`) are scaled by
+    `1e6` (`333333` → 33.3333%).
+  - User analytics expose running totals plus derived scores (`activity_score`, `loyalty_tier`) that map to reward
+    tiers; `collateralization_ratio` is stored as a percentage scaled by `1e2`.
 - Example Soroban call:
   ```sh
   soroban contract invoke \
