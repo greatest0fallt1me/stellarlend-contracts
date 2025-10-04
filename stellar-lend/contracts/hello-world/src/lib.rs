@@ -2178,6 +2178,7 @@ pub enum ProtocolError {
     UserRoleViolation = 28,
     BalanceInvariantViolation = 29,
     InsufficientLiquidity = 30,
+    SlippageProtectionTriggered = 31,
 }
 
 /// Protocol events
@@ -2876,6 +2877,7 @@ pub fn liquidate(
     liquidator: String,
     user: String,
     amount: i128,
+    min_out: i128,
 ) -> Result<(), ProtocolError> {
     if liquidator.is_empty() {
         return Err(ProtocolError::InvalidAddress);
@@ -2887,7 +2889,7 @@ pub fn liquidate(
         OperationKind::Liquidate,
         amount,
     )?;
-    liquidate::LiquidationModule::liquidate(&env, &liquidator, &user, amount)?;
+    liquidate::LiquidationModule::liquidate(&env, &liquidator, &user, amount, min_out)?;
     UserManager::record_activity(&env, &liquidator_addr, OperationKind::Liquidate, amount)?;
     Ok(())
 }
@@ -3256,8 +3258,9 @@ impl Contract {
         liquidator: String,
         user: String,
         amount: i128,
+        min_out: i128,
     ) -> Result<(), ProtocolError> {
-        liquidate(env, liquidator, user, amount)
+        liquidate(env, liquidator, user, amount, min_out)
     }
 
     /// Get user position
