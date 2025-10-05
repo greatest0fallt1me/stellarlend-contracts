@@ -1,5 +1,5 @@
 //! Analytics and Reporting Module for StellarLend
-//! 
+//!
 //! This module provides comprehensive analytics and reporting features including:
 //! - Protocol-wide metrics tracking
 //! - User-specific analytics
@@ -8,10 +8,8 @@
 //! - Risk analytics
 //! - Activity tracking
 
-use soroban_sdk::{
-    contracterror, contracttype, vec, Address, Env, Map, String, Symbol, Vec,
-};
 use alloc::string::ToString;
+use soroban_sdk::{contracterror, contracttype, vec, Address, Env, Map, String, Symbol, Vec};
 
 use crate::{ProtocolError, ProtocolEvent};
 
@@ -76,6 +74,11 @@ pub struct ProtocolMetrics {
     pub health_score: i128,
 }
 
+impl Default for ProtocolMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 impl ProtocolMetrics {
     pub fn new() -> Self {
         Self {
@@ -127,7 +130,11 @@ pub struct UserAnalytics {
     /// User's loyalty tier
     pub loyalty_tier: i128,
 }
-
+impl Default for UserAnalytics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 impl UserAnalytics {
     pub fn new() -> Self {
         Self {
@@ -223,7 +230,11 @@ pub struct RiskAnalytics {
     /// Last risk assessment timestamp
     pub last_assessment: u64,
 }
-
+impl Default for RiskAnalytics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 impl RiskAnalytics {
     pub fn new() -> Self {
         Self {
@@ -254,7 +265,11 @@ pub struct PerformanceMetrics {
     /// Last performance update
     pub last_update: u64,
 }
-
+impl Default for PerformanceMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 impl PerformanceMetrics {
     pub fn new() -> Self {
         Self {
@@ -273,39 +288,59 @@ pub struct AnalyticsStorage;
 
 impl AnalyticsStorage {
     // Storage keys
-    fn protocol_metrics_key(env: &Env) -> Symbol { Symbol::new(env, "protocol_metrics") }
-    fn user_analytics_key(env: &Env) -> Symbol { Symbol::new(env, "user_analytics") }
-    fn asset_analytics_key(env: &Env) -> Symbol { Symbol::new(env, "asset_analytics") }
-    fn historical_data_key(env: &Env) -> Symbol { Symbol::new(env, "historical_data") }
-    fn risk_analytics_key(env: &Env) -> Symbol { Symbol::new(env, "risk_analytics") }
-    fn performance_metrics_key(env: &Env) -> Symbol { Symbol::new(env, "performance_metrics") }
-    fn activity_log_key(env: &Env) -> Symbol { Symbol::new(env, "activity_log") }
+    fn protocol_metrics_key(env: &Env) -> Symbol {
+        Symbol::new(env, "protocol_metrics")
+    }
+    fn user_analytics_key(env: &Env) -> Symbol {
+        Symbol::new(env, "user_analytics")
+    }
+    fn asset_analytics_key(env: &Env) -> Symbol {
+        Symbol::new(env, "asset_analytics")
+    }
+    fn historical_data_key(env: &Env) -> Symbol {
+        Symbol::new(env, "historical_data")
+    }
+    fn risk_analytics_key(env: &Env) -> Symbol {
+        Symbol::new(env, "risk_analytics")
+    }
+    fn performance_metrics_key(env: &Env) -> Symbol {
+        Symbol::new(env, "performance_metrics")
+    }
+    fn activity_log_key(env: &Env) -> Symbol {
+        Symbol::new(env, "activity_log")
+    }
 
     // Protocol metrics
     pub fn get_protocol_metrics(env: &Env) -> ProtocolMetrics {
-        env.storage().instance()
+        env.storage()
+            .instance()
             .get(&Self::protocol_metrics_key(env))
-            .unwrap_or_else(ProtocolMetrics::new)
+            .unwrap_or_default()
     }
 
     pub fn put_protocol_metrics(env: &Env, metrics: &ProtocolMetrics) {
-        env.storage().instance().set(&Self::protocol_metrics_key(env), metrics);
+        env.storage()
+            .instance()
+            .set(&Self::protocol_metrics_key(env), metrics);
     }
 
     // User analytics
     pub fn get_user_analytics(env: &Env) -> Map<Address, UserAnalytics> {
-        env.storage().instance()
+        env.storage()
+            .instance()
             .get(&Self::user_analytics_key(env))
             .unwrap_or_else(|| Map::new(env))
     }
 
     pub fn put_user_analytics(env: &Env, analytics: &Map<Address, UserAnalytics>) {
-        env.storage().instance().set(&Self::user_analytics_key(env), analytics);
+        env.storage()
+            .instance()
+            .set(&Self::user_analytics_key(env), analytics);
     }
 
     pub fn get_user_analytics_for_user(env: &Env, user: &Address) -> UserAnalytics {
         let analytics_map = Self::get_user_analytics(env);
-        analytics_map.get(user.clone()).unwrap_or_else(UserAnalytics::new)
+        analytics_map.get(user.clone()).unwrap_or_default()
     }
 
     pub fn update_user_analytics(env: &Env, user: &Address, analytics: &UserAnalytics) {
@@ -316,68 +351,85 @@ impl AnalyticsStorage {
 
     // Asset analytics
     pub fn get_asset_analytics(env: &Env) -> Map<Address, AssetAnalytics> {
-        env.storage().instance()
+        env.storage()
+            .instance()
             .get(&Self::asset_analytics_key(env))
             .unwrap_or_else(|| Map::new(env))
     }
 
-    pub fn put_asset_analytics(env: &Env, analytics: &Map<Address, AssetAnalytics>) {
-        env.storage().instance().set(&Self::asset_analytics_key(env), analytics);
+    pub fn _put_asset_analytics(env: &Env, analytics: &Map<Address, AssetAnalytics>) {
+        env.storage()
+            .instance()
+            .set(&Self::asset_analytics_key(env), analytics);
     }
 
     pub fn get_asset_analytics_for_asset(env: &Env, asset: &Address) -> AssetAnalytics {
         let analytics_map = Self::get_asset_analytics(env);
-        analytics_map.get(asset.clone()).unwrap_or_else(|| AssetAnalytics::new(asset.clone()))
+        analytics_map
+            .get(asset.clone())
+            .unwrap_or_else(|| AssetAnalytics::new(asset.clone()))
     }
 
-    pub fn update_asset_analytics(env: &Env, asset: &Address, analytics: &AssetAnalytics) {
+    pub fn _update_asset_analytics(env: &Env, asset: &Address, analytics: &AssetAnalytics) {
         let mut analytics_map = Self::get_asset_analytics(env);
         analytics_map.set(asset.clone(), analytics.clone());
-        Self::put_asset_analytics(env, &analytics_map);
+        Self::_put_asset_analytics(env, &analytics_map);
     }
 
     // Historical data
     pub fn get_historical_data(env: &Env) -> Map<u64, HistoricalDataPoint> {
-        env.storage().instance()
+        env.storage()
+            .instance()
             .get(&Self::historical_data_key(env))
             .unwrap_or_else(|| Map::new(env))
     }
 
     pub fn put_historical_data(env: &Env, data: &Map<u64, HistoricalDataPoint>) {
-        env.storage().instance().set(&Self::historical_data_key(env), data);
+        env.storage()
+            .instance()
+            .set(&Self::historical_data_key(env), data);
     }
 
     // Risk analytics
     pub fn get_risk_analytics(env: &Env) -> RiskAnalytics {
-        env.storage().instance()
+        env.storage()
+            .instance()
             .get(&Self::risk_analytics_key(env))
-            .unwrap_or_else(RiskAnalytics::new)
+            .unwrap_or_default()
     }
 
     pub fn put_risk_analytics(env: &Env, analytics: &RiskAnalytics) {
-        env.storage().instance().set(&Self::risk_analytics_key(env), analytics);
+        env.storage()
+            .instance()
+            .set(&Self::risk_analytics_key(env), analytics);
     }
 
     // Performance metrics
     pub fn get_performance_metrics(env: &Env) -> PerformanceMetrics {
-        env.storage().instance()
+        env.storage()
+            .instance()
             .get(&Self::performance_metrics_key(env))
-            .unwrap_or_else(PerformanceMetrics::new)
+            .unwrap_or_default()
     }
 
     pub fn put_performance_metrics(env: &Env, metrics: &PerformanceMetrics) {
-        env.storage().instance().set(&Self::performance_metrics_key(env), metrics);
+        env.storage()
+            .instance()
+            .set(&Self::performance_metrics_key(env), metrics);
     }
 
     // Activity log
     pub fn get_activity_log(env: &Env) -> Vec<ActivityLogEntry> {
-        env.storage().instance()
+        env.storage()
+            .instance()
             .get(&Self::activity_log_key(env))
             .unwrap_or_else(|| vec![env])
     }
 
     pub fn put_activity_log(env: &Env, log: &Vec<ActivityLogEntry>) {
-        env.storage().instance().set(&Self::activity_log_key(env), log);
+        env.storage()
+            .instance()
+            .set(&Self::activity_log_key(env), log);
     }
 }
 
@@ -412,11 +464,14 @@ impl AnalyticsModule {
         asset: Option<Address>,
     ) -> Result<(), ProtocolError> {
         let timestamp = env.ledger().timestamp();
-        
+
         // Create activity log entry
         let mut metadata = Map::new(env);
-        metadata.set(String::from_str(env, "timestamp"), String::from_str(env, &timestamp.to_string()));
-        
+        metadata.set(
+            String::from_str(env, "timestamp"),
+            String::from_str(env, &timestamp.to_string()),
+        );
+
         let entry = ActivityLogEntry {
             timestamp,
             user: user.clone(),
@@ -429,12 +484,12 @@ impl AnalyticsModule {
         // Add to activity log
         let mut log = AnalyticsStorage::get_activity_log(env);
         log.push_back(entry);
-        
+
         // Keep only last 1000 entries to prevent storage bloat
         if log.len() > 1000 {
             log = log.slice(1..);
         }
-        
+
         AnalyticsStorage::put_activity_log(env, &log);
 
         // Update user analytics
@@ -449,7 +504,8 @@ impl AnalyticsModule {
             String::from_str(env, activity_type),
             amount,
             timestamp,
-        ).emit(env);
+        )
+        .emit(env);
 
         Ok(())
     }
@@ -512,26 +568,26 @@ impl AnalyticsModule {
             "deposit" => {
                 metrics.total_deposits += amount;
                 metrics.total_value_locked += amount;
-            },
+            }
             "borrow" => {
                 metrics.total_borrows += amount;
-            },
+            }
             "withdraw" => {
                 metrics.total_withdrawals += amount;
                 metrics.total_value_locked -= amount;
-            },
+            }
             "repay" => {
                 metrics.total_repayments += amount;
-            },
+            }
             "liquidate" => {
                 metrics.total_liquidations += 1;
-            },
+            }
             _ => {}
         }
 
         // Update volume
         metrics.total_volume = metrics.total_deposits + metrics.total_borrows;
-        
+
         // Update timestamp
         metrics.last_update = timestamp;
 
@@ -541,7 +597,7 @@ impl AnalyticsModule {
         } else {
             0
         };
-        
+
         // Health score based on utilization (lower utilization = higher health)
         metrics.health_score = (100 - utilization).max(0);
 
@@ -562,7 +618,7 @@ impl AnalyticsModule {
         let day_bucket = timestamp / 86400; // Daily buckets
 
         let mut historical_data = AnalyticsStorage::get_historical_data(env);
-        
+
         let data_point = HistoricalDataPoint {
             timestamp,
             metrics: metrics.clone(),
@@ -584,7 +640,8 @@ impl AnalyticsModule {
 
         // Calculate additional metrics
         let total_users = user_analytics.len() as i128;
-        let active_users = user_analytics.iter()
+        let active_users = user_analytics
+            .iter()
             .filter(|(_, analytics)| {
                 let cutoff = env.ledger().timestamp() - 86400; // 24 hours
                 analytics.last_activity > cutoff
@@ -605,7 +662,7 @@ impl AnalyticsModule {
     pub fn get_user_report(env: &Env, user: &Address) -> Result<UserReport, ProtocolError> {
         let user_analytics = AnalyticsStorage::get_user_analytics_for_user(env, user);
         let activity_log = AnalyticsStorage::get_activity_log(env);
-        
+
         // Filter user's activities
         let mut user_activities = Vec::new(env);
         for entry in activity_log.iter() {
@@ -654,7 +711,8 @@ impl AnalyticsModule {
         let mut value_at_risk = 0;
 
         for (_, analytics) in user_analytics.iter() {
-            if analytics.collateralization_ratio < 150 { // 150% threshold
+            if analytics.collateralization_ratio < 150 {
+                // 150% threshold
                 undercollateralized += 1;
                 value_at_risk += analytics.debt_value;
             }
@@ -699,10 +757,10 @@ impl AnalyticsModule {
         // Update success/error rates (simplified)
         if success {
             metrics.success_rate = (metrics.success_rate + 100) / 2;
-            metrics.error_rate = metrics.error_rate / 2;
+            metrics.error_rate /= 2;
         } else {
             metrics.error_rate = (metrics.error_rate + 100) / 2;
-            metrics.success_rate = metrics.success_rate / 2;
+            metrics.success_rate /= 2;
         }
 
         metrics.last_update = timestamp;

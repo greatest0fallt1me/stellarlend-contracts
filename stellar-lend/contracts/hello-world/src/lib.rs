@@ -7,18 +7,13 @@
 extern crate alloc;
 
 use alloc::format;
-use alloc::string::ToString;
 use soroban_sdk::token::TokenClient;
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, vec, Address, Bytes, Env, IntoVal, Map,
-    String, Symbol, Vec,
+    contract, contracterror, contractimpl, contracttype, Address, Env, Map, String, Symbol, Vec,
 };
-mod oracle;
-use oracle::{Oracle, OracleSource, OracleStorage};
-mod governance;
-use governance::{GovStorage, Governance, Proposal};
 mod flash_loan;
-use flash_loan::FlashLoan;
+mod governance;
+mod oracle;
 
 // Global allocator for Soroban contracts
 #[global_allocator]
@@ -174,7 +169,7 @@ impl UserRole {
         }
     }
 
-    fn as_symbol<'a>(&self, env: &'a Env) -> Symbol {
+    fn as_symbol(&self, env: &Env) -> Symbol {
         match self {
             UserRole::Suspended => Symbol::new(env, "suspended"),
             UserRole::Standard => Symbol::new(env, "standard"),
@@ -396,6 +391,7 @@ impl UserManager {
         Self::ensure_can_manage(env, caller, UserRole::Manager)?;
         let mut profile = Self::ensure_profile(env, user);
         profile.role = role.clone();
+        #[allow(clippy::needless_bool_assign)]
         if matches!(role, UserRole::Suspended) {
             profile.is_frozen = true;
         } else {
@@ -830,7 +826,7 @@ impl EventTracker {
         asset: Option<Address>,
         amount: i128,
     ) {
-        if topics.len() == 0 {
+        if topics.is_empty() {
             topics = Self::base_topics(env, &event_type);
         }
         let record = EventRecord::new(env, event_type, topics, user, asset, amount);
@@ -1228,7 +1224,7 @@ impl TokenRegistry {
 pub struct TransferEnforcer;
 
 impl TransferEnforcer {
-    fn token_client(env: &Env) -> Result<(TokenClient, Address), ProtocolError> {
+    fn token_client(env: &Env) -> Result<(TokenClient<'_>, Address), ProtocolError> {
         let asset = TokenRegistry::require_primary_asset(env)?;
         Ok((TokenClient::new(env, &asset), asset))
     }
@@ -1812,9 +1808,8 @@ pub struct InterestRateConfig {
     pub util_sensitivity_bps: i128,
 }
 
-impl InterestRateConfig {
-    /// Create default interest rate configuration
-    pub fn default() -> Self {
+impl Default for InterestRateConfig {
+    fn default() -> Self {
         Self {
             base_rate: 2000000,         // 2%
             kink_utilization: 80000000, // 80%
@@ -1880,9 +1875,8 @@ pub struct RiskConfig {
     /// Last time config was updated
     pub last_update: u64,
 }
-
-impl RiskConfig {
-    pub fn default() -> Self {
+impl Default for RiskConfig {
+    fn default() -> Self {
         Self {
             close_factor: 50000000,          // 50%
             liquidation_incentive: 10000000, // 10%
@@ -1894,7 +1888,6 @@ impl RiskConfig {
         }
     }
 }
-
 /// Storage helper for risk config
 pub struct RiskConfigStorage;
 
@@ -1911,7 +1904,7 @@ impl RiskConfigStorage {
         env.storage()
             .instance()
             .get(&Self::key(env))
-            .unwrap_or_else(RiskConfig::default)
+            .unwrap_or_default()
     }
 }
 
@@ -1935,7 +1928,7 @@ impl InterestRateStorage {
         env.storage()
             .instance()
             .get(&Self::config_key(env))
-            .unwrap_or_else(InterestRateConfig::default)
+            .unwrap_or_default()
     }
 
     pub fn save_state(env: &Env, state: &InterestRateState) {
@@ -2126,7 +2119,7 @@ impl ProtocolConfig {
         bps: i128,
     ) -> Result<(), ProtocolError> {
         Self::require_admin(env, caller)?;
-        if bps < 0 || bps > 10000 {
+        if !(0..=10000).contains(&bps) {
             return Err(ProtocolError::InvalidInput);
         }
         env.storage()
@@ -2823,7 +2816,7 @@ impl ProtocolEvent {
 }
 
 /// Analytics helper function
-pub fn analytics_record_action(env: &Env, user: &Address, action: &str, amount: i128) {
+pub fn analytics_record_action(env: &Env, user: &Address, _action: &str, amount: i128) {
     // Simple analytics recording - can be enhanced later
     let timestamp = env.ledger().timestamp();
     // For now, just emit a simple event
@@ -2831,7 +2824,7 @@ pub fn analytics_record_action(env: &Env, user: &Address, action: &str, amount: 
 }
 
 /// Helper function to ensure amount is positive
-fn ensure_amount_positive(amount: i128) -> Result<(), ProtocolError> {
+fn _ensure_amount_positive(amount: i128) -> Result<(), ProtocolError> {
     if amount <= 0 {
         return Err(ProtocolError::InvalidAmount);
     }
@@ -3500,7 +3493,7 @@ impl Contract {
     pub fn record_activity(
         env: Env,
         user: String,
-        activity_type: String,
+        _activity_type: String,
         amount: i128,
         asset: Option<Address>,
     ) -> Result<(), ProtocolError> {

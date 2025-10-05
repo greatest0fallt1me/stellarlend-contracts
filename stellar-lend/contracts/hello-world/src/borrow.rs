@@ -141,7 +141,7 @@ impl BorrowModule {
     }
 
     /// Borrow a specific asset against total cross-asset collateral
-    pub fn borrow_asset(
+    pub fn _borrow_asset(
         env: &Env,
         user: &String,
         asset: &Address,
@@ -195,7 +195,7 @@ impl BorrowModule {
     }
 
     /// Validate borrow parameters
-    pub fn validate_borrow_params(params: &BorrowParams) -> Result<(), BorrowError> {
+    pub fn _validate_borrow_params(params: &BorrowParams) -> Result<(), BorrowError> {
         if params.amount <= 0 {
             return Err(BorrowError::InvalidAmount);
         }
@@ -203,7 +203,7 @@ impl BorrowModule {
     }
 
     /// Calculate maximum borrowable amount based on collateral
-    pub fn calculate_max_borrowable(
+    pub fn _calculate_max_borrowable(
         collateral: i128,
         current_debt: i128,
         min_collateral_ratio: i128,
@@ -221,7 +221,7 @@ impl BorrowModule {
     }
 
     /// Check if borrow is allowed based on collateral ratio
-    pub fn is_borrow_allowed(
+    pub fn _is_borrow_allowed(
         collateral: i128,
         current_debt: i128,
         borrow_amount: i128,
