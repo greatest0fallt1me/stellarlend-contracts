@@ -8,7 +8,6 @@
 //! - Risk analytics
 //! - Activity tracking
 
-use alloc::string::ToString;
 use core::cmp::min;
 use soroban_sdk::{contracterror, contracttype, vec, Address, Env, Map, String, Symbol, Vec};
 
