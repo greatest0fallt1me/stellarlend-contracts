@@ -1,10 +1,11 @@
 use crate::{ProtocolError, ProtocolEvent, ReentrancyGuard};
 use soroban_sdk::{vec, Address, Env, IntoVal, Symbol};
 
+#[allow(dead_code)]
 pub struct FlashLoan;
 
 impl FlashLoan {
-    pub fn execute(
+    pub fn _execute(
         env: &Env,
         initiator: &Address,
         asset: &Address,
@@ -16,7 +17,7 @@ impl FlashLoan {
             return Err(ProtocolError::InvalidAmount);
         }
         ReentrancyGuard::enter(env)?;
-        let result = (|| {
+        let result = {
             let fee = (amount * fee_bps) / 10000;
             ProtocolEvent::FlashLoanInitiated(initiator.clone(), asset.clone(), amount, fee)
                 .emit(env);
@@ -32,7 +33,7 @@ impl FlashLoan {
             ProtocolEvent::FlashLoanCompleted(initiator.clone(), asset.clone(), amount, fee)
                 .emit(env);
             Ok(())
-        })();
+        };
         ReentrancyGuard::exit(env);
         result
     }

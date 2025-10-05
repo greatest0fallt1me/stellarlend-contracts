@@ -153,7 +153,7 @@ impl WithdrawModule {
     }
 
     /// Withdraw collateral for a specific asset (checks cross-asset ratio)
-    pub fn withdraw_asset(
+    pub fn _withdraw_asset(
         env: &Env,
         user: &String,
         asset: &Address,
@@ -211,7 +211,7 @@ impl WithdrawModule {
     }
 
     /// Calculate maximum withdrawable amount
-    pub fn calculate_max_withdrawable(env: &Env, user: &Address) -> Result<i128, ProtocolError> {
+    pub fn _calculate_max_withdrawable(env: &Env, user: &Address) -> Result<i128, ProtocolError> {
         let position = match StateHelper::get_position(env, user) {
             Some(pos) => pos,
             None => return Err(WithdrawError::PositionNotFound.into()),
@@ -232,7 +232,7 @@ impl WithdrawModule {
     }
 
     /// Validate withdraw parameters
-    pub fn validate_withdraw_params(params: &WithdrawParams) -> Result<(), WithdrawError> {
+    pub fn _validate_withdraw_params(params: &WithdrawParams) -> Result<(), WithdrawError> {
         if params.amount <= 0 {
             return Err(WithdrawError::InvalidAmount);
         }
@@ -240,7 +240,7 @@ impl WithdrawModule {
     }
 
     /// Check if withdrawal is allowed based on collateral ratio
-    pub fn is_withdrawal_allowed(
+    pub fn _is_withdrawal_allowed(
         current_collateral: i128,
         current_debt: i128,
         withdraw_amount: i128,
@@ -260,7 +260,7 @@ impl WithdrawModule {
     }
 
     /// Calculate collateral ratio after withdrawal
-    pub fn calculate_collateral_ratio_after_withdrawal(
+    pub fn _calculate_collateral_ratio_after_withdrawal(
         current_collateral: i128,
         current_debt: i128,
         withdraw_amount: i128,

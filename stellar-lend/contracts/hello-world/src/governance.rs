@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use soroban_sdk::{contracttype, Address, Env, Map, Symbol, Vec};
+use soroban_sdk::{contracttype, Address, Env, Map, Symbol};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]

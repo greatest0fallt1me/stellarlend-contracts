@@ -88,9 +88,9 @@ pub struct Oracle;
 
 impl Oracle {
     /// Register or update an oracle source for an asset
-    pub fn set_source(env: &Env, caller: &Address, asset: &Address, source: OracleSource) {
+    pub fn set_source(env: &Env, _caller: &Address, asset: &Address, source: OracleSource) {
         // Access control left to caller via lib.rs admin checks
-        let mut list = OracleStorage::get_sources(env, asset);
+        let list = OracleStorage::get_sources(env, asset);
         // Replace if exists
         let mut replaced = false;
         let mut out: Vec<OracleSource> = Vec::new(env);
@@ -109,7 +109,7 @@ impl Oracle {
     }
 
     /// Remove a source
-    pub fn remove_source(env: &Env, caller: &Address, asset: &Address, addr: &Address) {
+    pub fn remove_source(env: &Env, _caller: &Address, asset: &Address, addr: &Address) {
         let list = OracleStorage::get_sources(env, asset);
         let mut out: Vec<OracleSource> = Vec::new(env);
         for s in list.iter() {

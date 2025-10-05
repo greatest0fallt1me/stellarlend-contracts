@@ -7,18 +7,13 @@
 extern crate alloc;
 
 use alloc::format;
-use alloc::string::ToString;
 use soroban_sdk::token::TokenClient;
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, vec, Address, Bytes, Env, IntoVal, Map,
-    String, Symbol, Vec,
+    contract, contracterror, contractimpl, contracttype, Address, Env, Map, String, Symbol, Vec,
 };
-mod oracle;
-use oracle::{Oracle, OracleSource, OracleStorage};
-mod governance;
-use governance::{GovStorage, Governance, Proposal};
 mod flash_loan;
-use flash_loan::FlashLoan;
+mod governance;
+mod oracle;
 
 // Global allocator for Soroban contracts
 #[global_allocator]
@@ -100,6 +95,7 @@ impl AddressHelper {
 mod test;
 
 // Core protocol modules
+mod amm;
 mod analytics;
 mod borrow;
 mod deposit;
@@ -246,7 +242,7 @@ impl UserRole {
         }
     }
 
-    fn as_symbol<'a>(&self, env: &'a Env) -> Symbol {
+    fn as_symbol(&self, env: &Env) -> Symbol {
         match self {
             UserRole::Suspended => Symbol::new(env, "suspended"),
             UserRole::Standard => Symbol::new(env, "standard"),
@@ -468,6 +464,7 @@ impl UserManager {
         Self::ensure_can_manage(env, caller, UserRole::Manager)?;
         let mut profile = Self::ensure_profile(env, user);
         profile.role = role.clone();
+        #[allow(clippy::needless_bool_assign)]
         if matches!(role, UserRole::Suspended) {
             profile.is_frozen = true;
         } else {
@@ -902,7 +899,7 @@ impl EventTracker {
         asset: Option<Address>,
         amount: i128,
     ) {
-        if topics.len() == 0 {
+        if topics.is_empty() {
             topics = Self::base_topics(env, &event_type);
         }
         let record = EventRecord::new(env, event_type, topics, user, asset, amount);
@@ -1300,7 +1297,7 @@ impl TokenRegistry {
 pub struct TransferEnforcer;
 
 impl TransferEnforcer {
-    fn token_client(env: &Env) -> Result<(TokenClient, Address), ProtocolError> {
+    fn token_client(env: &Env) -> Result<(TokenClient<'_>, Address), ProtocolError> {
         let asset = TokenRegistry::require_primary_asset(env)?;
         Ok((TokenClient::new(env, &asset), asset))
     }
@@ -1884,9 +1881,8 @@ pub struct InterestRateConfig {
     pub util_sensitivity_bps: i128,
 }
 
-impl InterestRateConfig {
-    /// Create default interest rate configuration
-    pub fn default() -> Self {
+impl Default for InterestRateConfig {
+    fn default() -> Self {
         Self {
             base_rate: 2000000,         // 2%
             kink_utilization: 80000000, // 80%
@@ -1952,9 +1948,8 @@ pub struct RiskConfig {
     /// Last time config was updated
     pub last_update: u64,
 }
-
-impl RiskConfig {
-    pub fn default() -> Self {
+impl Default for RiskConfig {
+    fn default() -> Self {
         Self {
             close_factor: 50000000,          // 50%
             liquidation_incentive: 10000000, // 10%
@@ -1966,7 +1961,6 @@ impl RiskConfig {
         }
     }
 }
-
 /// Storage helper for risk config
 pub struct RiskConfigStorage;
 
@@ -1983,7 +1977,7 @@ impl RiskConfigStorage {
         env.storage()
             .instance()
             .get(&Self::key(env))
-            .unwrap_or_else(RiskConfig::default)
+            .unwrap_or_default()
     }
 }
 
@@ -2007,7 +2001,7 @@ impl InterestRateStorage {
         env.storage()
             .instance()
             .get(&Self::config_key(env))
-            .unwrap_or_else(InterestRateConfig::default)
+            .unwrap_or_default()
     }
 
     pub fn save_state(env: &Env, state: &InterestRateState) {
@@ -2198,7 +2192,7 @@ impl ProtocolConfig {
         bps: i128,
     ) -> Result<(), ProtocolError> {
         Self::require_admin(env, caller)?;
-        if bps < 0 || bps > 10000 {
+        if !(0..=10000).contains(&bps) {
             return Err(ProtocolError::InvalidInput);
         }
         env.storage()
@@ -2250,6 +2244,7 @@ pub enum ProtocolError {
     UserRoleViolation = 28,
     BalanceInvariantViolation = 29,
     InsufficientLiquidity = 30,
+    SlippageProtectionTriggered = 31,
 }
 
 /// Protocol events
@@ -2895,7 +2890,7 @@ impl ProtocolEvent {
 }
 
 /// Analytics helper function
-pub fn analytics_record_action(env: &Env, user: &Address, action: &str, amount: i128) {
+pub fn analytics_record_action(env: &Env, user: &Address, _action: &str, amount: i128) {
     // Simple analytics recording - can be enhanced later
     let timestamp = env.ledger().timestamp();
     // For now, just emit a simple event
@@ -2903,7 +2898,7 @@ pub fn analytics_record_action(env: &Env, user: &Address, action: &str, amount: 
 }
 
 /// Helper function to ensure amount is positive
-fn ensure_amount_positive(amount: i128) -> Result<(), ProtocolError> {
+fn _ensure_amount_positive(amount: i128) -> Result<(), ProtocolError> {
     if amount <= 0 {
         return Err(ProtocolError::InvalidAmount);
     }
@@ -2936,6 +2931,7 @@ pub fn liquidate(
     liquidator: String,
     user: String,
     amount: i128,
+    min_out: i128,
 ) -> Result<(), ProtocolError> {
     let liquidator_addr = AddressHelper::require_valid_address(&env, &liquidator)?;
     UserManager::ensure_operation_allowed(
@@ -2944,7 +2940,7 @@ pub fn liquidate(
         OperationKind::Liquidate,
         amount,
     )?;
-    liquidate::LiquidationModule::liquidate(&env, &liquidator, &user, amount)?;
+    liquidate::LiquidationModule::liquidate(&env, &liquidator, &user, amount, min_out)?;
     UserManager::record_activity(&env, &liquidator_addr, OperationKind::Liquidate, amount)?;
     Ok(())
 }
@@ -3310,8 +3306,9 @@ impl Contract {
         liquidator: String,
         user: String,
         amount: i128,
+        min_out: i128,
     ) -> Result<(), ProtocolError> {
-        liquidate(env, liquidator, user, amount)
+        liquidate(env, liquidator, user, amount, min_out)
     }
 
     /// Get user position
@@ -3554,7 +3551,7 @@ impl Contract {
     pub fn record_activity(
         env: Env,
         user: String,
-        activity_type: String,
+        _activity_type: String,
         amount: i128,
         asset: Option<Address>,
     ) -> Result<(), ProtocolError> {
@@ -3562,5 +3559,216 @@ impl Contract {
         // For now, we'll use a placeholder string since soroban_sdk::String doesn't implement Display
         // In a real implementation, you might want to modify the analytics module to accept soroban_sdk::String
         analytics::AnalyticsModule::record_activity(&env, &user_addr, "activity", amount, asset)
+    }
+
+    // ==================== AMM Registry and Swap Hooks ====================
+
+    /// Register a new AMM asset pair for swap operations
+    ///
+    /// # Arguments
+    /// * `admin` - Admin address (must match contract admin)
+    /// * `asset_a` - First asset address
+    /// * `asset_b` - Second asset address
+    /// * `amm_address` - AMM contract address managing this pair
+    /// * `pool_address` - Optional liquidity pool address
+    ///
+    /// # Returns
+    /// * `Ok(())` on successful registration
+    /// * `Err(ProtocolError)` if pair already exists or invalid parameters
+    pub fn register_amm_pair(
+        env: Env,
+        admin: Address,
+        asset_a: Address,
+        asset_b: Address,
+        amm_address: Address,
+        pool_address: Option<Address>,
+    ) -> Result<(), ProtocolError> {
+        let _guard = ReentrancyScope::enter(&env)?;
+
+        // Verify admin privileges
+        ProtocolConfig::require_admin(&env, &admin)?;
+
+        amm::AMMRegistry::register_pair(&env, asset_a, asset_b, amm_address, pool_address)
+    }
+
+    /// Check if an AMM pair is registered and active
+    ///
+    /// # Arguments
+    /// * `asset_a` - First asset address
+    /// * `asset_b` - Second asset address
+    ///
+    /// # Returns
+    /// * `true` if pair is registered and active, `false` otherwise
+    pub fn is_amm_pair_registered(
+        env: Env,
+        asset_a: Address,
+        asset_b: Address,
+    ) -> bool {
+        amm::AMMRegistry::is_pair_registered(&env, &asset_a, &asset_b)
+    }
+
+    /// Get information about a registered AMM pair
+    ///
+    /// # Arguments
+    /// * `asset_a` - First asset address
+    /// * `asset_b` - Second asset address
+    ///
+    /// # Returns
+    /// * Asset pair information if registered
+    /// * Error if pair not found
+    pub fn get_amm_pair_info(
+        env: Env,
+        asset_a: Address,
+        asset_b: Address,
+    ) -> Result<amm::AssetPair, ProtocolError> {
+        amm::AMMRegistry::get_pair_info(&env, &asset_a, &asset_b)
+    }
+
+    /// Execute a swap through registered AMM
+    ///
+    /// # Arguments
+    /// * `params` - Swap parameters including assets, amounts, and slippage tolerance
+    ///
+    /// # Returns
+    /// * Swap result with amounts and exchange rate
+    /// * Error if swap fails or parameters invalid
+    pub fn execute_amm_swap(
+        env: Env,
+        params: amm::SwapParams,
+    ) -> Result<amm::SwapResult, ProtocolError> {
+        let _guard = ReentrancyScope::enter(&env)?;
+        amm::AMMRegistry::execute_swap(&env, params)
+    }
+
+    /// Swap hook for liquidation flows
+    /// Automatically swaps seized collateral to debt asset during liquidation
+    ///
+    /// # Arguments
+    /// * `liquidator` - Address of the liquidator
+    /// * `collateral_asset` - Asset seized as collateral
+    /// * `debt_asset` - Asset to repay debt
+    /// * `collateral_amount` - Amount of collateral to swap
+    /// * `min_debt_amount` - Minimum debt amount expected from swap
+    ///
+    /// # Returns
+    /// * Swap result with actual amounts swapped
+    /// * Updates position with adjusted collateral and debt
+    pub fn liquidation_swap_hook(
+        env: Env,
+        liquidator: Address,
+        collateral_asset: Address,
+        debt_asset: Address,
+        collateral_amount: i128,
+        min_debt_amount: i128,
+    ) -> Result<amm::SwapResult, ProtocolError> {
+        let _guard = ReentrancyScope::enter(&env)?;
+
+        amm::AMMRegistry::liquidation_swap_hook(
+            &env,
+            &liquidator,
+            &collateral_asset,
+            &debt_asset,
+            collateral_amount,
+            min_debt_amount,
+        )
+    }
+
+    /// Swap hook for deleveraging flows
+    /// Allows users to reduce debt by swapping assets
+    ///
+    /// # Arguments
+    /// * `user` - User deleveraging their position
+    /// * `asset_to_sell` - Asset to sell
+    /// * `debt_asset` - Debt asset to repay
+    /// * `sell_amount` - Amount to sell
+    /// * `min_debt_repayment` - Minimum debt repayment expected
+    ///
+    /// # Returns
+    /// * Swap result with actual amounts
+    /// * Updates position with reduced debt
+    pub fn deleverage_swap_hook(
+        env: Env,
+        user: Address,
+        asset_to_sell: Address,
+        debt_asset: Address,
+        sell_amount: i128,
+        min_debt_repayment: i128,
+    ) -> Result<amm::SwapResult, ProtocolError> {
+        let _guard = ReentrancyScope::enter(&env)?;
+
+        amm::AMMRegistry::deleverage_swap_hook(
+            &env,
+            &user,
+            &asset_to_sell,
+            &debt_asset,
+            sell_amount,
+            min_debt_repayment,
+        )
+    }
+
+    /// Get total number of registered AMM pairs
+    ///
+    /// # Returns
+    /// * Count of registered pairs
+    pub fn get_total_amm_pairs(env: Env) -> i128 {
+        amm::AMMRegistry::get_total_pairs(&env)
+    }
+
+    /// Get all registered AMM pairs
+    ///
+    /// # Returns
+    /// * Vector of all registered asset pairs
+    pub fn get_all_amm_pairs(env: Env) -> Vec<amm::AssetPair> {
+        amm::AMMRegistry::get_all_pairs(&env)
+    }
+
+    /// Get AMM swap history for analytics
+    ///
+    /// # Returns
+    /// * Vector of recent swap results (last 100)
+    pub fn get_amm_swap_history(env: Env) -> Vec<amm::SwapResult> {
+        amm::AMMRegistry::get_swap_history(&env)
+    }
+
+    /// Deactivate an AMM pair
+    /// Admin-only function to disable a pair
+    ///
+    /// # Arguments
+    /// * `admin` - Admin address (must match contract admin)
+    /// * `asset_a` - First asset address
+    /// * `asset_b` - Second asset address
+    pub fn deactivate_amm_pair(
+        env: Env,
+        admin: Address,
+        asset_a: Address,
+        asset_b: Address,
+    ) -> Result<(), ProtocolError> {
+        let _guard = ReentrancyScope::enter(&env)?;
+
+        // Verify admin privileges
+        ProtocolConfig::require_admin(&env, &admin)?;
+
+        amm::AMMRegistry::deactivate_pair(&env, &asset_a, &asset_b)
+    }
+
+    /// Reactivate an AMM pair
+    /// Admin-only function to re-enable a previously deactivated pair
+    ///
+    /// # Arguments
+    /// * `admin` - Admin address (must match contract admin)
+    /// * `asset_a` - First asset address
+    /// * `asset_b` - Second asset address
+    pub fn activate_amm_pair(
+        env: Env,
+        admin: Address,
+        asset_a: Address,
+        asset_b: Address,
+    ) -> Result<(), ProtocolError> {
+        let _guard = ReentrancyScope::enter(&env)?;
+
+        // Verify admin privileges
+        ProtocolConfig::require_admin(&env, &admin)?;
+
+        amm::AMMRegistry::activate_pair(&env, &asset_a, &asset_b)
     }
 }

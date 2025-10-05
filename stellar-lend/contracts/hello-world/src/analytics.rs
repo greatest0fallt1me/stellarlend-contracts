@@ -74,6 +74,11 @@ pub struct ProtocolMetrics {
     pub health_score: i128,
 }
 
+impl Default for ProtocolMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 impl ProtocolMetrics {
     pub fn new() -> Self {
         Self {
@@ -125,7 +130,11 @@ pub struct UserAnalytics {
     /// User's loyalty tier
     pub loyalty_tier: i128,
 }
-
+impl Default for UserAnalytics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 impl UserAnalytics {
     pub fn new() -> Self {
         Self {
@@ -221,7 +230,11 @@ pub struct RiskAnalytics {
     /// Last risk assessment timestamp
     pub last_assessment: u64,
 }
-
+impl Default for RiskAnalytics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 impl RiskAnalytics {
     pub fn new() -> Self {
         Self {
@@ -252,7 +265,11 @@ pub struct PerformanceMetrics {
     /// Last performance update
     pub last_update: u64,
 }
-
+impl Default for PerformanceMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 impl PerformanceMetrics {
     pub fn new() -> Self {
         Self {
@@ -298,7 +315,7 @@ impl AnalyticsStorage {
         env.storage()
             .instance()
             .get(&Self::protocol_metrics_key(env))
-            .unwrap_or_else(ProtocolMetrics::new)
+            .unwrap_or_default()
     }
 
     pub fn put_protocol_metrics(env: &Env, metrics: &ProtocolMetrics) {
@@ -355,10 +372,10 @@ impl AnalyticsStorage {
             .unwrap_or_else(|| AssetAnalytics::new(asset.clone()))
     }
 
-    pub fn update_asset_analytics(env: &Env, asset: &Address, analytics: &AssetAnalytics) {
+    pub fn _update_asset_analytics(env: &Env, asset: &Address, analytics: &AssetAnalytics) {
         let mut analytics_map = Self::get_asset_analytics(env);
         analytics_map.set(asset.clone(), analytics.clone());
-        Self::put_asset_analytics(env, &analytics_map);
+        Self::_put_asset_analytics(env, &analytics_map);
     }
 
     // Historical data
@@ -380,7 +397,7 @@ impl AnalyticsStorage {
         env.storage()
             .instance()
             .get(&Self::risk_analytics_key(env))
-            .unwrap_or_else(RiskAnalytics::new)
+            .unwrap_or_default()
     }
 
     pub fn put_risk_analytics(env: &Env, analytics: &RiskAnalytics) {
@@ -394,7 +411,7 @@ impl AnalyticsStorage {
         env.storage()
             .instance()
             .get(&Self::performance_metrics_key(env))
-            .unwrap_or_else(PerformanceMetrics::new)
+            .unwrap_or_default()
     }
 
     pub fn put_performance_metrics(env: &Env, metrics: &PerformanceMetrics) {
@@ -742,10 +759,10 @@ impl AnalyticsModule {
         // Update success/error rates (simplified)
         if success {
             metrics.success_rate = (metrics.success_rate + 100) / 2;
-            metrics.error_rate = metrics.error_rate / 2;
+            metrics.error_rate /= 2;
         } else {
             metrics.error_rate = (metrics.error_rate + 100) / 2;
-            metrics.success_rate = metrics.success_rate / 2;
+            metrics.success_rate /= 2;
         }
 
         metrics.last_update = timestamp;
