@@ -5,8 +5,10 @@
 //! - Swap hooks for deleveraging and liquidation flows
 //! - Event emissions for AMM usage tracking
 //! - Integration with liquidation mechanisms
-
-use crate::{Position, ProtocolError, ProtocolEvent, ReentrancyGuard, StateHelper};
+#[cfg(not(test))]
+use crate::ProtocolEvent;
+#[allow(unused_imports)]
+use crate::{Position, ProtocolError, ReentrancyGuard, StateHelper};
 use soroban_sdk::{contracterror, contracttype, Address, Env, Map, Symbol, Vec};
 
 /// AMM-specific error types
