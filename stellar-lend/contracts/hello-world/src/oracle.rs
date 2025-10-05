@@ -37,11 +37,17 @@ impl OracleStorage {
         env.storage().instance().get(&Self::heartbeat_ttl_key(env)).unwrap_or(300)
     }
 
-    pub fn set_heartbeat_ttl(env: &Env, ttl: u64) {
+    pub fn set_heartbeat_ttl(env: &Env, caller: &Address, ttl: u64) -> Result<(), crate::ProtocolError> {
+        crate::UserManager::require_admin(env, caller)?;
         env.storage().instance().set(&Self::heartbeat_ttl_key(env), &ttl);
+        Ok(())
     }
 
-    pub fn set_mode(env: &Env, mode: i128) { env.storage().instance().set(&Self::mode_key(env), &mode); }
+    pub fn set_mode(env: &Env, caller: &Address, mode: i128) -> Result<(), crate::ProtocolError> {
+        crate::UserManager::require_admin(env, caller)?;
+        env.storage().instance().set(&Self::mode_key(env), &mode);
+        Ok(())
+    }
     pub fn get_mode(env: &Env) -> i128 { env.storage().instance().get(&Self::mode_key(env)).unwrap_or(0) } // 0=median,1=twap
     pub fn inc_perf(env: &Env) -> i128 {
         let cur: i128 = env.storage().instance().get(&Self::perf_count_key(env)).unwrap_or(0) + 1;
@@ -54,8 +60,8 @@ pub struct Oracle;
 
 impl Oracle {
     /// Register or update an oracle source for an asset
-    pub fn set_source(env: &Env, caller: &Address, asset: &Address, source: OracleSource) {
-        // Access control left to caller via lib.rs admin checks
+    pub fn set_source(env: &Env, caller: &Address, asset: &Address, source: OracleSource) -> Result<(), crate::ProtocolError> {
+        crate::UserManager::require_admin(env, caller)?;
         let mut list = OracleStorage::get_sources(env, asset);
         // Replace if exists
         let mut replaced = false;
@@ -65,14 +71,17 @@ impl Oracle {
         }
         if !replaced { out.push_back(source); }
         OracleStorage::put_sources(env, asset, &out);
+        Ok(())
     }
 
     /// Remove a source
-    pub fn remove_source(env: &Env, caller: &Address, asset: &Address, addr: &Address) {
+    pub fn remove_source(env: &Env, caller: &Address, asset: &Address, addr: &Address) -> Result<(), crate::ProtocolError> {
+        crate::UserManager::require_admin(env, caller)?;
         let list = OracleStorage::get_sources(env, asset);
         let mut out: Vec<OracleSource> = Vec::new(env);
         for s in list.iter() { if s.addr != *addr { out.push_back(s); } }
         OracleStorage::put_sources(env, asset, &out);
+        Ok(())
     }
 
     /// Fetch prices from all sources (stubbed as calling `get_price()` on source contracts)
