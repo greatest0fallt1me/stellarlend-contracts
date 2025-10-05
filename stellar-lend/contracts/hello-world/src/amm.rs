@@ -382,8 +382,8 @@ impl AMMRegistry {
         asset_a: &Address,
         asset_b: &Address,
     ) -> Result<(), ProtocolError> {
-        let mut pair = AMMStorage::get_pair(env, asset_a, asset_b)
-            .ok_or_else(|| AMMError::PairNotRegistered)?;
+        let mut pair =
+            AMMStorage::get_pair(env, asset_a, asset_b).ok_or(AMMError::PairNotRegistered)?;
 
         pair.is_active = false;
         pair.last_updated = env.ledger().timestamp();
@@ -398,8 +398,8 @@ impl AMMRegistry {
         asset_a: &Address,
         asset_b: &Address,
     ) -> Result<(), ProtocolError> {
-        let mut pair = AMMStorage::get_pair(env, asset_a, asset_b)
-            .ok_or_else(|| AMMError::PairNotRegistered)?;
+        let mut pair =
+            AMMStorage::get_pair(env, asset_a, asset_b).ok_or(AMMError::PairNotRegistered)?;
 
         pair.is_active = true;
         pair.last_updated = env.ledger().timestamp();
@@ -433,7 +433,7 @@ impl AMMRegistry {
 
             // Get the pair
             let pair = AMMStorage::get_pair(env, &params.asset_in, &params.asset_out)
-                .ok_or_else(|| AMMError::PairNotRegistered)?;
+                .ok_or(AMMError::PairNotRegistered)?;
 
             if !pair.is_active {
                 return Err(AMMError::PairNotRegistered.into());

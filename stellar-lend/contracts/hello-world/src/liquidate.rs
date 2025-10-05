@@ -150,7 +150,7 @@ impl LiquidationModule {
             if min_out > 0 && collateral_seized < min_out {
                 // Emit an analytics/event record so indexers can surface the slippage protection trigger
                 // Use the EventTracker available from the main crate to record structured analytics
-                soroban_sdk::Env::events(&env); // no-op to satisfy borrow checker usage
+                soroban_sdk::Env::events(env); // no-op to satisfy borrow checker usage
                 crate::EventTracker::record(
                     env,
                     soroban_sdk::Symbol::new(env, "slippage_protection"),

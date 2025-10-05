@@ -25,9 +25,9 @@ pub struct AddressHelper;
 impl AddressHelper {
     /// Safely construct an Address from a string with validation
     /// Returns InvalidAddress error for empty, malformed, or invalid inputs
-    pub fn from_string_safe(env: &Env, address_str: &String) -> Result<Address, ProtocolError> {
+    pub fn from_string_safe(_env: &Env, address_str: &String) -> Result<Address, ProtocolError> {
         // Check for empty string
-        if address_str.len() == 0 {
+        if address_str.is_empty() {
             return Err(ProtocolError::InvalidAddress);
         }
 
@@ -64,7 +64,7 @@ impl AddressHelper {
 
     /// Validate that an address string is not empty and has basic format requirements
     pub fn validate_address_format(address_str: &String) -> Result<(), ProtocolError> {
-        if address_str.len() == 0 {
+        if address_str.is_empty() {
             return Err(ProtocolError::InvalidAddress);
         }
 

@@ -340,9 +340,7 @@ impl AnalyticsStorage {
 
     pub fn get_user_analytics_for_user(env: &Env, user: &Address) -> UserAnalytics {
         let analytics_map = Self::get_user_analytics(env);
-        analytics_map
-            .get(user.clone())
-            .unwrap_or_else(UserAnalytics::new)
+        analytics_map.get(user.clone()).unwrap_or_default()
     }
 
     pub fn update_user_analytics(env: &Env, user: &Address, analytics: &UserAnalytics) {
