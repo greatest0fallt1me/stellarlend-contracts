@@ -3599,11 +3599,7 @@ impl Contract {
     ///
     /// # Returns
     /// * `true` if pair is registered and active, `false` otherwise
-    pub fn is_amm_pair_registered(
-        env: Env,
-        asset_a: Address,
-        asset_b: Address,
-    ) -> bool {
+    pub fn is_amm_pair_registered(env: Env, asset_a: Address, asset_b: Address) -> bool {
         amm::AMMRegistry::is_pair_registered(&env, &asset_a, &asset_b)
     }
 

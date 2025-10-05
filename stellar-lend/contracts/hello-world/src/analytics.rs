@@ -359,7 +359,7 @@ impl AnalyticsStorage {
             .unwrap_or_else(|| Map::new(env))
     }
 
-    pub fn put_asset_analytics(env: &Env, analytics: &Map<Address, AssetAnalytics>) {
+    pub fn _put_asset_analytics(env: &Env, analytics: &Map<Address, AssetAnalytics>) {
         env.storage()
             .instance()
             .set(&Self::asset_analytics_key(env), analytics);

@@ -746,7 +746,10 @@ fn test_liquidate_slippage_protection_triggers() {
             1_000_000, // very high min_out
         );
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), ProtocolError::SlippageProtectionTriggered);
+        assert_eq!(
+            result.unwrap_err(),
+            ProtocolError::SlippageProtectionTriggered
+        );
     });
 }
 
@@ -1159,6 +1162,7 @@ fn test_liquidate_invalid_addresses() {
             String::from_str(&env, ""),
             valid_user.to_string(),
             1000,
+            0, // min_out parameter
         );
         assert!(result.is_err());
         // The empty string should be caught by our address validation
@@ -1173,6 +1177,7 @@ fn test_liquidate_invalid_addresses() {
             valid_user.to_string(),
             String::from_str(&env, ""),
             1000,
+            0, // min_out parameter
         );
         assert!(result.is_err());
         // This should fail when the liquidation module tries to parse the empty user string
