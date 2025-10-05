@@ -93,6 +93,7 @@ impl LiquidationModule {
         liquidator: &String,
         user: &String,
         amount: i128,
+        min_out: i128,
     ) -> Result<LiquidationResult, ProtocolError> {
         ReentrancyGuard::enter(env)?;
         let result = (|| -> Result<LiquidationResult, ProtocolError> {
@@ -144,6 +145,28 @@ impl LiquidationModule {
             // Calculate collateral to seize
             let collateral_seized =
                 (liquidation_amount * (100000000 + risk_config.liquidation_incentive)) / 100000000;
+
+            // Slippage protection: ensure the liquidator receives at least `min_out` collateral
+            if min_out > 0 && collateral_seized < min_out {
+                // Emit an analytics/event record so indexers can surface the slippage protection trigger
+                // Use the EventTracker available from the main crate to record structured analytics
+                soroban_sdk::Env::events(&env); // no-op to satisfy borrow checker usage
+                crate::EventTracker::record(
+                    env,
+                    soroban_sdk::Symbol::new(env, "slippage_protection"),
+                    {
+                        let mut topics = soroban_sdk::Vec::new(env);
+                        topics.push_back(soroban_sdk::Symbol::new(env, "liquidator"));
+                        topics.push_back(soroban_sdk::Symbol::new(env, "user"));
+                        topics
+                    },
+                    Some(liquidator_addr.clone()),
+                    Some(user_addr.clone()),
+                    collateral_seized,
+                );
+
+                return Err(ProtocolError::SlippageProtectionTriggered);
+            }
 
             // Update position
             position.debt -= liquidation_amount;

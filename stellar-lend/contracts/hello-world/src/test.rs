@@ -664,9 +664,14 @@ fn test_liquidate_success() {
         // Now set the minimum ratio back to a higher value to make the position undercollateralized
         Contract::set_min_collateral_ratio(env.clone(), admin.to_string(), 150).unwrap();
 
-        // Test successful liquidation
-        let result =
-            Contract::liquidate(env.clone(), liquidator.to_string(), user.to_string(), 500);
+        // Test successful liquidation (no slippage constraint)
+        let result = Contract::liquidate(
+            env.clone(),
+            liquidator.to_string(),
+            user.to_string(),
+            500,
+            0,
+        );
         assert!(result.is_ok());
     });
 }
@@ -690,13 +695,56 @@ fn test_liquidate_not_eligible() {
         Contract::borrow(env.clone(), user.to_string(), 1000).unwrap();
 
         // Try to liquidate (should fail)
-        let result =
-            Contract::liquidate(env.clone(), liquidator.to_string(), user.to_string(), 500);
+        let result = Contract::liquidate(
+            env.clone(),
+            liquidator.to_string(),
+            user.to_string(),
+            500,
+            0,
+        );
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err(),
             ProtocolError::NotEligibleForLiquidation
         );
+    });
+}
+
+#[test]
+fn test_liquidate_slippage_protection_triggers() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let user = TestUtils::create_user_address(&env, 0);
+    let liquidator = TestUtils::create_user_address(&env, 1);
+
+    let (admin, contract_id, _token) =
+        TestUtils::setup_contract_with_token(&env, &[user.clone(), liquidator.clone()]);
+    env.as_contract(&contract_id, || {
+        TestUtils::verify_user(&env, &admin, &user);
+        TestUtils::verify_user(&env, &admin, &liquidator);
+
+        // Set a very low minimum collateral ratio for testing
+        Contract::set_min_collateral_ratio(env.clone(), admin.to_string(), 50).unwrap();
+
+        // Deposit collateral and borrow to create undercollateralized position
+        Contract::deposit_collateral(env.clone(), user.to_string(), 1000).unwrap();
+        Contract::borrow(env.clone(), user.to_string(), 1000).unwrap();
+
+        // Now set the minimum ratio back to a higher value to make the position undercollateralized
+        Contract::set_min_collateral_ratio(env.clone(), admin.to_string(), 150).unwrap();
+
+        // Calculate an unrealistically high min_out so slippage protection triggers
+        // Use a min_out higher than the collateral that would be seized
+        let result = Contract::liquidate(
+            env.clone(),
+            liquidator.to_string(),
+            user.to_string(),
+            500,
+            1_000_000, // very high min_out
+        );
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ProtocolError::SlippageProtectionTriggered);
     });
 }
 
