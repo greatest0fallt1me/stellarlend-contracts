@@ -3,8 +3,8 @@
 
 use crate::analytics::AnalyticsModule;
 use crate::{
-    EmergencyManager, InterestRateManager, InterestRateStorage, OperationKind, ProtocolConfig,
-    ProtocolError, ProtocolEvent, ReentrancyGuard, RiskConfigStorage, StateHelper,
+    EmergencyManager, OperationKind, ProtocolConfig, ProtocolError, ProtocolEvent, ReentrancyGuard,
+    RiskConfigStorage, StateHelper,
 };
 use soroban_sdk::{contracterror, contracttype, Address, Env, String};
 
@@ -93,6 +93,7 @@ impl LiquidationModule {
         liquidator: &String,
         user: &String,
         amount: i128,
+        min_out: i128,
     ) -> Result<LiquidationResult, ProtocolError> {
         ReentrancyGuard::enter(env)?;
         let result = (|| -> Result<LiquidationResult, ProtocolError> {
@@ -112,8 +113,8 @@ impl LiquidationModule {
                 return Err(LiquidationError::ProtocolPaused.into());
             }
 
-            let liquidator_addr = Address::from_string(liquidator);
-            let user_addr = Address::from_string(user);
+            let liquidator_addr = crate::AddressHelper::require_valid_address(env, liquidator)?;
+            let user_addr = crate::AddressHelper::require_valid_address(env, user)?;
 
             // Load user position
             let mut position = match StateHelper::get_position(env, &user_addr) {
@@ -144,6 +145,28 @@ impl LiquidationModule {
             // Calculate collateral to seize
             let collateral_seized =
                 (liquidation_amount * (100000000 + risk_config.liquidation_incentive)) / 100000000;
+
+            // Slippage protection: ensure the liquidator receives at least `min_out` collateral
+            if min_out > 0 && collateral_seized < min_out {
+                // Emit an analytics/event record so indexers can surface the slippage protection trigger
+                // Use the EventTracker available from the main crate to record structured analytics
+                soroban_sdk::Env::events(env); // no-op to satisfy borrow checker usage
+                crate::EventTracker::record(
+                    env,
+                    soroban_sdk::Symbol::new(env, "slippage_protection"),
+                    {
+                        let mut topics = soroban_sdk::Vec::new(env);
+                        topics.push_back(soroban_sdk::Symbol::new(env, "liquidator"));
+                        topics.push_back(soroban_sdk::Symbol::new(env, "user"));
+                        topics
+                    },
+                    Some(liquidator_addr.clone()),
+                    Some(user_addr.clone()),
+                    collateral_seized,
+                );
+
+                return Err(ProtocolError::SlippageProtectionTriggered);
+            }
 
             // Update position
             position.debt -= liquidation_amount;
@@ -182,7 +205,7 @@ impl LiquidationModule {
     }
 
     /// Check if a position is eligible for liquidation
-    pub fn is_eligible_for_liquidation(env: &Env, user: &Address) -> Result<bool, ProtocolError> {
+    pub fn _is_eligible_for_liquidation(env: &Env, user: &Address) -> Result<bool, ProtocolError> {
         let position = match StateHelper::get_position(env, user) {
             Some(pos) => pos,
             None => return Err(LiquidationError::PositionNotFound.into()),
@@ -199,7 +222,7 @@ impl LiquidationModule {
     }
 
     /// Calculate maximum liquidation amount for a position
-    pub fn calculate_max_liquidation_amount(
+    pub fn _calculate_max_liquidation_amount(
         env: &Env,
         user: &Address,
     ) -> Result<i128, ProtocolError> {
@@ -215,7 +238,7 @@ impl LiquidationModule {
     }
 
     /// Calculate collateral to seize for a given liquidation amount
-    pub fn calculate_collateral_to_seize(
+    pub fn _calculate_collateral_to_seize(
         env: &Env,
         liquidation_amount: i128,
     ) -> Result<i128, ProtocolError> {
@@ -227,7 +250,9 @@ impl LiquidationModule {
     }
 
     /// Validate liquidation parameters
-    pub fn validate_liquidation_params(params: &LiquidationParams) -> Result<(), LiquidationError> {
+    pub fn _validate_liquidation_params(
+        params: &LiquidationParams,
+    ) -> Result<(), LiquidationError> {
         if params.amount <= 0 {
             return Err(LiquidationError::InvalidAmount);
         }
@@ -235,13 +260,13 @@ impl LiquidationModule {
     }
 
     /// Calculate liquidation incentive
-    pub fn calculate_liquidation_incentive(env: &Env, liquidation_amount: i128) -> i128 {
+    pub fn _calculate_liquidation_incentive(env: &Env, liquidation_amount: i128) -> i128 {
         let risk_config = RiskConfigStorage::get(env);
         (liquidation_amount * risk_config.liquidation_incentive) / 100000000
     }
 
     /// Get liquidation health factor
-    pub fn get_health_factor(env: &Env, user: &Address) -> Result<i128, ProtocolError> {
+    pub fn _get_health_factor(env: &Env, user: &Address) -> Result<i128, ProtocolError> {
         let position = match StateHelper::get_position(env, user) {
             Some(pos) => pos,
             None => return Err(LiquidationError::PositionNotFound.into()),

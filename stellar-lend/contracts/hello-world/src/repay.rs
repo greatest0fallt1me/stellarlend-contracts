@@ -142,7 +142,7 @@ impl RepayModule {
     }
 
     /// Repay debt for a specific asset
-    pub fn repay_asset(
+    pub fn _repay_asset(
         env: &Env,
         user: &String,
         asset: &Address,
@@ -159,7 +159,7 @@ impl RepayModule {
 
             EmergencyManager::ensure_operation_allowed(env, OperationKind::Repay)?;
 
-            let user_addr = Address::from_string(user);
+            let user_addr = crate::AddressHelper::require_valid_address(env, user)?;
 
             // For cross-asset repayment, we would need to implement cross-asset position handling
             // This is a simplified version for the modular structure
@@ -191,14 +191,14 @@ impl RepayModule {
     }
 
     /// Full repayment of all debt
-    pub fn full_repay(env: &Env, repayer: &String) -> Result<i128, ProtocolError> {
+    pub fn _full_repay(env: &Env, repayer: &String) -> Result<i128, ProtocolError> {
         ReentrancyGuard::enter(env)?;
         let result = (|| -> Result<i128, ProtocolError> {
             if repayer.is_empty() {
                 return Err(RepayError::InvalidAddress.into());
             }
 
-            let repayer_addr = Address::from_string(repayer);
+            let repayer_addr = crate::AddressHelper::require_valid_address(env, repayer)?;
 
             // Load user position
             let mut position = match StateHelper::get_position(env, &repayer_addr) {
@@ -244,7 +244,7 @@ impl RepayModule {
     }
 
     /// Validate repay parameters
-    pub fn validate_repay_params(params: &RepayParams) -> Result<(), RepayError> {
+    pub fn _validate_repay_params(params: &RepayParams) -> Result<(), RepayError> {
         if !params.is_full_repay && params.amount <= 0 {
             return Err(RepayError::InvalidAmount);
         }
@@ -252,14 +252,12 @@ impl RepayModule {
     }
 
     /// Calculate actual repay amount (considering debt limits)
-    pub fn calculate_repay_amount(
+    pub fn _calculate_repay_amount(
         requested_amount: i128,
         current_debt: i128,
         is_full_repay: bool,
     ) -> i128 {
-        if is_full_repay {
-            current_debt
-        } else if requested_amount > current_debt {
+        if is_full_repay || requested_amount > current_debt {
             current_debt
         } else {
             requested_amount
@@ -267,12 +265,12 @@ impl RepayModule {
     }
 
     /// Check if position can be fully repaid
-    pub fn can_full_repay(current_debt: i128) -> bool {
+    pub fn _can_full_repay(current_debt: i128) -> bool {
         current_debt > 0
     }
 
     /// Calculate remaining debt after repayment
-    pub fn calculate_remaining_debt(current_debt: i128, repay_amount: i128) -> i128 {
+    pub fn _calculate_remaining_debt(current_debt: i128, repay_amount: i128) -> i128 {
         if repay_amount >= current_debt {
             0
         } else {

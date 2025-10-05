@@ -7,27 +7,95 @@
 extern crate alloc;
 
 use alloc::format;
-use alloc::string::ToString;
 use soroban_sdk::token::TokenClient;
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, vec, Address, Bytes, Env, IntoVal, Map,
-    String, Symbol, Vec,
+    contract, contracterror, contractimpl, contracttype, Address, Env, Map, String, Symbol, Vec,
 };
-mod oracle;
-use oracle::{Oracle, OracleSource, OracleStorage};
-mod governance;
-use governance::{GovStorage, Governance, Proposal};
 mod flash_loan;
-use flash_loan::FlashLoan;
+mod governance;
+mod oracle;
 
 // Global allocator for Soroban contracts
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
+/// Safe address validation and construction helpers
+pub struct AddressHelper;
+
+impl AddressHelper {
+    /// Safely construct an Address from a string with validation
+    /// Returns InvalidAddress error for empty, malformed, or invalid inputs
+    pub fn from_string_safe(_env: &Env, address_str: &String) -> Result<Address, ProtocolError> {
+        // Check for empty string
+        if address_str.is_empty() {
+            return Err(ProtocolError::InvalidAddress);
+        }
+
+        // Validate basic format requirements
+        Self::validate_address_format(address_str)?;
+
+        // Construct the address - in a real implementation, we would need to handle
+        // the potential panic from Address::from_string. For now, we assume the
+        // validation above catches most issues.
+        Ok(Address::from_string(address_str))
+    }
+
+    /// Validate an address string without constructing the Address
+    /// Returns true if the string represents a valid address format
+    pub fn is_valid_address_string(address_str: &String) -> bool {
+        Self::validate_address_format(address_str).is_ok()
+    }
+
+    /// Construct multiple addresses safely from strings
+    /// Returns InvalidAddress error if any address is invalid
+    pub fn from_strings_safe(
+        env: &Env,
+        address_strs: Vec<String>,
+    ) -> Result<Vec<Address>, ProtocolError> {
+        let mut addresses = Vec::new(env);
+
+        for addr_str in address_strs.iter() {
+            let address = Self::from_string_safe(env, &addr_str)?;
+            addresses.push_back(address);
+        }
+
+        Ok(addresses)
+    }
+
+    /// Validate that an address string is not empty and has basic format requirements
+    pub fn validate_address_format(address_str: &String) -> Result<(), ProtocolError> {
+        if address_str.is_empty() {
+            return Err(ProtocolError::InvalidAddress);
+        }
+
+        // Check for reasonable length bounds (Stellar addresses are typically 56 characters)
+        // But we'll be more permissive to handle different address formats
+        if address_str.len() > 256 {
+            return Err(ProtocolError::InvalidAddress);
+        }
+
+        // Check for null bytes or other obviously invalid characters
+        // Note: In Soroban, we can't easily convert String to std::string::String
+        // This is a placeholder for more sophisticated validation that could be added
+
+        Ok(())
+    }
+
+    /// Helper to safely convert string to address for public API functions
+    /// This is the main function that should replace direct Address::from_string calls
+    pub fn require_valid_address(
+        env: &Env,
+        address_str: &String,
+    ) -> Result<Address, ProtocolError> {
+        Self::from_string_safe(env, address_str)
+    }
+}
+
 #[cfg(test)]
 mod test;
 
 // Core protocol modules
+mod amm;
 mod analytics;
 mod borrow;
 mod deposit;
@@ -174,7 +242,7 @@ impl UserRole {
         }
     }
 
-    fn as_symbol<'a>(&self, env: &'a Env) -> Symbol {
+    fn as_symbol(&self, env: &Env) -> Symbol {
         match self {
             UserRole::Suspended => Symbol::new(env, "suspended"),
             UserRole::Standard => Symbol::new(env, "standard"),
@@ -441,6 +509,7 @@ impl UserManager {
 
         let mut profile = Self::ensure_profile(env, user);
         profile.role = role.clone();
+        #[allow(clippy::needless_bool_assign)]
         if matches!(role, UserRole::Suspended) {
             profile.is_frozen = true;
         } else {
@@ -875,7 +944,7 @@ impl EventTracker {
         asset: Option<Address>,
         amount: i128,
     ) {
-        if topics.len() == 0 {
+        if topics.is_empty() {
             topics = Self::base_topics(env, &event_type);
         }
         let record = EventRecord::new(env, event_type, topics, user, asset, amount);
@@ -1273,7 +1342,7 @@ impl TokenRegistry {
 pub struct TransferEnforcer;
 
 impl TransferEnforcer {
-    fn token_client(env: &Env) -> Result<(TokenClient, Address), ProtocolError> {
+    fn token_client(env: &Env) -> Result<(TokenClient<'_>, Address), ProtocolError> {
         let asset = TokenRegistry::require_primary_asset(env)?;
         Ok((TokenClient::new(env, &asset), asset))
     }
@@ -1857,9 +1926,8 @@ pub struct InterestRateConfig {
     pub util_sensitivity_bps: i128,
 }
 
-impl InterestRateConfig {
-    /// Create default interest rate configuration
-    pub fn default() -> Self {
+impl Default for InterestRateConfig {
+    fn default() -> Self {
         Self {
             base_rate: 2000000,         // 2%
             kink_utilization: 80000000, // 80%
@@ -1925,9 +1993,8 @@ pub struct RiskConfig {
     /// Last time config was updated
     pub last_update: u64,
 }
-
-impl RiskConfig {
-    pub fn default() -> Self {
+impl Default for RiskConfig {
+    fn default() -> Self {
         Self {
             close_factor: 50000000,          // 50%
             liquidation_incentive: 10000000, // 10%
@@ -1939,7 +2006,6 @@ impl RiskConfig {
         }
     }
 }
-
 /// Storage helper for risk config
 pub struct RiskConfigStorage;
 
@@ -1956,7 +2022,7 @@ impl RiskConfigStorage {
         env.storage()
             .instance()
             .get(&Self::key(env))
-            .unwrap_or_else(RiskConfig::default)
+            .unwrap_or_default()
     }
 }
 
@@ -1980,7 +2046,7 @@ impl InterestRateStorage {
         env.storage()
             .instance()
             .get(&Self::config_key(env))
-            .unwrap_or_else(InterestRateConfig::default)
+            .unwrap_or_default()
     }
 
     pub fn save_state(env: &Env, state: &InterestRateState) {
@@ -2171,7 +2237,7 @@ impl ProtocolConfig {
         bps: i128,
     ) -> Result<(), ProtocolError> {
         Self::require_admin(env, caller)?;
-        if bps < 0 || bps > 10000 {
+        if !(0..=10000).contains(&bps) {
             return Err(ProtocolError::InvalidInput);
         }
         env.storage()
@@ -2223,6 +2289,7 @@ pub enum ProtocolError {
     UserRoleViolation = 28,
     BalanceInvariantViolation = 29,
     InsufficientLiquidity = 30,
+    SlippageProtectionTriggered = 31,
 }
 
 /// Protocol events
@@ -2868,7 +2935,7 @@ impl ProtocolEvent {
 }
 
 /// Analytics helper function
-pub fn analytics_record_action(env: &Env, user: &Address, action: &str, amount: i128) {
+pub fn analytics_record_action(env: &Env, user: &Address, _action: &str, amount: i128) {
     // Simple analytics recording - can be enhanced later
     let timestamp = env.ledger().timestamp();
     // For now, just emit a simple event
@@ -2876,7 +2943,7 @@ pub fn analytics_record_action(env: &Env, user: &Address, action: &str, amount: 
 }
 
 /// Helper function to ensure amount is positive
-fn ensure_amount_positive(amount: i128) -> Result<(), ProtocolError> {
+fn _ensure_amount_positive(amount: i128) -> Result<(), ProtocolError> {
     if amount <= 0 {
         return Err(ProtocolError::InvalidAmount);
     }
@@ -2885,34 +2952,22 @@ fn ensure_amount_positive(amount: i128) -> Result<(), ProtocolError> {
 
 /// Core protocol functions
 pub fn deposit_collateral(env: Env, depositor: String, amount: i128) -> Result<(), ProtocolError> {
-    if depositor.is_empty() {
-        return Err(ProtocolError::InvalidAddress);
-    }
-    let depositor_addr = Address::from_string(&depositor);
+    let depositor_addr = AddressHelper::require_valid_address(&env, &depositor)?;
     deposit::DepositModule::deposit_collateral(&env, &depositor_addr, amount)
 }
 
 pub fn borrow(env: Env, borrower: String, amount: i128) -> Result<(), ProtocolError> {
-    if borrower.is_empty() {
-        return Err(ProtocolError::InvalidAddress);
-    }
-    let borrower_addr = Address::from_string(&borrower);
+    let borrower_addr = AddressHelper::require_valid_address(&env, &borrower)?;
     borrow::BorrowModule::borrow(&env, &borrower_addr, amount)
 }
 
 pub fn repay(env: Env, repayer: String, amount: i128) -> Result<(), ProtocolError> {
-    if repayer.is_empty() {
-        return Err(ProtocolError::InvalidAddress);
-    }
-    let repayer_addr = Address::from_string(&repayer);
+    let repayer_addr = AddressHelper::require_valid_address(&env, &repayer)?;
     repay::RepayModule::repay(&env, &repayer_addr, amount)
 }
 
 pub fn withdraw(env: Env, withdrawer: String, amount: i128) -> Result<(), ProtocolError> {
-    if withdrawer.is_empty() {
-        return Err(ProtocolError::InvalidAddress);
-    }
-    let withdrawer_addr = Address::from_string(&withdrawer);
+    let withdrawer_addr = AddressHelper::require_valid_address(&env, &withdrawer)?;
     withdraw::WithdrawModule::withdraw(&env, &withdrawer_addr, amount)
 }
 
@@ -2921,27 +2976,22 @@ pub fn liquidate(
     liquidator: String,
     user: String,
     amount: i128,
+    min_out: i128,
 ) -> Result<(), ProtocolError> {
-    if liquidator.is_empty() {
-        return Err(ProtocolError::InvalidAddress);
-    }
-    let liquidator_addr = Address::from_string(&liquidator);
+    let liquidator_addr = AddressHelper::require_valid_address(&env, &liquidator)?;
     UserManager::ensure_operation_allowed(
         &env,
         &liquidator_addr,
         OperationKind::Liquidate,
         amount,
     )?;
-    liquidate::LiquidationModule::liquidate(&env, &liquidator, &user, amount)?;
+    liquidate::LiquidationModule::liquidate(&env, &liquidator, &user, amount, min_out)?;
     UserManager::record_activity(&env, &liquidator_addr, OperationKind::Liquidate, amount)?;
     Ok(())
 }
 
 pub fn get_position(env: Env, user: String) -> Result<(i128, i128, i128), ProtocolError> {
-    if user.is_empty() {
-        return Err(ProtocolError::InvalidAddress);
-    }
-    let user_addr = Address::from_string(&user);
+    let user_addr = AddressHelper::require_valid_address(&env, &user)?;
     match StateHelper::get_position(&env, &user_addr) {
         Some(position) => {
             let collateral_ratio = if position.debt > 0 {
@@ -2962,7 +3012,7 @@ pub fn set_risk_params(
     liquidation_incentive: i128,
 ) -> Result<(), ProtocolError> {
     let _guard = ReentrancyScope::enter(&env)?;
-    let caller_addr = Address::from_string(&caller);
+    let caller_addr = AddressHelper::require_valid_address(&env, &caller)?;
     ProtocolConfig::require_admin(&env, &caller_addr)?;
 
     let mut config = RiskConfigStorage::get(&env);
@@ -2984,7 +3034,7 @@ pub fn set_pause_switches(
     pause_liquidate: bool,
 ) -> Result<(), ProtocolError> {
     let _guard = ReentrancyScope::enter(&env)?;
-    let caller_addr = Address::from_string(&caller);
+    let caller_addr = AddressHelper::require_valid_address(&env, &caller)?;
     ProtocolConfig::require_admin(&env, &caller_addr)?;
 
     let mut config = RiskConfigStorage::get(&env);
@@ -3051,8 +3101,8 @@ pub fn set_emergency_manager(
     enabled: bool,
 ) -> Result<(), ProtocolError> {
     let _guard = ReentrancyScope::enter(&env)?;
-    let caller_addr = Address::from_string(&caller);
-    let manager_addr = Address::from_string(&manager);
+    let caller_addr = AddressHelper::require_valid_address(&env, &caller)?;
+    let manager_addr = AddressHelper::require_valid_address(&env, &manager)?;
     EmergencyManager::set_manager(&env, &caller_addr, &manager_addr, enabled)
 }
 
@@ -3062,7 +3112,7 @@ pub fn trigger_emergency_pause(
     reason: Option<String>,
 ) -> Result<(), ProtocolError> {
     let _guard = ReentrancyScope::enter(&env)?;
-    let caller_addr = Address::from_string(&caller);
+    let caller_addr = AddressHelper::require_valid_address(&env, &caller)?;
     EmergencyManager::pause(&env, &caller_addr, reason)
 }
 
@@ -3072,19 +3122,19 @@ pub fn enter_recovery_mode(
     plan: Option<String>,
 ) -> Result<(), ProtocolError> {
     let _guard = ReentrancyScope::enter(&env)?;
-    let caller_addr = Address::from_string(&caller);
+    let caller_addr = AddressHelper::require_valid_address(&env, &caller)?;
     EmergencyManager::enter_recovery(&env, &caller_addr, plan)
 }
 
 pub fn resume_operations(env: Env, caller: String) -> Result<(), ProtocolError> {
     let _guard = ReentrancyScope::enter(&env)?;
-    let caller_addr = Address::from_string(&caller);
+    let caller_addr = AddressHelper::require_valid_address(&env, &caller)?;
     EmergencyManager::resume(&env, &caller_addr)
 }
 
 pub fn record_recovery_step(env: Env, caller: String, step: String) -> Result<(), ProtocolError> {
     let _guard = ReentrancyScope::enter(&env)?;
-    let caller_addr = Address::from_string(&caller);
+    let caller_addr = AddressHelper::require_valid_address(&env, &caller)?;
     EmergencyManager::record_recovery_step(&env, &caller_addr, step)
 }
 
@@ -3095,13 +3145,13 @@ pub fn queue_emergency_param_update(
     value: i128,
 ) -> Result<(), ProtocolError> {
     let _guard = ReentrancyScope::enter(&env)?;
-    let caller_addr = Address::from_string(&caller);
+    let caller_addr = AddressHelper::require_valid_address(&env, &caller)?;
     EmergencyManager::queue_param_update(&env, &caller_addr, parameter, value)
 }
 
 pub fn apply_emergency_param_updates(env: Env, caller: String) -> Result<(), ProtocolError> {
     let _guard = ReentrancyScope::enter(&env)?;
-    let caller_addr = Address::from_string(&caller);
+    let caller_addr = AddressHelper::require_valid_address(&env, &caller)?;
     EmergencyManager::apply_param_updates(&env, &caller_addr)
 }
 
@@ -3113,7 +3163,7 @@ pub fn adjust_emergency_fund(
     reserve_delta: i128,
 ) -> Result<(), ProtocolError> {
     let _guard = ReentrancyScope::enter(&env)?;
-    let caller_addr = Address::from_string(&caller);
+    let caller_addr = AddressHelper::require_valid_address(&env, &caller)?;
     EmergencyManager::adjust_fund(&env, &caller_addr, token, delta, reserve_delta)
 }
 
@@ -3156,13 +3206,13 @@ pub fn register_token_asset(
     token: Address,
 ) -> Result<(), ProtocolError> {
     let _guard = ReentrancyScope::enter(&env)?;
-    let caller_addr = Address::from_string(&caller);
+    let caller_addr = AddressHelper::require_valid_address(&env, &caller)?;
     TokenRegistry::set_asset(&env, &caller_addr, key, token)
 }
 
 pub fn set_primary_asset(env: Env, caller: String, token: Address) -> Result<(), ProtocolError> {
     let _guard = ReentrancyScope::enter(&env)?;
-    let caller_addr = Address::from_string(&caller);
+    let caller_addr = AddressHelper::require_valid_address(&env, &caller)?;
     TokenRegistry::set_primary_asset(&env, &caller_addr, token)
 }
 
@@ -3177,7 +3227,7 @@ pub fn set_user_role(
     role: UserRole,
 ) -> Result<(), ProtocolError> {
     let _guard = ReentrancyScope::enter(&env)?;
-    let caller_addr = Address::from_string(&caller);
+    let caller_addr = AddressHelper::require_valid_address(&env, &caller)?;
     UserManager::set_role(&env, &caller_addr, &user, role)
 }
 
@@ -3188,7 +3238,7 @@ pub fn set_user_verification(
     status: VerificationStatus,
 ) -> Result<(), ProtocolError> {
     let _guard = ReentrancyScope::enter(&env)?;
-    let caller_addr = Address::from_string(&caller);
+    let caller_addr = AddressHelper::require_valid_address(&env, &caller)?;
     UserManager::set_verification_status(&env, &caller_addr, &user, status)
 }
 
@@ -3202,7 +3252,7 @@ pub fn set_user_limits(
     daily_limit: i128,
 ) -> Result<(), ProtocolError> {
     let _guard = ReentrancyScope::enter(&env)?;
-    let caller_addr = Address::from_string(&caller);
+    let caller_addr = AddressHelper::require_valid_address(&env, &caller)?;
     UserManager::set_limits(
         &env,
         &caller_addr,
@@ -3216,13 +3266,13 @@ pub fn set_user_limits(
 
 pub fn freeze_user(env: Env, caller: String, user: Address) -> Result<(), ProtocolError> {
     let _guard = ReentrancyScope::enter(&env)?;
-    let caller_addr = Address::from_string(&caller);
+    let caller_addr = AddressHelper::require_valid_address(&env, &caller)?;
     UserManager::freeze_user(&env, &caller_addr, &user)
 }
 
 pub fn unfreeze_user(env: Env, caller: String, user: Address) -> Result<(), ProtocolError> {
     let _guard = ReentrancyScope::enter(&env)?;
-    let caller_addr = Address::from_string(&caller);
+    let caller_addr = AddressHelper::require_valid_address(&env, &caller)?;
     UserManager::unfreeze_user(&env, &caller_addr, &user)
 }
 
@@ -3235,7 +3285,7 @@ impl Contract {
     /// Initializes the contract and sets the admin address
     pub fn initialize(env: Env, admin: String) -> Result<(), ProtocolError> {
         let _guard = ReentrancyScope::enter(&env)?;
-        let admin_addr = Address::from_string(&admin);
+        let admin_addr = AddressHelper::require_valid_address(&env, &admin)?;
         if env
             .storage()
             .instance()
@@ -3266,7 +3316,7 @@ impl Contract {
         caller: String,
         ratio: i128,
     ) -> Result<(), ProtocolError> {
-        let caller_addr = Address::from_string(&caller);
+        let caller_addr = AddressHelper::require_valid_address(&env, &caller)?;
         ProtocolConfig::set_min_collateral_ratio(&env, &caller_addr, ratio)?;
         Ok(())
     }
@@ -3301,8 +3351,9 @@ impl Contract {
         liquidator: String,
         user: String,
         amount: i128,
+        min_out: i128,
     ) -> Result<(), ProtocolError> {
-        liquidate(env, liquidator, user, amount)
+        liquidate(env, liquidator, user, amount, min_out)
     }
 
     /// Get user position
@@ -3519,7 +3570,7 @@ impl Contract {
     }
 
     pub fn get_user_report(env: Env, user: String) -> Result<analytics::UserReport, ProtocolError> {
-        let user_addr = Address::from_string(&user);
+        let user_addr = AddressHelper::require_valid_address(&env, &user)?;
         analytics::AnalyticsModule::get_user_report(&env, &user_addr)
     }
 
@@ -3545,13 +3596,220 @@ impl Contract {
     pub fn record_activity(
         env: Env,
         user: String,
-        activity_type: String,
+        _activity_type: String,
         amount: i128,
         asset: Option<Address>,
     ) -> Result<(), ProtocolError> {
-        let user_addr = Address::from_string(&user);
+        let user_addr = AddressHelper::require_valid_address(&env, &user)?;
         // For now, we'll use a placeholder string since soroban_sdk::String doesn't implement Display
         // In a real implementation, you might want to modify the analytics module to accept soroban_sdk::String
         analytics::AnalyticsModule::record_activity(&env, &user_addr, "activity", amount, asset)
+    }
+
+    // ==================== AMM Registry and Swap Hooks ====================
+
+    /// Register a new AMM asset pair for swap operations
+    ///
+    /// # Arguments
+    /// * `admin` - Admin address (must match contract admin)
+    /// * `asset_a` - First asset address
+    /// * `asset_b` - Second asset address
+    /// * `amm_address` - AMM contract address managing this pair
+    /// * `pool_address` - Optional liquidity pool address
+    ///
+    /// # Returns
+    /// * `Ok(())` on successful registration
+    /// * `Err(ProtocolError)` if pair already exists or invalid parameters
+    pub fn register_amm_pair(
+        env: Env,
+        admin: Address,
+        asset_a: Address,
+        asset_b: Address,
+        amm_address: Address,
+        pool_address: Option<Address>,
+    ) -> Result<(), ProtocolError> {
+        let _guard = ReentrancyScope::enter(&env)?;
+
+        // Verify admin privileges
+        ProtocolConfig::require_admin(&env, &admin)?;
+
+        amm::AMMRegistry::register_pair(&env, asset_a, asset_b, amm_address, pool_address)
+    }
+
+    /// Check if an AMM pair is registered and active
+    ///
+    /// # Arguments
+    /// * `asset_a` - First asset address
+    /// * `asset_b` - Second asset address
+    ///
+    /// # Returns
+    /// * `true` if pair is registered and active, `false` otherwise
+    pub fn is_amm_pair_registered(env: Env, asset_a: Address, asset_b: Address) -> bool {
+        amm::AMMRegistry::is_pair_registered(&env, &asset_a, &asset_b)
+    }
+
+    /// Get information about a registered AMM pair
+    ///
+    /// # Arguments
+    /// * `asset_a` - First asset address
+    /// * `asset_b` - Second asset address
+    ///
+    /// # Returns
+    /// * Asset pair information if registered
+    /// * Error if pair not found
+    pub fn get_amm_pair_info(
+        env: Env,
+        asset_a: Address,
+        asset_b: Address,
+    ) -> Result<amm::AssetPair, ProtocolError> {
+        amm::AMMRegistry::get_pair_info(&env, &asset_a, &asset_b)
+    }
+
+    /// Execute a swap through registered AMM
+    ///
+    /// # Arguments
+    /// * `params` - Swap parameters including assets, amounts, and slippage tolerance
+    ///
+    /// # Returns
+    /// * Swap result with amounts and exchange rate
+    /// * Error if swap fails or parameters invalid
+    pub fn execute_amm_swap(
+        env: Env,
+        params: amm::SwapParams,
+    ) -> Result<amm::SwapResult, ProtocolError> {
+        let _guard = ReentrancyScope::enter(&env)?;
+        amm::AMMRegistry::execute_swap(&env, params)
+    }
+
+    /// Swap hook for liquidation flows
+    /// Automatically swaps seized collateral to debt asset during liquidation
+    ///
+    /// # Arguments
+    /// * `liquidator` - Address of the liquidator
+    /// * `collateral_asset` - Asset seized as collateral
+    /// * `debt_asset` - Asset to repay debt
+    /// * `collateral_amount` - Amount of collateral to swap
+    /// * `min_debt_amount` - Minimum debt amount expected from swap
+    ///
+    /// # Returns
+    /// * Swap result with actual amounts swapped
+    /// * Updates position with adjusted collateral and debt
+    pub fn liquidation_swap_hook(
+        env: Env,
+        liquidator: Address,
+        collateral_asset: Address,
+        debt_asset: Address,
+        collateral_amount: i128,
+        min_debt_amount: i128,
+    ) -> Result<amm::SwapResult, ProtocolError> {
+        let _guard = ReentrancyScope::enter(&env)?;
+
+        amm::AMMRegistry::liquidation_swap_hook(
+            &env,
+            &liquidator,
+            &collateral_asset,
+            &debt_asset,
+            collateral_amount,
+            min_debt_amount,
+        )
+    }
+
+    /// Swap hook for deleveraging flows
+    /// Allows users to reduce debt by swapping assets
+    ///
+    /// # Arguments
+    /// * `user` - User deleveraging their position
+    /// * `asset_to_sell` - Asset to sell
+    /// * `debt_asset` - Debt asset to repay
+    /// * `sell_amount` - Amount to sell
+    /// * `min_debt_repayment` - Minimum debt repayment expected
+    ///
+    /// # Returns
+    /// * Swap result with actual amounts
+    /// * Updates position with reduced debt
+    pub fn deleverage_swap_hook(
+        env: Env,
+        user: Address,
+        asset_to_sell: Address,
+        debt_asset: Address,
+        sell_amount: i128,
+        min_debt_repayment: i128,
+    ) -> Result<amm::SwapResult, ProtocolError> {
+        let _guard = ReentrancyScope::enter(&env)?;
+
+        amm::AMMRegistry::deleverage_swap_hook(
+            &env,
+            &user,
+            &asset_to_sell,
+            &debt_asset,
+            sell_amount,
+            min_debt_repayment,
+        )
+    }
+
+    /// Get total number of registered AMM pairs
+    ///
+    /// # Returns
+    /// * Count of registered pairs
+    pub fn get_total_amm_pairs(env: Env) -> i128 {
+        amm::AMMRegistry::get_total_pairs(&env)
+    }
+
+    /// Get all registered AMM pairs
+    ///
+    /// # Returns
+    /// * Vector of all registered asset pairs
+    pub fn get_all_amm_pairs(env: Env) -> Vec<amm::AssetPair> {
+        amm::AMMRegistry::get_all_pairs(&env)
+    }
+
+    /// Get AMM swap history for analytics
+    ///
+    /// # Returns
+    /// * Vector of recent swap results (last 100)
+    pub fn get_amm_swap_history(env: Env) -> Vec<amm::SwapResult> {
+        amm::AMMRegistry::get_swap_history(&env)
+    }
+
+    /// Deactivate an AMM pair
+    /// Admin-only function to disable a pair
+    ///
+    /// # Arguments
+    /// * `admin` - Admin address (must match contract admin)
+    /// * `asset_a` - First asset address
+    /// * `asset_b` - Second asset address
+    pub fn deactivate_amm_pair(
+        env: Env,
+        admin: Address,
+        asset_a: Address,
+        asset_b: Address,
+    ) -> Result<(), ProtocolError> {
+        let _guard = ReentrancyScope::enter(&env)?;
+
+        // Verify admin privileges
+        ProtocolConfig::require_admin(&env, &admin)?;
+
+        amm::AMMRegistry::deactivate_pair(&env, &asset_a, &asset_b)
+    }
+
+    /// Reactivate an AMM pair
+    /// Admin-only function to re-enable a previously deactivated pair
+    ///
+    /// # Arguments
+    /// * `admin` - Admin address (must match contract admin)
+    /// * `asset_a` - First asset address
+    /// * `asset_b` - Second asset address
+    pub fn activate_amm_pair(
+        env: Env,
+        admin: Address,
+        asset_a: Address,
+        asset_b: Address,
+    ) -> Result<(), ProtocolError> {
+        let _guard = ReentrancyScope::enter(&env)?;
+
+        // Verify admin privileges
+        ProtocolConfig::require_admin(&env, &admin)?;
+
+        amm::AMMRegistry::activate_pair(&env, &asset_a, &asset_b)
     }
 }

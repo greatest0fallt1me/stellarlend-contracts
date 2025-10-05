@@ -134,7 +134,7 @@ impl DepositModule {
     }
 
     /// Deposit collateral for a specific asset (cross-asset)
-    pub fn deposit_collateral_asset(
+    pub fn _deposit_collateral_asset(
         env: &Env,
         user: &String,
         asset: &Address,
@@ -151,7 +151,7 @@ impl DepositModule {
 
             EmergencyManager::ensure_operation_allowed(env, OperationKind::Deposit)?;
 
-            let user_addr = Address::from_string(user);
+            let user_addr = crate::AddressHelper::require_valid_address(env, user)?;
 
             // For cross-asset deposits, we would need to implement cross-asset position handling
             // This is a simplified version for the modular structure
@@ -175,7 +175,7 @@ impl DepositModule {
     }
 
     /// Validate deposit parameters
-    pub fn validate_deposit_params(params: &DepositParams) -> Result<(), DepositError> {
+    pub fn _validate_deposit_params(params: &DepositParams) -> Result<(), DepositError> {
         if params.amount <= 0 {
             return Err(DepositError::InvalidAmount);
         }
@@ -183,7 +183,7 @@ impl DepositModule {
     }
 
     /// Calculate deposit impact on collateral ratio
-    pub fn calculate_collateral_ratio_impact(
+    pub fn _calculate_collateral_ratio_impact(
         current_collateral: i128,
         current_debt: i128,
         deposit_amount: i128,
