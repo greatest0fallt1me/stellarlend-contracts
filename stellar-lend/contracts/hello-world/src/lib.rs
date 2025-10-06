@@ -2065,23 +2065,39 @@ impl InterestRateStorage {
         let mut state = Self::get_state(env);
         let config = Self::get_config(env);
 
+        // Units and scales:
+        // - Rates are scaled by 1e8 (100000000) representing 1.0 = 1e8
+        // - Utilization is scaled by 1e8
+        // - Time is measured in seconds; per-year normalization uses 365*24*60*60
+        // - All arithmetic uses saturating operations to avoid overflows
+
         // Simple interest rate calculation based on utilization
         if state.total_supplied > 0 {
-            state.utilization_rate = (state.total_borrowed * 100000000) / state.total_supplied;
+            // utilization = borrowed / supplied scaled to 1e8
+            state.utilization_rate = (state.total_borrowed.saturating_mul(100000000))
+                .saturating_div(state.total_supplied);
         } else {
             state.utilization_rate = 0;
         }
 
         // Calculate borrow rate based on utilization
-        if state.utilization_rate <= config.kink_utilization {
-            state.current_borrow_rate =
-                config.base_rate + (state.utilization_rate * config.multiplier) / 100000000;
+        let u = state.utilization_rate.clamp(0, 100000000);
+        if u <= config.kink_utilization {
+            state.current_borrow_rate = config
+                .base_rate
+                .saturating_add((u.saturating_mul(config.multiplier)).saturating_div(100000000));
         } else {
-            let kink_rate =
-                config.base_rate + (config.kink_utilization * config.multiplier) / 100000000;
-            let excess_utilization = state.utilization_rate - config.kink_utilization;
-            state.current_borrow_rate =
-                kink_rate + (excess_utilization * config.multiplier * 2) / 100000000;
+            let kink_rate = config.base_rate.saturating_add(
+                (config.kink_utilization.saturating_mul(config.multiplier))
+                    .saturating_div(100000000),
+            );
+            let excess_utilization = u.saturating_sub(config.kink_utilization);
+            state.current_borrow_rate = kink_rate.saturating_add(
+                (excess_utilization
+                    .saturating_mul(config.multiplier)
+                    .saturating_mul(2))
+                .saturating_div(100000000),
+            );
         }
 
         // Apply rate limits
@@ -2093,14 +2109,19 @@ impl InterestRateStorage {
         }
 
         // Smoothing for borrow rate: new = old*(s) + current*(1-s)
-        let s_bps = config.smoothing_bps;
+        let s_bps = config.smoothing_bps; // 0..=10000
         let old = state.smoothed_borrow_rate;
         let cur = state.current_borrow_rate;
-        state.smoothed_borrow_rate = (old * s_bps + cur * (10000 - s_bps)) / 10000;
+        state.smoothed_borrow_rate = old
+            .saturating_mul(s_bps)
+            .saturating_add(cur.saturating_mul(10000 - s_bps))
+            .saturating_div(10000);
 
         // Calculate supply rate from smoothed borrow rate
-        state.current_supply_rate =
-            state.smoothed_borrow_rate * (100000000 - config.reserve_factor) / 100000000;
+        state.current_supply_rate = state
+            .smoothed_borrow_rate
+            .saturating_mul(100000000 - config.reserve_factor)
+            .saturating_div(100000000);
 
         state.last_accrual_time = env.ledger().timestamp();
         Self::save_state(env, &state);
@@ -2118,29 +2139,56 @@ impl InterestRateManager {
         borrow_rate: i128,
         supply_rate: i128,
     ) {
+        // Units and scales:
+        // - borrow_rate and supply_rate are annualized rates scaled by 1e8
+        // - interest accrued = principal * rate * time_seconds / (SECONDS_PER_YEAR * 1e8)
+        // - All arithmetic is saturating to avoid overflow
+        const SECONDS_PER_YEAR: i128 = 365 * 24 * 60 * 60;
+        const SCALE: i128 = 100000000; // 1e8
+
         let current_time = env.ledger().timestamp();
         if position.last_accrual_time == 0 {
             position.last_accrual_time = current_time;
             return;
         }
 
-        let time_delta = current_time - position.last_accrual_time;
+        let time_delta = current_time.saturating_sub(position.last_accrual_time);
         if time_delta == 0 {
             return;
         }
 
+        // Clamp rates to sensible bounds [0, 1e8]
+        let br = borrow_rate.clamp(0, SCALE);
+        let sr = supply_rate.clamp(0, SCALE);
+
         // Accrue borrow interest
         if position.debt > 0 {
-            let interest = (position.debt * borrow_rate * time_delta as i128)
-                / (365 * 24 * 60 * 60 * 100000000);
-            position.borrow_interest += interest;
+            let numerator = position
+                .debt
+                .saturating_mul(br)
+                .saturating_mul(time_delta as i128);
+            let denom = SECONDS_PER_YEAR.saturating_mul(SCALE);
+            let interest = if denom == 0 {
+                0
+            } else {
+                numerator.saturating_div(denom)
+            };
+            position.borrow_interest = position.borrow_interest.saturating_add(interest);
         }
 
         // Accrue supply interest
         if position.collateral > 0 {
-            let interest = (position.collateral * supply_rate * time_delta as i128)
-                / (365 * 24 * 60 * 60 * 100000000);
-            position.supply_interest += interest;
+            let numerator = position
+                .collateral
+                .saturating_mul(sr)
+                .saturating_mul(time_delta as i128);
+            let denom = SECONDS_PER_YEAR.saturating_mul(SCALE);
+            let interest = if denom == 0 {
+                0
+            } else {
+                numerator.saturating_div(denom)
+            };
+            position.supply_interest = position.supply_interest.saturating_add(interest);
         }
 
         position.last_accrual_time = current_time;
