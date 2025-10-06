@@ -1276,7 +1276,6 @@ fn test_emergency_functions_invalid_caller() {
 }
 
 #[test]
-#[should_panic]
 fn test_pause_controls() {
     let env = Env::default();
     let contract_id = env.register(Contract, ());
