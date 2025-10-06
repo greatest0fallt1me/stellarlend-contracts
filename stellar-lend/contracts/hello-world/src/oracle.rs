@@ -233,13 +233,21 @@ impl Oracle {
         if let Some((cached, ts)) = cache.get(asset.clone()) {
             if now.saturating_sub(ts) <= ttl {
                 // cache hit
-                crate::ProtocolEvent::CacheUpdated(Symbol::new(env, "oracle_price_cache"), Symbol::new(env, "hit")).emit(env);
+                crate::ProtocolEvent::CacheUpdated(
+                    Symbol::new(env, "oracle_price_cache"),
+                    Symbol::new(env, "hit"),
+                )
+                .emit(env);
                 return Some(cached);
             } else {
                 // evict stale
                 cache.remove(asset.clone());
                 OracleStorage::put_price_cache(env, &cache);
-                crate::ProtocolEvent::CacheUpdated(Symbol::new(env, "oracle_price_cache"), Symbol::new(env, "evict")).emit(env);
+                crate::ProtocolEvent::CacheUpdated(
+                    Symbol::new(env, "oracle_price_cache"),
+                    Symbol::new(env, "evict"),
+                )
+                .emit(env);
             }
         }
 
@@ -261,7 +269,11 @@ impl Oracle {
             let out = sum / (use_n as i128);
             cache.set(asset.clone(), (out, now));
             OracleStorage::put_price_cache(env, &cache);
-            crate::ProtocolEvent::CacheUpdated(Symbol::new(env, "oracle_price_cache"), Symbol::new(env, "set")).emit(env);
+            crate::ProtocolEvent::CacheUpdated(
+                Symbol::new(env, "oracle_price_cache"),
+                Symbol::new(env, "set"),
+            )
+            .emit(env);
             return Some(out);
         }
 
@@ -280,12 +292,20 @@ impl Oracle {
         // Trim highest and lowest samples per configuration if enough samples
         let trim = OracleStorage::get_trim_count(env).max(0) as usize;
         let start = if n_usize > trim { trim } else { 0 };
-        let end = if n_usize > trim { n_usize.saturating_sub(trim) } else { n_usize };
+        let end = if n_usize > trim {
+            n_usize.saturating_sub(trim)
+        } else {
+            n_usize
+        };
         if end <= start {
             let out = prices.get((n_usize / 2) as u32).unwrap();
             cache.set(asset.clone(), (out, now));
             OracleStorage::put_price_cache(env, &cache);
-            crate::ProtocolEvent::CacheUpdated(Symbol::new(env, "oracle_price_cache"), Symbol::new(env, "set")).emit(env);
+            crate::ProtocolEvent::CacheUpdated(
+                Symbol::new(env, "oracle_price_cache"),
+                Symbol::new(env, "set"),
+            )
+            .emit(env);
             return Some(out);
         }
 
@@ -306,14 +326,12 @@ impl Oracle {
             let p = prices.get(k as u32).unwrap();
             let diff = (p - med).abs();
             // allow within med * deviation_bps / 10000
-            let max_diff = (med.abs()
-                .saturating_mul(deviation_bps))
-                .saturating_div(10000);
+            let max_diff = (med.abs().saturating_mul(deviation_bps)).saturating_div(10000);
             if diff <= max_diff {
                 filtered.push_back(p);
             }
         }
-        let out_final = if filtered.len() == 0 {
+        let out_final = if filtered.is_empty() {
             med
         } else {
             let m_usize = filtered.len() as usize;
@@ -331,12 +349,17 @@ impl Oracle {
             if m_usize % 2 == 1 {
                 filtered.get(mid_f as u32).unwrap()
             } else {
-                (filtered.get((mid_f - 1) as u32).unwrap() + filtered.get(mid_f as u32).unwrap()) / 2
+                (filtered.get((mid_f - 1) as u32).unwrap() + filtered.get(mid_f as u32).unwrap())
+                    / 2
             }
         };
         cache.set(asset.clone(), (out_final, now));
         OracleStorage::put_price_cache(env, &cache);
-        crate::ProtocolEvent::CacheUpdated(Symbol::new(env, "oracle_price_cache"), Symbol::new(env, "set")).emit(env);
+        crate::ProtocolEvent::CacheUpdated(
+            Symbol::new(env, "oracle_price_cache"),
+            Symbol::new(env, "set"),
+        )
+        .emit(env);
         Some(out_final)
     }
 }

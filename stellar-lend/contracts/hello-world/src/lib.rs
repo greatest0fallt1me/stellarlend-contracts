@@ -2028,9 +2028,7 @@ impl InterestRateStorage {
         // Simple interest rate calculation based on utilization
         if state.total_supplied > 0 {
             // utilization = borrowed / supplied scaled to 1e8
-            state.utilization_rate = (state
-                .total_borrowed
-                .saturating_mul(100000000))
+            state.utilization_rate = (state.total_borrowed.saturating_mul(100000000))
                 .saturating_div(state.total_supplied);
         } else {
             state.utilization_rate = 0;
@@ -2043,15 +2041,16 @@ impl InterestRateStorage {
                 .base_rate
                 .saturating_add((u.saturating_mul(config.multiplier)).saturating_div(100000000));
         } else {
-            let kink_rate = config
-                .base_rate
-                .saturating_add((config.kink_utilization.saturating_mul(config.multiplier)).saturating_div(100000000));
+            let kink_rate = config.base_rate.saturating_add(
+                (config.kink_utilization.saturating_mul(config.multiplier))
+                    .saturating_div(100000000),
+            );
             let excess_utilization = u.saturating_sub(config.kink_utilization);
             state.current_borrow_rate = kink_rate.saturating_add(
                 (excess_utilization
                     .saturating_mul(config.multiplier)
                     .saturating_mul(2))
-                    .saturating_div(100000000),
+                .saturating_div(100000000),
             );
         }
 
@@ -2068,8 +2067,8 @@ impl InterestRateStorage {
         let old = state.smoothed_borrow_rate;
         let cur = state.current_borrow_rate;
         state.smoothed_borrow_rate = old
-            .saturating_mul(s_bps as i128)
-            .saturating_add(cur.saturating_mul((10000 - s_bps) as i128))
+            .saturating_mul(s_bps)
+            .saturating_add(cur.saturating_mul(10000 - s_bps))
             .saturating_div(10000);
 
         // Calculate supply rate from smoothed borrow rate
@@ -2123,7 +2122,11 @@ impl InterestRateManager {
                 .saturating_mul(br)
                 .saturating_mul(time_delta as i128);
             let denom = SECONDS_PER_YEAR.saturating_mul(SCALE);
-            let interest = if denom == 0 { 0 } else { numerator.saturating_div(denom) };
+            let interest = if denom == 0 {
+                0
+            } else {
+                numerator.saturating_div(denom)
+            };
             position.borrow_interest = position.borrow_interest.saturating_add(interest);
         }
 
@@ -2134,7 +2137,11 @@ impl InterestRateManager {
                 .saturating_mul(sr)
                 .saturating_mul(time_delta as i128);
             let denom = SECONDS_PER_YEAR.saturating_mul(SCALE);
-            let interest = if denom == 0 { 0 } else { numerator.saturating_div(denom) };
+            let interest = if denom == 0 {
+                0
+            } else {
+                numerator.saturating_div(denom)
+            };
             position.supply_interest = position.supply_interest.saturating_add(interest);
         }
 
