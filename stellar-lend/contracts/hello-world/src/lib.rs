@@ -434,6 +434,45 @@ impl UserManager {
         Ok(())
     }
 
+    /// Shared helper for admin-only operations - validates that caller is admin
+    pub fn require_admin(env: &Env, caller: &Address) -> Result<(), ProtocolError> {
+        ProtocolConfig::require_admin(env, caller)
+    }
+
+    /// Shared helper for manager-level operations - validates manager role or admin
+    pub fn require_manager(env: &Env, caller: &Address) -> Result<(), ProtocolError> {
+        Self::ensure_can_manage(env, caller, UserRole::Manager)
+    }
+
+    /// Shared helper for analyst-level operations - validates analyst role or higher
+    pub fn require_analyst(env: &Env, caller: &Address) -> Result<(), ProtocolError> {
+        Self::ensure_can_manage(env, caller, UserRole::Analyst)
+    }
+
+    /// Shared helper for admin-only sensitive operations - double-checks admin status
+    pub fn require_admin_strict(env: &Env, caller: &Address) -> Result<(), ProtocolError> {
+        let profile = Self::ensure_profile(env, caller);
+
+        // Must be verified admin user
+        if !profile.verification.is_verified() {
+            return Err(ProtocolError::UserNotVerified);
+        }
+
+        // Must have admin role level
+        if profile.role.level() < UserRole::Admin.level() {
+            return Err(ProtocolError::UserRoleViolation);
+        }
+
+        // Must also be registered admin in ProtocolConfig (double-check)
+        if let Some(admin) = ProtocolConfig::get_admin(env) {
+            if admin == *caller {
+                return Ok(());
+            }
+        }
+
+        Err(ProtocolError::Unauthorized)
+    }
+
     pub fn bootstrap_admin(env: &Env, admin: &Address) {
         let mut profile = Self::ensure_profile(env, admin);
         profile.role = UserRole::Admin;
@@ -461,7 +500,13 @@ impl UserManager {
         user: &Address,
         role: UserRole,
     ) -> Result<(), ProtocolError> {
-        Self::ensure_can_manage(env, caller, UserRole::Manager)?;
+        // Only admin can set admin roles
+        if matches!(role, UserRole::Admin) {
+            Self::require_admin(env, caller)?;
+        } else {
+            Self::ensure_can_manage(env, caller, UserRole::Manager)?;
+        }
+
         let mut profile = Self::ensure_profile(env, user);
         profile.role = role.clone();
         #[allow(clippy::needless_bool_assign)]

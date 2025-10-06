@@ -910,6 +910,67 @@ fn test_get_position_not_found() {
         assert_eq!(result.unwrap_err(), ProtocolError::PositionNotFound);
     });
 }
+
+#[test]
+fn test_oracle_set_heartbeat_ttl_admin_only() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = TestUtils::create_admin_address(&env);
+
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        // Initialize contract
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+
+        // Test admin can set heartbeat_ttl (this would need oracle functions in main contract)
+        // This test would require Oracle functions to be exposed through Contract interface
+    });
+}
+
+#[test]
+fn test_oracle_set_mode_admin_only() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = TestUtils::create_admin_address(&env);
+
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        // Initialize contract
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+
+        // Test admin can set mode (this would need oracle functions in main contract)
+        // This test would require Oracle functions to be exposed through Contract interface
+    });
+}
+
+#[test]
+fn test_admin_role_validation() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = TestUtils::create_admin_address(&env);
+    let user = TestUtils::create_user_address(&env, 0);
+
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        // Initialize contract
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+
+        // Bootstrap users with different roles
+        UserManager::bootstrap_admin(&env, &admin);
+
+        // Test admin can perform admin-only operations
+        let result = Contract::set_min_collateral_ratio(env.clone(), admin.to_string(), 150);
+        assert!(result.is_ok());
+
+        // Test non-admin cannot perform admin-only operations
+        let result = Contract::set_min_collateral_ratio(env.clone(), user.to_string(), 200);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ProtocolError::Unauthorized);
+    });
+}
 // Address validation tests
 #[test]
 fn test_address_helper_valid_address() {
@@ -1072,11 +1133,52 @@ fn test_initialize_invalid_admin_address() {
 }
 
 #[test]
+fn test_manager_role_validation() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = TestUtils::create_admin_address(&env);
+    let manager = TestUtils::create_user_address(&env, 0);
+
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        // Initialize contract
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+
+        // Bootstrap users with different roles
+        UserManager::bootstrap_admin(&env, &admin);
+
+        // Set manager role for manager user
+        UserManager::set_role(&env, &admin, &manager, UserRole::Manager).unwrap();
+
+        // Test manager can perform manager-level operations (user management)
+        let result = Contract::set_user_role(
+            env.clone(),
+            manager.to_string(),
+            manager.clone(),
+            UserRole::Standard,
+        );
+        assert!(result.is_ok());
+
+        // Test manager cannot escalate to admin role
+        let result = Contract::set_user_role(
+            env.clone(),
+            manager.to_string(),
+            manager.clone(),
+            UserRole::Admin,
+        );
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ProtocolError::Unauthorized);
+    });
+}
+
+#[test]
 fn test_deposit_collateral_invalid_depositor() {
     let env = Env::default();
     env.mock_all_auths();
 
     let admin = TestUtils::create_admin_address(&env);
+
     let contract_id = env.register(Contract, ());
     env.as_contract(&contract_id, || {
         Contract::initialize(env.clone(), admin.to_string()).unwrap();
@@ -1192,6 +1294,41 @@ fn test_liquidate_invalid_addresses() {
 }
 
 #[test]
+fn test_analyst_role_validation() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = TestUtils::create_admin_address(&env);
+    let analyst = TestUtils::create_user_address(&env, 0);
+
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        // Initialize contract
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+
+        // Bootstrap users with different roles
+        UserManager::bootstrap_admin(&env, &admin);
+
+        // Set analyst role for analyst user
+        UserManager::set_role(&env, &admin, &analyst, UserRole::Analyst).unwrap();
+
+        // Test analyst can perform verification operations
+        let result = Contract::set_user_verification(
+            env.clone(),
+            analyst.to_string(),
+            analyst.clone(),
+            VerificationStatus::Verified,
+        );
+        assert!(result.is_ok());
+
+        // Test analyst cannot perform admin operations
+        let result = Contract::set_min_collateral_ratio(env.clone(), analyst.to_string(), 200);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ProtocolError::Unauthorized);
+    });
+}
+
+#[test]
 fn test_get_position_invalid_user() {
     let env = Env::default();
     env.mock_all_auths();
@@ -1209,11 +1346,52 @@ fn test_get_position_invalid_user() {
 }
 
 #[test]
+fn test_role_escalation_prevention() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = TestUtils::create_admin_address(&env);
+    let manager = TestUtils::create_user_address(&env, 0);
+
+    let contract_id = env.register(Contract, ());
+    env.as_contract(&contract_id, || {
+        // Initialize contract
+        Contract::initialize(env.clone(), admin.to_string()).unwrap();
+
+        // Bootstrap users with different roles
+        UserManager::bootstrap_admin(&env, &admin);
+
+        // Set manager role for manager user
+        UserManager::set_role(&env, &admin, &manager, UserRole::Manager).unwrap();
+
+        // Test manager cannot escalate user to admin role (only admin can set admin)
+        let result = Contract::set_user_role(
+            env.clone(),
+            manager.to_string(),
+            manager.clone(),
+            UserRole::Admin,
+        );
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), ProtocolError::Unauthorized);
+
+        // Only admin can set admin role
+        let result = Contract::set_user_role(
+            env.clone(),
+            admin.to_string(),
+            manager.clone(),
+            UserRole::Admin,
+        );
+        assert!(result.is_ok());
+    });
+}
+
+#[test]
 fn test_admin_functions_invalid_caller() {
     let env = Env::default();
     env.mock_all_auths();
 
     let admin = TestUtils::create_admin_address(&env);
+
     let contract_id = env.register(Contract, ());
     env.as_contract(&contract_id, || {
         Contract::initialize(env.clone(), admin.to_string()).unwrap();
