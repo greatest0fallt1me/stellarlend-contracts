@@ -880,7 +880,8 @@ fn test_recent_activity_feed_ordering_and_limit() {
 
     let user = TestUtils::create_user_address(&env, 0);
 
-    let (admin, contract_id, _token) = TestUtils::setup_contract_with_token(&env, &[user.clone()]);
+    let (admin, contract_id, _token) =
+        TestUtils::setup_contract_with_token(&env, core::slice::from_ref(&user));
     env.as_contract(&contract_id, || {
         TestUtils::verify_user(&env, &admin, &user);
 
@@ -917,7 +918,8 @@ fn test_recent_activity_feed_edge_limits() {
 
     let user = TestUtils::create_user_address(&env, 0);
 
-    let (admin, contract_id, _token) = TestUtils::setup_contract_with_token(&env, &[user.clone()]);
+    let (admin, contract_id, _token) =
+        TestUtils::setup_contract_with_token(&env, core::slice::from_ref(&user));
     env.as_contract(&contract_id, || {
         TestUtils::verify_user(&env, &admin, &user);
 
