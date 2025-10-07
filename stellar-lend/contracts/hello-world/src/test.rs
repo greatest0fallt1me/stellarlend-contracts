@@ -2044,9 +2044,12 @@ fn test_dynamic_cf_event_emission() {
 
     // Push second price to trigger CF update
     let new_cf = client.push_price_and_update_cf(&admin.to_string(), &asset, &120000000); // 20% increase
-    
+
     // Verify that CF changed (indicating event was emitted)
-    assert!(new_cf != 75000000, "CF should have changed due to volatility");
+    assert!(
+        new_cf != 75000000,
+        "CF should have changed due to volatility"
+    );
 }
 
 #[test]

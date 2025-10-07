@@ -2007,19 +2007,19 @@ impl AssetParams {
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct DynamicCFParams {
-    pub min_cf: i128,         // 0..=1e8
-    pub max_cf: i128,         // 0..=1e8
+    pub min_cf: i128,          // 0..=1e8
+    pub max_cf: i128,          // 0..=1e8
     pub sensitivity_bps: i128, // how much to reduce per 1% vol (bps)
     pub max_step_bps: i128,    // max change per update (bps)
 }
 
 impl DynamicCFParams {
     pub fn default() -> Self {
-        Self { 
+        Self {
             min_cf: 50000000,     // 50% minimum
             max_cf: 90000000,     // 90% maximum
             sensitivity_bps: 100, // 1% reduction per 1% volatility
-            max_step_bps: 200     // 2% max change per update
+            max_step_bps: 200,    // 2% max change per update
         }
     }
 }
@@ -2028,16 +2028,16 @@ impl DynamicCFParams {
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct MarketState {
-    pub last_price: i128,      // last known price in 1e8 scale
-    pub vol_index_bps: i128,   // simple volatility index in bps
+    pub last_price: i128,    // last known price in 1e8 scale
+    pub vol_index_bps: i128, // simple volatility index in bps
 }
 
 impl MarketState {
-    pub fn initial() -> Self { 
-        Self { 
-            last_price: 0, 
-            vol_index_bps: 0 
-        } 
+    pub fn initial() -> Self {
+        Self {
+            last_price: 0,
+            vol_index_bps: 0,
+        }
     }
 }
 
@@ -2280,15 +2280,15 @@ impl AssetRegistryStorage {
     fn params_key(env: &Env) -> Symbol {
         Symbol::new(env, "asset_params")
     }
-    
+
     fn prices_key(env: &Env) -> Symbol {
         Symbol::new(env, "asset_prices")
     }
-    
+
     fn market_state_key(env: &Env) -> Symbol {
         Symbol::new(env, "market_state")
     }
-    
+
     fn dyn_params_key(env: &Env) -> Symbol {
         Symbol::new(env, "dyn_cf_params")
     }
@@ -2323,7 +2323,9 @@ impl AssetRegistryStorage {
     }
 
     pub fn put_market_state(env: &Env, map: &Map<Address, MarketState>) {
-        env.storage().instance().set(&Self::market_state_key(env), map);
+        env.storage()
+            .instance()
+            .set(&Self::market_state_key(env), map);
     }
 
     pub fn get_dyn_params(env: &Env) -> Map<Address, DynamicCFParams> {
@@ -2334,7 +2336,9 @@ impl AssetRegistryStorage {
     }
 
     pub fn put_dyn_params(env: &Env, map: &Map<Address, DynamicCFParams>) {
-        env.storage().instance().set(&Self::dyn_params_key(env), map);
+        env.storage()
+            .instance()
+            .set(&Self::dyn_params_key(env), map);
     }
 }
 
@@ -4059,17 +4063,17 @@ impl Contract {
         let _guard = ReentrancyScope::enter(&env)?;
         let caller_addr = AddressHelper::require_valid_address(&env, &caller)?;
         ProtocolConfig::require_admin(&env, &caller_addr)?;
-        
+
         if collateral_factor < 0 || collateral_factor > 100000000 {
             return Err(ProtocolError::InvalidInput);
         }
-        
+
         let mut map = AssetRegistryStorage::get_params_map(&env);
-        let params = AssetParams { 
-            collateral_factor, 
-            borrow_enabled, 
-            deposit_enabled, 
-            cross_enabled 
+        let params = AssetParams {
+            collateral_factor,
+            borrow_enabled,
+            deposit_enabled,
+            cross_enabled,
         };
         map.set(asset, params);
         AssetRegistryStorage::put_params_map(&env, &map);
@@ -4083,15 +4087,20 @@ impl Contract {
     /// * `caller` - Admin address (must match contract admin)
     /// * `asset` - Asset address
     /// * `price` - Price in 1e8 scale
-    pub fn set_asset_price(env: Env, caller: String, asset: Address, price: i128) -> Result<(), ProtocolError> {
+    pub fn set_asset_price(
+        env: Env,
+        caller: String,
+        asset: Address,
+        price: i128,
+    ) -> Result<(), ProtocolError> {
         let _guard = ReentrancyScope::enter(&env)?;
         let caller_addr = AddressHelper::require_valid_address(&env, &caller)?;
         ProtocolConfig::require_admin(&env, &caller_addr)?;
-        
-        if price <= 0 { 
-            return Err(ProtocolError::InvalidInput); 
+
+        if price <= 0 {
+            return Err(ProtocolError::InvalidInput);
         }
-        
+
         let mut map = AssetRegistryStorage::get_prices_map(&env);
         map.set(asset, price);
         AssetRegistryStorage::put_prices_map(&env, &map);
@@ -4120,21 +4129,21 @@ impl Contract {
         let _guard = ReentrancyScope::enter(&env)?;
         let caller_addr = AddressHelper::require_valid_address(&env, &caller)?;
         ProtocolConfig::require_admin(&env, &caller_addr)?;
-        
+
         if min_cf < 0 || min_cf > 100000000 || max_cf < 0 || max_cf > 100000000 || min_cf > max_cf {
             return Err(ProtocolError::InvalidInput);
         }
-        
+
         if sensitivity_bps < 0 || max_step_bps < 0 {
             return Err(ProtocolError::InvalidInput);
         }
-        
+
         let mut dyn_map = AssetRegistryStorage::get_dyn_params(&env);
-        let dcf = DynamicCFParams { 
-            min_cf, 
-            max_cf, 
-            sensitivity_bps, 
-            max_step_bps 
+        let dcf = DynamicCFParams {
+            min_cf,
+            max_cf,
+            sensitivity_bps,
+            max_step_bps,
         };
         dyn_map.set(asset, dcf);
         AssetRegistryStorage::put_dyn_params(&env, &dyn_map);
@@ -4151,31 +4160,38 @@ impl Contract {
     ///
     /// # Returns
     /// * New collateral factor after dynamic adjustment
-    pub fn push_price_and_update_cf(env: Env, caller: String, asset: Address, price: i128) -> Result<i128, ProtocolError> {
+    pub fn push_price_and_update_cf(
+        env: Env,
+        caller: String,
+        asset: Address,
+        price: i128,
+    ) -> Result<i128, ProtocolError> {
         let _guard = ReentrancyScope::enter(&env)?;
-        
+
         // Set the price first (admin rights required) - inline the price setting to avoid reentrancy guard conflict
         let caller_addr = AddressHelper::require_valid_address(&env, &caller)?;
         ProtocolConfig::require_admin(&env, &caller_addr)?;
-        
-        if price <= 0 { 
-            return Err(ProtocolError::InvalidInput); 
+
+        if price <= 0 {
+            return Err(ProtocolError::InvalidInput);
         }
-        
+
         let mut map = AssetRegistryStorage::get_prices_map(&env);
         map.set(asset.clone(), price);
         AssetRegistryStorage::put_prices_map(&env, &map);
 
         // Update market state with volatility calculation
         let mut ms_map = AssetRegistryStorage::get_market_state(&env);
-        let mut ms = ms_map.get(asset.clone()).unwrap_or_else(MarketState::initial);
-        
+        let mut ms = ms_map
+            .get(asset.clone())
+            .unwrap_or_else(MarketState::initial);
+
         if ms.last_price > 0 {
             // Calculate absolute return in basis points: |p/p0 - 1| * 10000
             let num = (price - ms.last_price).abs() * 10000;
             let den = if ms.last_price == 0 { 1 } else { ms.last_price };
             let ret_bps = num / den;
-            
+
             // EWMA-like update: vol = (vol*4 + ret)/5
             ms.vol_index_bps = (ms.vol_index_bps * 4 + ret_bps) / 5;
         }
@@ -4185,38 +4201,42 @@ impl Contract {
 
         // Apply dynamic CF change
         let mut params_map = AssetRegistryStorage::get_params_map(&env);
-        let mut asset_params = params_map.get(asset.clone()).unwrap_or_else(AssetParams::default);
+        let mut asset_params = params_map
+            .get(asset.clone())
+            .unwrap_or_else(AssetParams::default);
         let dyn_map = AssetRegistryStorage::get_dyn_params(&env);
-        let dcf = dyn_map.get(asset.clone()).unwrap_or_else(DynamicCFParams::default);
+        let dcf = dyn_map
+            .get(asset.clone())
+            .unwrap_or_else(DynamicCFParams::default);
 
         // Calculate CF adjustment based on volatility
         // delta_cf_bps = sensitivity_bps * (vol_index_bps / 100)
         let delta_cf_bps = dcf.sensitivity_bps * (ms.vol_index_bps / 100);
         let base_cf_bps = asset_params.collateral_factor / 10000; // convert 1e8 -> bps (1e8 / 10000 = 10000 bps)
         let mut target_cf_bps = base_cf_bps - delta_cf_bps;
-        
+
         // Apply bounds
         let min_cf_bps = dcf.min_cf / 10000;
         let max_cf_bps = dcf.max_cf / 10000;
-        if target_cf_bps < min_cf_bps { 
-            target_cf_bps = min_cf_bps; 
+        if target_cf_bps < min_cf_bps {
+            target_cf_bps = min_cf_bps;
         }
-        if target_cf_bps > max_cf_bps { 
-            target_cf_bps = max_cf_bps; 
+        if target_cf_bps > max_cf_bps {
+            target_cf_bps = max_cf_bps;
         }
-        
+
         // Apply max step limit
         let current_bps = asset_params.collateral_factor / 10000;
         let diff = target_cf_bps - current_bps;
-        let step = if diff.abs() > dcf.max_step_bps { 
-            dcf.max_step_bps * diff.signum() 
-        } else { 
-            diff 
+        let step = if diff.abs() > dcf.max_step_bps {
+            dcf.max_step_bps * diff.signum()
+        } else {
+            diff
         };
-        
+
         let new_cf_bps = current_bps + step;
         let new_cf_1e8 = new_cf_bps * 10000; // convert back to 1e8 scale
-        
+
         // Update asset params
         asset_params.collateral_factor = new_cf_1e8;
         params_map.set(asset.clone(), asset_params);
@@ -4224,7 +4244,7 @@ impl Contract {
 
         // Emit event with before/after values
         ProtocolEvent::DynamicCFUpdated(asset, new_cf_1e8).emit(&env);
-        
+
         Ok(new_cf_1e8)
     }
 
