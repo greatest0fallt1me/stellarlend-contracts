@@ -1,5 +1,8 @@
 use super::*;
-use soroban_sdk::{contract, contractimpl, testutils::Ledger, Address, Env, Map, String, Symbol};
+use soroban_sdk::{
+    contract, contractimpl, testutils::Address as _, testutils::Ledger, Address, Env, Map, String,
+    Symbol,
+};
 
 use crate::flash_loan::FlashLoan;
 use crate::{
@@ -1592,4 +1595,51 @@ fn test_emergency_functions_invalid_caller() {
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), ProtocolError::InvalidAddress);
     });
+}
+
+#[test]
+fn test_pause_controls() {
+    let env = Env::default();
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+
+    // Initialize contract
+    let admin = TestUtils::create_admin_address(&env);
+
+    client.initialize(&admin.to_string());
+
+    // Test users
+    let user = Address::generate(&env);
+
+    // Setup test token
+    let token_admin = Address::generate(&env);
+    let token_client = create_token_contract(&env, &token_admin);
+    let token_address = token_client.address.clone();
+
+    // Register token
+    client.set_primary_asset(&admin.to_string(), &token_address);
+
+    // Mint tokens to user
+    token_client.mint(&user, &1000);
+
+    // Pause deposits
+    client.set_pause_switches(
+        &admin.to_string(),
+        &false, // borrow
+        &true,  // deposit
+        &false, // withdraw
+        &false, // liquidate
+    );
+
+    // Attempt deposit while paused
+    let result = client.try_deposit_collateral(&user.to_string(), &100);
+    assert!(result.is_err());
+}
+
+// Helper to create token contract for testing
+fn create_token_contract<'a>(env: &Env, admin: &Address) -> MockTokenClient<'a> {
+    let contract_id = env.register(MockToken, ());
+    let token = MockTokenClient::new(env, &contract_id);
+    token.initialize(admin);
+    token
 }

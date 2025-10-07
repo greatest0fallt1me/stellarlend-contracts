@@ -1994,6 +1994,21 @@ pub struct RiskConfig {
     /// Last time config was updated
     pub last_update: u64,
 }
+
+// Methods for risk config
+impl RiskConfig {
+    /// Ensure the operation is not paused
+    pub fn ensure_not_paused(&self, operation: OperationKind) -> Result<(), ProtocolError> {
+        match operation {
+            OperationKind::Deposit if self.pause_deposit => Err(ProtocolError::ProtocolPaused),
+            OperationKind::Borrow if self.pause_borrow => Err(ProtocolError::ProtocolPaused),
+            OperationKind::Withdraw if self.pause_withdraw => Err(ProtocolError::ProtocolPaused),
+            OperationKind::Liquidate if self.pause_liquidate => Err(ProtocolError::ProtocolPaused),
+            _ => Ok(()),
+        }
+    }
+}
+
 impl Default for RiskConfig {
     fn default() -> Self {
         Self {
@@ -3001,21 +3016,35 @@ fn _ensure_amount_positive(amount: i128) -> Result<(), ProtocolError> {
 
 /// Core protocol functions
 pub fn deposit_collateral(env: Env, depositor: String, amount: i128) -> Result<(), ProtocolError> {
+    // Check pause state first
+    let risk_config = RiskConfigStorage::get(&env);
+    risk_config.ensure_not_paused(OperationKind::Deposit)?;
+
     let depositor_addr = AddressHelper::require_valid_address(&env, &depositor)?;
     deposit::DepositModule::deposit_collateral(&env, &depositor_addr, amount)
 }
 
 pub fn borrow(env: Env, borrower: String, amount: i128) -> Result<(), ProtocolError> {
+    // Check pause state first
+    let risk_config = RiskConfigStorage::get(&env);
+    risk_config.ensure_not_paused(OperationKind::Borrow)?;
+
     let borrower_addr = AddressHelper::require_valid_address(&env, &borrower)?;
     borrow::BorrowModule::borrow(&env, &borrower_addr, amount)
 }
 
 pub fn repay(env: Env, repayer: String, amount: i128) -> Result<(), ProtocolError> {
+    // Check pause state first
+    let risk_config = RiskConfigStorage::get(&env);
+    risk_config.ensure_not_paused(OperationKind::Repay)?;
     let repayer_addr = AddressHelper::require_valid_address(&env, &repayer)?;
     repay::RepayModule::repay(&env, &repayer_addr, amount)
 }
 
 pub fn withdraw(env: Env, withdrawer: String, amount: i128) -> Result<(), ProtocolError> {
+    // Check pause state first
+    let risk_config = RiskConfigStorage::get(&env);
+    risk_config.ensure_not_paused(OperationKind::Withdraw)?;
     let withdrawer_addr = AddressHelper::require_valid_address(&env, &withdrawer)?;
     withdraw::WithdrawModule::withdraw(&env, &withdrawer_addr, amount)
 }
@@ -3027,6 +3056,9 @@ pub fn liquidate(
     amount: i128,
     min_out: i128,
 ) -> Result<(), ProtocolError> {
+    // Check pause state first
+    let risk_config = RiskConfigStorage::get(&env);
+    risk_config.ensure_not_paused(OperationKind::Liquidate)?;
     let liquidator_addr = AddressHelper::require_valid_address(&env, &liquidator)?;
     UserManager::ensure_operation_allowed(
         &env,
