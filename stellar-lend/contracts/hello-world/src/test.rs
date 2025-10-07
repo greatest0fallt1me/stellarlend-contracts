@@ -1672,9 +1672,9 @@ fn test_set_asset_params() {
     // Verify parameters were set
     let params = client.get_asset_params(&asset);
     assert_eq!(params.collateral_factor, 75000000);
-    assert_eq!(params.borrow_enabled, true);
-    assert_eq!(params.deposit_enabled, true);
-    assert_eq!(params.cross_enabled, true);
+    assert!(params.borrow_enabled);
+    assert!(params.deposit_enabled);
+    assert!(params.cross_enabled);
 }
 
 #[test]

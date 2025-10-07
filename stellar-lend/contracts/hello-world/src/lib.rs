@@ -1992,8 +1992,8 @@ pub struct AssetParams {
     pub cross_enabled: bool,
 }
 
-impl AssetParams {
-    pub fn default() -> Self {
+impl Default for AssetParams {
+    fn default() -> Self {
         Self {
             collateral_factor: 75000000, // 75%
             borrow_enabled: true,
@@ -2013,8 +2013,8 @@ pub struct DynamicCFParams {
     pub max_step_bps: i128,    // max change per update (bps)
 }
 
-impl DynamicCFParams {
-    pub fn default() -> Self {
+impl Default for DynamicCFParams {
+    fn default() -> Self {
         Self {
             min_cf: 50000000,     // 50% minimum
             max_cf: 90000000,     // 90% maximum
@@ -4064,7 +4064,7 @@ impl Contract {
         let caller_addr = AddressHelper::require_valid_address(&env, &caller)?;
         ProtocolConfig::require_admin(&env, &caller_addr)?;
 
-        if collateral_factor < 0 || collateral_factor > 100000000 {
+        if !(0..=100000000).contains(&collateral_factor) {
             return Err(ProtocolError::InvalidInput);
         }
 
@@ -4130,7 +4130,10 @@ impl Contract {
         let caller_addr = AddressHelper::require_valid_address(&env, &caller)?;
         ProtocolConfig::require_admin(&env, &caller_addr)?;
 
-        if min_cf < 0 || min_cf > 100000000 || max_cf < 0 || max_cf > 100000000 || min_cf > max_cf {
+        if !(0..=100000000).contains(&min_cf)
+            || !(0..=100000000).contains(&max_cf)
+            || min_cf > max_cf
+        {
             return Err(ProtocolError::InvalidInput);
         }
 
@@ -4203,11 +4206,11 @@ impl Contract {
         let mut params_map = AssetRegistryStorage::get_params_map(&env);
         let mut asset_params = params_map
             .get(asset.clone())
-            .unwrap_or_else(AssetParams::default);
+            .unwrap_or_default();
         let dyn_map = AssetRegistryStorage::get_dyn_params(&env);
         let dcf = dyn_map
             .get(asset.clone())
-            .unwrap_or_else(DynamicCFParams::default);
+            .unwrap_or_default();
 
         // Calculate CF adjustment based on volatility
         // delta_cf_bps = sensitivity_bps * (vol_index_bps / 100)
@@ -4257,7 +4260,7 @@ impl Contract {
     /// * Asset parameters or default if not found
     pub fn get_asset_params(env: Env, asset: Address) -> AssetParams {
         let map = AssetRegistryStorage::get_params_map(&env);
-        map.get(asset).unwrap_or_else(AssetParams::default)
+        map.get(asset).unwrap_or_default()
     }
 
     /// Get current asset price
@@ -4281,7 +4284,7 @@ impl Contract {
     /// * Dynamic CF parameters or default if not found
     pub fn get_dynamic_cf_params(env: Env, asset: Address) -> DynamicCFParams {
         let map = AssetRegistryStorage::get_dyn_params(&env);
-        map.get(asset).unwrap_or_else(DynamicCFParams::default)
+        map.get(asset).unwrap_or_default()
     }
 
     /// Get market state for an asset
