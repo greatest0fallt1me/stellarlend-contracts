@@ -4204,13 +4204,9 @@ impl Contract {
 
         // Apply dynamic CF change
         let mut params_map = AssetRegistryStorage::get_params_map(&env);
-        let mut asset_params = params_map
-            .get(asset.clone())
-            .unwrap_or_default();
+        let mut asset_params = params_map.get(asset.clone()).unwrap_or_default();
         let dyn_map = AssetRegistryStorage::get_dyn_params(&env);
-        let dcf = dyn_map
-            .get(asset.clone())
-            .unwrap_or_default();
+        let dcf = dyn_map.get(asset.clone()).unwrap_or_default();
 
         // Calculate CF adjustment based on volatility
         // delta_cf_bps = sensitivity_bps * (vol_index_bps / 100)
